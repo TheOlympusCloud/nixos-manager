@@ -77,11 +77,12 @@ export type HostDiff = {
   portsAdded?: string[]
   portsRemoved?: string[]
 }
-export type ModelDiffReply = { state: 'ready'; hosts?: HostDiff[]; error?: string } | { state: 'computing'; jobs: string[] }
+export type ModelDiffReply = { state: 'ready'; hosts?: HostDiff[]; error?: string; headError?: string } | { state: 'computing'; jobs: string[] }
 
 /** The machine's app-owned file (hosts/<host>/managed.json). */
 export type Managed = { host?: string; path: string; exists: boolean; hash: string; packages: string[]; settings: Record<string, unknown> }
-export type SettingEdit = { path: string[]; value: unknown } | { path: string[]; unset: true }
+/** base_hash: the managed file the edit was based on; the server answers 409 if it changed since. */
+export type SettingEdit = ({ path: string[]; value: unknown } | { path: string[]; unset: true }) & { base_hash?: string }
 
 export type PackageHit = { attr: string; pname: string; version: string; description: string }
 export type OptionInfo = { name: string; type: string; description: string; default: string | null; example: string | null; readOnly: boolean }

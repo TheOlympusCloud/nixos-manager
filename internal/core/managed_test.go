@@ -26,16 +26,16 @@ func TestManagedPackages(t *testing.T) {
 
 func TestManagedSettings(t *testing.T) {
 	s := newService(t)
-	must[ManagedView](t)(s.SetOption("pi", []string{"services", "openssh", "enable"}, true))
-	must[ManagedView](t)(s.SetOption("pi", []string{"services", "openssh", "settings", "PermitRootLogin"}, "no"))
-	must[ManagedView](t)(s.SetOption("pi", []string{"services", "nginx", "virtualHosts", "home.lan", "root"}, "/srv/www"))
-	must[ManagedView](t)(s.SetOption("pi", []string{"networking", "firewall", "allowedTCPPorts"}, []any{22, 8123}))
-	v := must[ManagedView](t)(s.UnsetOption("pi", []string{"services", "openssh", "settings", "PermitRootLogin"}))
+	must[ManagedView](t)(s.SetOption("pi", []string{"services", "openssh", "enable"}, true, nil))
+	must[ManagedView](t)(s.SetOption("pi", []string{"services", "openssh", "settings", "PermitRootLogin"}, "no", nil))
+	must[ManagedView](t)(s.SetOption("pi", []string{"services", "nginx", "virtualHosts", "home.lan", "root"}, "/srv/www", nil))
+	must[ManagedView](t)(s.SetOption("pi", []string{"networking", "firewall", "allowedTCPPorts"}, []any{22, 8123}, nil))
+	v := must[ManagedView](t)(s.UnsetOption("pi", []string{"services", "openssh", "settings", "PermitRootLogin"}, nil))
 	ssh := v.Settings["services"].(map[string]any)["openssh"].(map[string]any)
 	if _, ok := ssh["settings"]; ok || ssh["enable"] != true {
 		t.Fatalf("unset did not prune the empty parent: %+v", ssh)
 	}
-	v = must[ManagedView](t)(s.UnsetOption("pi", []string{"services", "openssh", "enable"}))
+	v = must[ManagedView](t)(s.UnsetOption("pi", []string{"services", "openssh", "enable"}, nil))
 	services := v.Settings["services"].(map[string]any)
 	if _, ok := services["openssh"]; ok || services["nginx"] == nil {
 		t.Fatalf("services after unsets %+v", services)
@@ -47,7 +47,7 @@ func TestManagedSettings(t *testing.T) {
 		}
 	}
 	// Unsetting something that is not there is not an error.
-	must[ManagedView](t)(s.UnsetOption("pi", []string{"services", "nope", "enable"}))
+	must[ManagedView](t)(s.UnsetOption("pi", []string{"services", "nope", "enable"}, nil))
 }
 
 func TestManagedValidation(t *testing.T) {
@@ -58,14 +58,14 @@ func TestManagedValidation(t *testing.T) {
 		_, err = s.AddPackages("web", []string{bad})
 		isErr(t, err, ErrInvalid)
 	}
-	_, err = s.SetOption("web", nil, true)
+	_, err = s.SetOption("web", nil, true, nil)
 	isErr(t, err, ErrInvalid)
-	_, err = s.SetOption("web", []string{"services", ""}, true)
+	_, err = s.SetOption("web", []string{"services", ""}, true, nil)
 	isErr(t, err, ErrInvalid)
-	_, err = s.SetOption("web", []string{"time", "timeZone"}, nil)
+	_, err = s.SetOption("web", []string{"time", "timeZone"}, nil, nil)
 	isErr(t, err, ErrInvalid)
-	must[ManagedView](t)(s.SetOption("web", []string{"time", "timeZone"}, "Europe/Madrid"))
-	_, err = s.SetOption("web", []string{"time", "timeZone", "x"}, 1)
+	must[ManagedView](t)(s.SetOption("web", []string{"time", "timeZone"}, "Europe/Madrid", nil))
+	_, err = s.SetOption("web", []string{"time", "timeZone", "x"}, 1, nil)
 	isErr(t, err, ErrInvalid) // timeZone is a value, not a set
 }
 
@@ -85,5 +85,31 @@ func TestManagedKeepsUnknownKeysAndRefusesBrokenJSON(t *testing.T) {
 	}
 	write(t, s.Repo, "hosts/web/managed.json", `{"packages": "git"}`)
 	_, err = s.AddPackages("web", []string{"htop"})
+	isErr(t, err, ErrInvalid)
+}
+
+// A form saves a whole value; it must not overwrite a change made since it loaded.
+func TestManagedSettingsCheckTheHashTheCallerSaw(t *testing.T) {
+	s := newService(t)
+	seen := must[ManagedView](t)(s.SetOption("web", []string{"networking", "firewall", "allowedTCPPorts"}, []any{22}, nil))
+	must[ManagedView](t)(s.SetOption("web", []string{"networking", "firewall", "allowedTCPPorts"}, []any{22, 8080}, nil)) // an agent
+	_, err := s.SetOption("web", []string{"networking", "firewall", "allowedTCPPorts"}, []any{22, 443}, &seen.Hash)
+	isErr(t, err, ErrConflict)
+	_, err = s.UnsetOption("web", []string{"networking", "firewall", "allowedTCPPorts"}, &seen.Hash)
+	isErr(t, err, ErrConflict)
+	cur := must[ManagedView](t)(s.ManagedView("web"))
+	if ports := cur.Settings["networking"].(map[string]any)["firewall"].(map[string]any)["allowedTCPPorts"].([]any); len(ports) != 2 {
+		t.Fatalf("the agent's change was lost: %v", ports)
+	}
+	must[ManagedView](t)(s.SetOption("web", []string{"networking", "firewall", "allowedTCPPorts"}, []any{22, 8080, 443}, &cur.Hash))
+	empty := ""
+	_, err = s.SetOption("fresh", []string{"time", "timeZone"}, "UTC", &empty) // no file yet: the empty hash matches
+	ok(t, err)
+}
+
+func TestManagedRefusesTrailingJSON(t *testing.T) {
+	s := newService(t)
+	write(t, s.Repo, "hosts/web/managed.json", "{\"packages\": [\"vim\"]}\n{\"packages\": [\"git\"]}\n")
+	_, err := s.AddPackages("web", []string{"htop"})
 	isErr(t, err, ErrInvalid)
 }

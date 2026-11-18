@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -62,6 +63,9 @@ func (s *Service) readManaged(host string) (managedDoc, error) {
 	if err := dec.Decode(&md.doc); err != nil || md.doc == nil {
 		return md, errorf(ErrInvalid, "%s is not valid JSON (%v); fix it in the code view", p, err)
 	}
+	if dec.Decode(&struct{}{}) != io.EOF { // e.g. two objects left by a bad merge: rewriting would drop one
+		return md, errorf(ErrInvalid, "%s holds more than one JSON value; fix it in the code view", p)
+	}
 	if raw, ok := md.doc["packages"]; ok {
 		list, ok := raw.([]any)
 		if !ok {
@@ -91,11 +95,15 @@ func (s *Service) ManagedView(host string) (ManagedView, error) {
 	return md.view, err
 }
 
-// editManaged applies edit and saves the file only if nobody changed it since it was read.
-func (s *Service) editManaged(host string, edit func(v *ManagedView) error) (ManagedView, error) {
+// editManaged applies edit and saves the file only if nobody changed it since it
+// was read. With base set, the file must also still be the version the caller saw.
+func (s *Service) editManaged(host string, base *string, edit func(v *ManagedView) error) (ManagedView, error) {
 	md, err := s.readManaged(host)
 	if err != nil {
 		return md.view, err
+	}
+	if base != nil && *base != md.view.Hash {
+		return md.view, errorf(ErrConflict, "%s changed since it was loaded", md.view.Path)
 	}
 	if err := edit(&md.view); err != nil {
 		return md.view, err
@@ -132,7 +140,7 @@ func (s *Service) AddPackages(host string, names []string) (ManagedView, error) 
 	if err := checkPackages(names); err != nil {
 		return ManagedView{}, err
 	}
-	return s.editManaged(host, func(v *ManagedView) error {
+	return s.editManaged(host, nil, func(v *ManagedView) error {
 		v.Packages = append(v.Packages, names...)
 		return nil
 	})
@@ -143,7 +151,7 @@ func (s *Service) RemovePackages(host string, names []string) (ManagedView, erro
 	if err := checkPackages(names); err != nil {
 		return ManagedView{}, err
 	}
-	return s.editManaged(host, func(v *ManagedView) error {
+	return s.editManaged(host, nil, func(v *ManagedView) error {
 		v.Packages = slices.DeleteFunc(v.Packages, func(p string) bool { return slices.Contains(names, p) })
 		return nil
 	})
@@ -162,14 +170,15 @@ func checkPath(path []string) error {
 }
 
 // SetOption sets a NixOS option (path is its attribute path) on a machine.
-func (s *Service) SetOption(host string, path []string, value any) (ManagedView, error) {
+// base, when set, is the managed file's hash the caller's value is based on.
+func (s *Service) SetOption(host string, path []string, value any, base *string) (ManagedView, error) {
 	if err := checkPath(path); err != nil {
 		return ManagedView{}, err
 	}
 	if value == nil {
 		return ManagedView{}, errorf(ErrInvalid, "a value is required; unset the option instead")
 	}
-	return s.editManaged(host, func(v *ManagedView) error {
+	return s.editManaged(host, base, func(v *ManagedView) error {
 		node := v.Settings
 		for i, seg := range path[:len(path)-1] {
 			next, ok := node[seg]
@@ -189,12 +198,12 @@ func (s *Service) SetOption(host string, path []string, value any) (ManagedView,
 	})
 }
 
-// UnsetOption removes a setting and any parent left empty.
-func (s *Service) UnsetOption(host string, path []string) (ManagedView, error) {
+// UnsetOption removes a setting and any parent left empty; base as for SetOption.
+func (s *Service) UnsetOption(host string, path []string, base *string) (ManagedView, error) {
 	if err := checkPath(path); err != nil {
 		return ManagedView{}, err
 	}
-	return s.editManaged(host, func(v *ManagedView) error {
+	return s.editManaged(host, base, func(v *ManagedView) error {
 		unset(v.Settings, path)
 		return nil
 	})

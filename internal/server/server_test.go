@@ -516,6 +516,9 @@ func TestManagedEditsOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"add": []string{"rm -rf"}}, nil); code != 400 {
 		t.Fatalf("bad package name: %d", code)
 	}
+	if code := e.do(t, "POST", "/api/hosts/web/settings", map[string]any{"path": []string{"time", "timeZone"}, "value": "UTC", "base_hash": "stale"}, nil); code != 409 {
+		t.Fatalf("a form based on an old version: %d", code)
+	}
 	var got core.ManagedView
 	e.do(t, "GET", "/api/hosts/web/managed", nil, &got)
 	if got.Path != "hosts/web/managed.json" || !got.Exists || got.Packages[0] != "git" {

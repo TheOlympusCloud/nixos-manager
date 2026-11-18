@@ -286,10 +286,10 @@ func New(svc *core.Service, version string) *mcp.Server {
 		Path  []string `json:"path"`
 		Value any      `json:"value" jsonschema:"the JSON value: boolean, number, string, list or object"`
 	}) (core.ManagedView, error) {
-		return svc.SetOption(in.Host, in.Path, in.Value)
+		return svc.SetOption(in.Host, in.Path, in.Value, nil)
 	})
 	tool(s, "unset_option", "Remove an option setting from a machine's managed.json.", func(ctx context.Context, in hostPath) (core.ManagedView, error) {
-		return svc.UnsetOption(in.Host, in.Path)
+		return svc.UnsetOption(in.Host, in.Path, nil)
 	})
 
 	tool(s, "list_targets", "List the NixOS, home-manager and nix-darwin configurations in the staged flake, with the attribute to pass to run_check.", func(ctx context.Context, _ struct{}) (map[string][]core.Target, error) {

@@ -138,9 +138,15 @@ export async function removePackageByName(host: string, name: string) {
   if (!attr) return toast(`${name} is not in ${host}'s managed packages any more.`, 'error'), false
   return removePackages(host, [attr])
 }
+/** The hash of the managed file this tab last saw, so a stale form cannot overwrite a newer edit. */
+async function seenHash(host: string): Promise<string | undefined> {
+  if (!fleet.managed[host]) await loadManaged(host)
+  return fleet.managed[host]?.hash
+}
 export const setOption = (host: string, path: string[], value: unknown) =>
-  write(host, () => api.editSetting(host, { path, value }), `Set ${pathName(path)} on ${host}`)
-export const unsetOption = (host: string, path: string[]) => write(host, () => api.editSetting(host, { path, unset: true }), `Reset ${pathName(path)} on ${host}`)
+  write(host, async () => api.editSetting(host, { path, value, base_hash: await seenHash(host) }), `Set ${pathName(path)} on ${host}`)
+export const unsetOption = (host: string, path: string[]) =>
+  write(host, async () => api.editSetting(host, { path, unset: true, base_hash: await seenHash(host) }), `Reset ${pathName(path)} on ${host}`)
 
 /** `services` + `desktopManager.plasma6` → services.desktopManager.plasma6.enable */
 export const enablePath = (group: FeatureGroup | string, name: string) => [group, ...fillPath(optionSegments(name), []), 'enable']

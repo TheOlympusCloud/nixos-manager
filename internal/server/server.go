@@ -144,14 +144,15 @@ func (s *Server) Handler() http.Handler {
 		return v, err
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/settings", post(func(r *http.Request, in struct {
-		Path  []string
-		Value any
-		Unset bool
+		Path     []string
+		Value    any
+		Unset    bool
+		BaseHash *string `json:"base_hash"` // the managed file the edit is based on; 409 if it changed
 	}) (any, error) {
 		if in.Unset {
-			return s.Svc.UnsetOption(r.PathValue("host"), in.Path)
+			return s.Svc.UnsetOption(r.PathValue("host"), in.Path, in.BaseHash)
 		}
-		return s.Svc.SetOption(r.PathValue("host"), in.Path, in.Value)
+		return s.Svc.SetOption(r.PathValue("host"), in.Path, in.Value, in.BaseHash)
 	}))
 	api.HandleFunc("GET /api/search/packages", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
