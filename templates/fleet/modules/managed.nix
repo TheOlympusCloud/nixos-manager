@@ -24,7 +24,10 @@ in
   };
 
   config = lib.mkMerge [
-    (data.settings or { })
+    # A value set by clicking is the machine's final value: it wins over hand-written
+    # definitions of the same option (priority 90 beats the default 100), but not
+    # over lib.mkForce. Lists are therefore written whole, not merged.
+    (lib.mkOverride 90 (data.settings or { }))
     { environment.systemPackages = map package (data.packages or [ ]); }
   ];
 }
