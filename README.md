@@ -113,5 +113,9 @@ go test -race ./...
 go build ./cmd/nixos-manager
 ```
 
+`scripts/e2e.sh` runs the real server against a fresh flake and a bare git
+remote: login, lock, check, commit gate, commit, push, edit, history and
+restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
+
 `npm run dev` in `web/` serves the UI with hot reload and proxies `/api` to a
 backend on `127.0.0.1:8080`.
