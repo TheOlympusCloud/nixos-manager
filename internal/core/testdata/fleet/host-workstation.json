@@ -1,0 +1,344 @@
+{
+ "name": "workstation",
+ "hostName": "workstation",
+ "system": "x86_64-linux",
+ "release": "26.05",
+ "stateVersion": "26.05",
+ "timeZone": "Europe/Madrid",
+ "kernel": "6.12.58",
+ "managedFile": "hosts/workstation/managed.json",
+ "packages": [
+  {
+   "name": "git",
+   "version": "2.51.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "htop",
+   "version": "3.4.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "curl",
+   "version": "8.16.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "vim",
+   "version": "9.1.1689",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "wget",
+   "version": "1.25.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "ripgrep",
+   "version": "14.1.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "jq",
+   "version": "1.8.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "firefox",
+   "version": "145.0",
+   "files": [
+    "modules/desktop.nix"
+   ]
+  },
+  {
+   "name": "thunderbird",
+   "version": "140.4.0",
+   "files": [
+    "modules/desktop.nix"
+   ]
+  },
+  {
+   "name": "vlc",
+   "version": "3.0.21",
+   "files": [
+    "modules/desktop.nix"
+   ]
+  },
+  {
+   "name": "gimp",
+   "version": "3.0.6",
+   "files": [
+    "modules/desktop.nix"
+   ]
+  },
+  {
+   "name": "libreoffice",
+   "version": "25.2.6",
+   "files": [
+    "modules/desktop.nix"
+   ]
+  },
+  {
+   "name": "kdePackages.kate",
+   "version": "25.08.2",
+   "files": [
+    "modules/desktop.nix"
+   ]
+  },
+  {
+   "name": "vscode",
+   "version": "1.105.1",
+   "files": [
+    "hosts/workstation/managed.json"
+   ]
+  },
+  {
+   "name": "obsidian",
+   "version": "1.9.14",
+   "files": [
+    "hosts/workstation/managed.json"
+   ]
+  },
+  {
+   "name": "spotify",
+   "version": "1.2.74",
+   "files": [
+    "hosts/workstation/managed.json"
+   ]
+  },
+  {
+   "name": "discord",
+   "version": "0.0.111",
+   "files": [
+    "hosts/workstation/managed.json"
+   ]
+  },
+  {
+   "name": "nvtopPackages.amd",
+   "version": "3.2.0",
+   "files": [
+    "hosts/workstation/default.nix"
+   ]
+  },
+  {
+   "name": "nano",
+   "version": "8.6",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "perl",
+   "version": "5.40.0",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "rsync",
+   "version": "3.4.1",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "strace",
+   "version": "6.16",
+   "files": [
+    "nixos"
+   ]
+  }
+ ],
+ "features": [
+  {
+   "group": "services",
+   "name": "openssh",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable the OpenSSH secure shell daemon, which allows secure remote logins."
+  },
+  {
+   "group": "services",
+   "name": "tailscale",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable Tailscale client daemon."
+  },
+  {
+   "group": "services",
+   "name": "comin",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable comin, a GitOps deployment service for NixOS."
+  },
+  {
+   "group": "services",
+   "name": "pipewire",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "description": "Whether to enable PipeWire service."
+  },
+  {
+   "group": "services",
+   "name": "desktopManager.plasma6",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "description": "Enable the Plasma 6 (KDE 6) desktop environment."
+  },
+  {
+   "group": "services",
+   "name": "printing",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "description": "Whether to enable printing support through the CUPS daemon."
+  },
+  {
+   "group": "services",
+   "name": "fstrim",
+   "files": [
+    "hosts/workstation/default.nix"
+   ],
+   "description": "Whether to enable periodic SSD TRIM of mounted partitions in background."
+  },
+  {
+   "group": "programs",
+   "name": "steam",
+   "files": [
+    "hosts/workstation/managed.json"
+   ],
+   "description": "Whether to enable steam."
+  },
+  {
+   "group": "programs",
+   "name": "firefox",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "description": "Whether to enable the Firefox web browser."
+  },
+  {
+   "group": "programs",
+   "name": "zsh",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to configure zsh as an interactive shell."
+  },
+  {
+   "group": "programs",
+   "name": "git",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable git, a distributed version control system."
+  },
+  {
+   "group": "virtualisation",
+   "name": "docker",
+   "files": [
+    "hosts/workstation/managed.json"
+   ],
+   "description": "This option enables docker, a daemon that manages linux containers."
+  },
+  {
+   "group": "hardware",
+   "name": "bluetooth",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "description": "Whether to enable support for Bluetooth."
+  },
+  {
+   "group": "hardware",
+   "name": "graphics",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "description": "Whether to enable hardware accelerated graphics drivers."
+  }
+ ],
+ "users": [
+  {
+   "name": "pablo",
+   "description": "Pablo",
+   "groups": [
+    "wheel",
+    "networkmanager",
+    "docker"
+   ],
+   "home": {
+    "packages": [
+     "neovim",
+     "bat",
+     "eza",
+     "fzf",
+     "starship",
+     "btop",
+     "lazygit"
+    ],
+    "programs": [
+     "git",
+     "zsh",
+     "starship",
+     "direnv",
+     "firefox"
+    ]
+   }
+  }
+ ],
+ "ports": {
+  "tcp": [
+   22
+  ],
+  "udp": [
+   41641
+  ],
+  "firewall": true
+ },
+ "fileSystems": [
+  {
+   "mountPoint": "/",
+   "fsType": "ext4",
+   "device": "/dev/disk/by-label/nixos"
+  },
+  {
+   "mountPoint": "/boot",
+   "fsType": "vfat",
+   "device": "/dev/disk/by-label/BOOT"
+  },
+  {
+   "mountPoint": "/home",
+   "fsType": "btrfs",
+   "device": "/dev/disk/by-label/home"
+  }
+ ],
+ "files": [
+  "flake.nix",
+  "hosts/workstation/default.nix",
+  "hosts/workstation/hardware-configuration.nix",
+  "hosts/workstation/managed.json",
+  "modules/common.nix",
+  "modules/desktop.nix",
+  "home/pablo.nix"
+ ]
+}

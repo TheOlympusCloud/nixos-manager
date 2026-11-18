@@ -1,0 +1,26 @@
+#!/bin/sh
+# Stand-in for nix during development and tests (never in production): answers the
+# app's evaluations from fixture files and echoes every other command.
+#   NIXMGR_FAKE_FIXTURES  fixture folder (default: internal/core/testdata/fleet)
+#   NIXMGR_FAKE_DELAY     seconds to wait per machine, to see progress in the UI
+dir=${NIXMGR_FAKE_FIXTURES:-$(dirname "$0")/../../internal/core/testdata/fleet}
+case "$*" in
+  *"nixmgr:discover"*) cat "$dir/discover.json" ;;
+  *"nixmgr:host"*)
+    sleep "${NIXMGR_FAKE_DELAY:-0}"
+    if [ -f "$dir/host-$NIXMGR_HOST.json" ]; then
+      cat "$dir/host-$NIXMGR_HOST.json"
+    else
+      printf 'error: infinite recursion encountered\n       at /nix/store/x-source/hosts/%s/default.nix:12:3\n' "$NIXMGR_HOST" >&2
+      exit 1
+    fi ;;
+  *"nixmgr:home"*) cat "$dir/home-$NIXMGR_HOST.json" ;;
+  *"nixmgr:options"*) cat "$dir/options.json" ;;
+  *" search "*) cat "$dir/packages.json" ;;
+  *"flake lock"*)
+    echo "nix $*"
+    all="$*"
+    target="${all##*path:}"
+    [ -f "$target/flake.lock" ] || cp "$dir/flake.lock" "$target/flake.lock" ;;
+  *) echo "nix $*" ;;
+esac

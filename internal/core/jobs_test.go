@@ -13,6 +13,7 @@ import (
 // path: flake it is given, fails for targets named "broken", and answers the
 // target discovery eval.
 const fakeNix = `#!/bin/sh
+case "$*" in *"eval --json"*) echo "{\"nixos\":[\"web\"],\"home\":[\"pablo@web\"],\"darwin\":[]}"; exit 0 ;; esac
 echo "nix $*"
 for a in "$@"; do
   case "$a" in
@@ -22,7 +23,6 @@ done
 case "$*" in *slow*) sleep 0.3 ;; esac
 case "$*" in
   *broken*) echo "error: broken target" >&2; exit 1 ;;
-  *"eval --json"*) echo "{\"nixos\":[\"web\"],\"home\":[\"pablo@web\"],\"darwin\":[]}" ;;
 esac
 `
 

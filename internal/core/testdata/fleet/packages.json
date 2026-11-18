@@ -1,0 +1,82 @@
+{
+ "legacyPackages.x86_64-linux.firefox": {
+  "pname": "firefox",
+  "version": "145.0",
+  "description": "Web browser built from Firefox source tree"
+ },
+ "legacyPackages.x86_64-linux.firefox-esr": {
+  "pname": "firefox-esr",
+  "version": "140.4.0esr",
+  "description": "Web browser built from Firefox Extended Support Release source tree"
+ },
+ "legacyPackages.x86_64-linux.htop": {
+  "pname": "htop",
+  "version": "3.4.1",
+  "description": "Interactive process viewer"
+ },
+ "legacyPackages.x86_64-linux.btop": {
+  "pname": "btop",
+  "version": "1.4.5",
+  "description": "Monitor of resources"
+ },
+ "legacyPackages.x86_64-linux.git": {
+  "pname": "git",
+  "version": "2.51.0",
+  "description": "Distributed version control system"
+ },
+ "legacyPackages.x86_64-linux.vscode": {
+  "pname": "vscode",
+  "version": "1.105.1",
+  "description": "Code editor developed by Microsoft"
+ },
+ "legacyPackages.x86_64-linux.vim": {
+  "pname": "vim",
+  "version": "9.1.1689",
+  "description": "Most popular clone of the VI editor"
+ },
+ "legacyPackages.x86_64-linux.neovim": {
+  "pname": "neovim",
+  "version": "0.11.5",
+  "description": "Vim text editor fork focused on extensibility and agility"
+ },
+ "legacyPackages.x86_64-linux.jellyfin": {
+  "pname": "jellyfin",
+  "version": "10.11.2",
+  "description": "Free Software Media System"
+ },
+ "legacyPackages.x86_64-linux.restic": {
+  "pname": "restic",
+  "version": "0.18.1",
+  "description": "Backup program that is fast, efficient and secure"
+ },
+ "legacyPackages.x86_64-linux.tmux": {
+  "pname": "tmux",
+  "version": "3.5a",
+  "description": "Terminal multiplexer"
+ },
+ "legacyPackages.x86_64-linux.python3Packages.requests": {
+  "pname": "requests",
+  "version": "2.32.5",
+  "description": "HTTP library for Python"
+ },
+ "legacyPackages.x86_64-linux.kdePackages.kate": {
+  "pname": "kate",
+  "version": "25.08.2",
+  "description": "Advanced text editor"
+ },
+ "legacyPackages.x86_64-linux.obsidian": {
+  "pname": "obsidian",
+  "version": "1.9.14",
+  "description": "Powerful knowledge base that works on top of a local folder of plain text Markdown files"
+ },
+ "legacyPackages.x86_64-linux.spotify": {
+  "pname": "spotify",
+  "version": "1.2.74",
+  "description": "Play music from the Spotify music service"
+ },
+ "legacyPackages.x86_64-linux.discord": {
+  "pname": "discord",
+  "version": "0.0.111",
+  "description": "All-in-one cross-platform voice and text chat for gamers"
+ }
+}

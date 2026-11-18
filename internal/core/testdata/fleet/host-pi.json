@@ -1,0 +1,196 @@
+{
+ "name": "pi",
+ "hostName": "pi",
+ "system": "aarch64-linux",
+ "release": "26.05",
+ "stateVersion": "26.05",
+ "timeZone": "Europe/Madrid",
+ "kernel": "6.12.58",
+ "managedFile": null,
+ "packages": [
+  {
+   "name": "git",
+   "version": "2.51.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "htop",
+   "version": "3.4.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "curl",
+   "version": "8.16.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "vim",
+   "version": "9.1.1689",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "wget",
+   "version": "1.25.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "ripgrep",
+   "version": "14.1.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "jq",
+   "version": "1.8.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "libraspberrypi",
+   "version": "0-unstable-2024-12-23",
+   "files": [
+    "hosts/pi/default.nix"
+   ]
+  },
+  {
+   "name": "i2c-tools",
+   "version": "4.4",
+   "files": [
+    "hosts/pi/default.nix"
+   ]
+  },
+  {
+   "name": "nano",
+   "version": "8.6",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "perl",
+   "version": "5.40.0",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "rsync",
+   "version": "3.4.1",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "strace",
+   "version": "6.16",
+   "files": [
+    "nixos"
+   ]
+  }
+ ],
+ "features": [
+  {
+   "group": "services",
+   "name": "openssh",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable the OpenSSH secure shell daemon, which allows secure remote logins."
+  },
+  {
+   "group": "services",
+   "name": "tailscale",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable Tailscale client daemon."
+  },
+  {
+   "group": "services",
+   "name": "comin",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable comin, a GitOps deployment service for NixOS."
+  },
+  {
+   "group": "services",
+   "name": "home-assistant",
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "description": "Whether to enable Home Assistant."
+  },
+  {
+   "group": "services",
+   "name": "mosquitto",
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "description": "Whether to enable the MQTT Mosquitto broker."
+  },
+  {
+   "group": "programs",
+   "name": "zsh",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to configure zsh as an interactive shell."
+  },
+  {
+   "group": "programs",
+   "name": "git",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable git, a distributed version control system."
+  }
+ ],
+ "users": [
+  {
+   "name": "pablo",
+   "description": "Pablo",
+   "groups": [
+    "wheel",
+    "gpio"
+   ],
+   "home": null
+  }
+ ],
+ "ports": {
+  "tcp": [
+   22,
+   1883,
+   8123
+  ],
+  "udp": [
+   41641
+  ],
+  "firewall": true
+ },
+ "fileSystems": [
+  {
+   "mountPoint": "/",
+   "fsType": "ext4",
+   "device": "/dev/disk/by-label/NIXOS_SD"
+  }
+ ],
+ "files": [
+  "flake.nix",
+  "hosts/pi/default.nix",
+  "hosts/pi/hardware-configuration.nix",
+  "modules/common.nix"
+ ]
+}

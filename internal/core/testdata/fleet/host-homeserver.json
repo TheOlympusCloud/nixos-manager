@@ -1,0 +1,261 @@
+{
+ "name": "homeserver",
+ "hostName": "homeserver",
+ "system": "x86_64-linux",
+ "release": "26.05",
+ "stateVersion": "26.05",
+ "timeZone": "Europe/Madrid",
+ "kernel": "6.12.58",
+ "managedFile": "hosts/homeserver/managed.json",
+ "packages": [
+  {
+   "name": "git",
+   "version": "2.51.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "htop",
+   "version": "3.4.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "curl",
+   "version": "8.16.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "vim",
+   "version": "9.1.1689",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "wget",
+   "version": "1.25.0",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "ripgrep",
+   "version": "14.1.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "jq",
+   "version": "1.8.1",
+   "files": [
+    "modules/common.nix"
+   ]
+  },
+  {
+   "name": "btop",
+   "version": "1.4.5",
+   "files": [
+    "modules/server.nix"
+   ]
+  },
+  {
+   "name": "tmux",
+   "version": "3.5a",
+   "files": [
+    "modules/server.nix"
+   ]
+  },
+  {
+   "name": "smartmontools",
+   "version": "7.5",
+   "files": [
+    "modules/server.nix"
+   ]
+  },
+  {
+   "name": "ncdu",
+   "version": "2.9.1",
+   "files": [
+    "modules/server.nix"
+   ]
+  },
+  {
+   "name": "restic",
+   "version": "0.18.1",
+   "files": [
+    "hosts/homeserver/managed.json"
+   ]
+  },
+  {
+   "name": "rclone",
+   "version": "1.71.1",
+   "files": [
+    "hosts/homeserver/managed.json"
+   ]
+  },
+  {
+   "name": "nano",
+   "version": "8.6",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "perl",
+   "version": "5.40.0",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "rsync",
+   "version": "3.4.1",
+   "files": [
+    "nixos"
+   ]
+  },
+  {
+   "name": "strace",
+   "version": "6.16",
+   "files": [
+    "nixos"
+   ]
+  }
+ ],
+ "features": [
+  {
+   "group": "services",
+   "name": "openssh",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable the OpenSSH secure shell daemon, which allows secure remote logins."
+  },
+  {
+   "group": "services",
+   "name": "tailscale",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable Tailscale client daemon."
+  },
+  {
+   "group": "services",
+   "name": "comin",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable comin, a GitOps deployment service for NixOS."
+  },
+  {
+   "group": "services",
+   "name": "forgejo",
+   "files": [
+    "modules/server.nix"
+   ],
+   "description": "Whether to enable Forgejo."
+  },
+  {
+   "group": "services",
+   "name": "nextcloud",
+   "files": [
+    "modules/server.nix"
+   ],
+   "description": "Whether to enable nextcloud."
+  },
+  {
+   "group": "services",
+   "name": "fstrim",
+   "files": [
+    "modules/server.nix"
+   ],
+   "description": "Whether to enable periodic SSD TRIM of mounted partitions in background."
+  },
+  {
+   "group": "services",
+   "name": "jellyfin",
+   "files": [
+    "hosts/homeserver/managed.json"
+   ],
+   "description": "Whether to enable Jellyfin Media Server."
+  },
+  {
+   "group": "programs",
+   "name": "zsh",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to configure zsh as an interactive shell."
+  },
+  {
+   "group": "programs",
+   "name": "git",
+   "files": [
+    "modules/common.nix"
+   ],
+   "description": "Whether to enable git, a distributed version control system."
+  },
+  {
+   "group": "virtualisation",
+   "name": "podman",
+   "files": [
+    "modules/server.nix"
+   ],
+   "description": "This option enables Podman, a daemonless container engine for developing, managing, and running OCI Containers."
+  }
+ ],
+ "users": [
+  {
+   "name": "pablo",
+   "description": "Pablo",
+   "groups": [
+    "wheel"
+   ],
+   "home": null
+  }
+ ],
+ "ports": {
+  "tcp": [
+   22,
+   80,
+   443,
+   3000,
+   8096
+  ],
+  "udp": [
+   41641
+  ],
+  "firewall": true
+ },
+ "fileSystems": [
+  {
+   "mountPoint": "/",
+   "fsType": "ext4",
+   "device": "/dev/disk/by-label/nixos"
+  },
+  {
+   "mountPoint": "/boot",
+   "fsType": "vfat",
+   "device": "/dev/disk/by-label/BOOT"
+  },
+  {
+   "mountPoint": "/srv/media",
+   "fsType": "xfs",
+   "device": "/dev/disk/by-label/media"
+  }
+ ],
+ "files": [
+  "flake.nix",
+  "hosts/homeserver/default.nix",
+  "hosts/homeserver/hardware-configuration.nix",
+  "hosts/homeserver/managed.json",
+  "modules/common.nix",
+  "modules/server.nix"
+ ]
+}

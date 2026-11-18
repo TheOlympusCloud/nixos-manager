@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -29,15 +28,17 @@ type Jobs struct {
 	Nix    string // nix binary
 	Nixfmt string // nixfmt binary
 
-	mu     sync.Mutex
-	jobs   []*Job // oldest first
-	nextID int
-	passed map[string]bool
-	queue  chan *Job
+	mu         sync.Mutex
+	jobs       []*Job // oldest first
+	nextID     int
+	passed     map[string]bool
+	queue      chan *Job
+	models     map[string]*Model // by git tree
+	modelOrder []string
 }
 
 func newJobs(repo *Repo) *Jobs {
-	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", passed: map[string]bool{}, queue: make(chan *Job, queueLength)}
+	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", passed: map[string]bool{}, models: map[string]*Model{}, queue: make(chan *Job, queueLength)}
 	go j.worker()
 	return j
 }
@@ -171,6 +172,11 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
+	return js.enqueue(req, tree)
+}
+
+// enqueue queues a job for the worker; js.mu must be held.
+func (js *Jobs) enqueue(req JobRequest, tree string) (*Job, error) {
 	js.nextID++
 	job := newJob(fmt.Sprintf("j%d", js.nextID), req)
 	job.tree = tree
@@ -180,7 +186,7 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 		return nil, errorf(ErrConflict, "too many jobs are waiting; try again when they finish")
 	}
 	js.jobs = append(js.jobs, job)
-	for len(js.jobs) > keepJobs && js.jobs[0].Info(false).State != "queued" && js.jobs[0].Info(false).State != "running" {
+	for len(js.jobs) > keepJobs && js.jobs[0].finishedState() {
 		js.jobs = js.jobs[1:]
 	}
 	return job, nil
@@ -240,6 +246,9 @@ func (js *Jobs) nixArgs(args ...string) []string {
 func (js *Jobs) run(job *Job) error {
 	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
 	defer cancel()
+	if job.Req.Kind == "model" {
+		return js.runModel(ctx, job)
+	}
 	dir := js.Repo.Dir
 	var steps [][]string
 	switch job.Req.Kind {
@@ -290,10 +299,6 @@ type Target struct {
 	Attr string `json:"attr"`
 }
 
-const discoverExpr = `let
-  f = builtins.getFlake (builtins.getEnv "NIXMGR_FLAKE");
-  names = k: if builtins.hasAttr k f then builtins.attrNames f.${k} else [ ];
-in { nixos = names "nixosConfigurations"; home = names "homeConfigurations"; darwin = names "darwinConfigurations"; }`
 
 var plainAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_'-]*$`)
 
@@ -313,28 +318,16 @@ func (js *Jobs) Targets(ctx context.Context) ([]Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmp, err := os.MkdirTemp("", "nixmgr-targets-")
+	src, cleanup, err := js.snapshot(ctx, tree)
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
-	src := filepath.Join(tmp, "src")
-	if err := js.Repo.export(ctx, tree, src); err != nil {
-		return nil, err
-	}
+	defer cleanup()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--json", "--impure", "--expr", discoverExpr)...)
-	cmd.Env = append(os.Environ(), "NIXMGR_FLAKE=path:"+src)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	names, err := js.discover(ctx, src)
 	if err != nil {
-		return nil, fmt.Errorf("evaluating the flake failed: %s", strings.TrimSpace(stderr.String()))
-	}
-	var names map[string][]string
-	if err := json.Unmarshal(lastLine(out), &names); err != nil {
-		return nil, fmt.Errorf("unexpected nix eval output: %v", err)
+		return nil, err
 	}
 	targets := []Target{}
 	for _, k := range []struct{ kind, prefix, suffix string }{

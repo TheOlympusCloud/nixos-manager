@@ -1,0 +1,122 @@
+[
+ {
+  "name": "services.openssh.enable",
+  "type": "boolean",
+  "description": "Whether to enable the OpenSSH secure shell daemon, which allows secure remote logins.",
+  "default": "false",
+  "example": "true",
+  "readOnly": false
+ },
+ {
+  "name": "services.openssh.ports",
+  "type": "list of 16 bit unsigned integer; between 0 and 65535 (both inclusive)",
+  "description": "Specifies on which ports the SSH daemon listens.",
+  "default": "[\n  22\n]",
+  "example": "[\n  22\n  2222\n]",
+  "readOnly": false
+ },
+ {
+  "name": "services.openssh.settings.PermitRootLogin",
+  "type": "one of \"yes\", \"without-password\", \"prohibit-password\", \"forced-commands-only\", \"no\"",
+  "description": "Whether the root user can login using ssh.",
+  "default": "\"prohibit-password\"",
+  "example": null,
+  "readOnly": false
+ },
+ {
+  "name": "services.openssh.settings.PasswordAuthentication",
+  "type": "null or boolean",
+  "description": "Specifies whether password authentication is allowed.",
+  "default": "true",
+  "example": null,
+  "readOnly": false
+ },
+ {
+  "name": "services.jellyfin.enable",
+  "type": "boolean",
+  "description": "Whether to enable Jellyfin Media Server.",
+  "default": "false",
+  "example": "true",
+  "readOnly": false
+ },
+ {
+  "name": "services.jellyfin.openFirewall",
+  "type": "boolean",
+  "description": "Open the default ports in the firewall for the media server.",
+  "default": "false",
+  "example": null,
+  "readOnly": false
+ },
+ {
+  "name": "services.tailscale.enable",
+  "type": "boolean",
+  "description": "Whether to enable Tailscale client daemon.",
+  "default": "false",
+  "example": "true",
+  "readOnly": false
+ },
+ {
+  "name": "services.tailscale.useRoutingFeatures",
+  "type": "one of \"none\", \"client\", \"server\", \"both\"",
+  "description": "Enables settings required for Tailscale's routing features like subnet routers and exit nodes.",
+  "default": "\"none\"",
+  "example": "\"server\"",
+  "readOnly": false
+ },
+ {
+  "name": "services.nginx.virtualHosts.<name>.root",
+  "type": "null or absolute path",
+  "description": "The path of the web root directory.",
+  "default": "null",
+  "example": "\"/data/webserver/docs\"",
+  "readOnly": false
+ },
+ {
+  "name": "networking.firewall.allowedTCPPorts",
+  "type": "list of 16 bit unsigned integer; between 0 and 65535 (both inclusive)",
+  "description": "List of TCP ports on which incoming connections are accepted.",
+  "default": "[ ]",
+  "example": "[\n  22\n  80\n]",
+  "readOnly": false
+ },
+ {
+  "name": "time.timeZone",
+  "type": "null or string without spaces",
+  "description": "The time zone used when displaying times and dates.",
+  "default": "null",
+  "example": "\"America/New_York\"",
+  "readOnly": false
+ },
+ {
+  "name": "programs.steam.enable",
+  "type": "boolean",
+  "description": "Whether to enable steam.",
+  "default": "false",
+  "example": "true",
+  "readOnly": false
+ },
+ {
+  "name": "virtualisation.docker.enable",
+  "type": "boolean",
+  "description": "This option enables docker, a daemon that manages linux containers.",
+  "default": "false",
+  "example": null,
+  "readOnly": false
+ },
+ {
+  "name": "system.stateVersion",
+  "type": "string",
+  "description": "This option defines the first version of NixOS you have installed on this particular machine.",
+  "default": "\"26.05\"",
+  "example": null,
+  "readOnly": false
+ },
+ {
+  "name": "system.nixos.release",
+  "type": "string",
+  "description": "The NixOS release (e.g. 16.03).",
+  "default": "\"26.05\"",
+  "example": null,
+  "readOnly": true
+ }
+]
