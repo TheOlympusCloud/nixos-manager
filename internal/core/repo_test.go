@@ -280,10 +280,60 @@ func TestHistoryAndRestore(t *testing.T) {
 	_, err = r.FileAt(ctx, "deadbeef", "a")
 	isErr(t, err, ErrNotFound)
 
-	ok(t, r.Restore(ctx, "hosts/a.nix", c1))
+	// hosts/a.nix is gone from disk (renamed), so restoring it means creating it.
+	isErr(t, r.Restore(ctx, "hosts/a.nix", c1, "stale"), ErrConflict)
+	ok(t, r.Restore(ctx, "hosts/a.nix", c1, ""))
 	if c, _, _ := r.Read("hosts/a.nix"); c != v1 {
 		t.Fatalf("restored content %q", c)
 	}
+	isErr(t, r.Restore(ctx, "hosts/a.nix", c1, ""), ErrExists)
+
+	// An edit someone else saved since we read the file must not be overwritten.
+	_, seen, _ := r.Read("hosts/b.nix")
+	write(t, r, "hosts/b.nix", "edited by someone else\n")
+	isErr(t, r.Restore(ctx, "hosts/b.nix", log[0].SHA, seen), ErrConflict)
+	if c, _, _ := r.Read("hosts/b.nix"); c != "edited by someone else\n" {
+		t.Fatalf("restore overwrote an unseen edit: %q", c)
+	}
+	_, cur, _ := r.Read("hosts/b.nix")
+	_, err = r.FileAt(ctx, c1, "hosts/b.nix")
+	isErr(t, err, ErrNotFound)
+	isErr(t, r.Restore(ctx, "hosts/b.nix", c1, cur), ErrNotFound)
+}
+
+func TestPathsAreLiteralNotGlobs(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	for _, f := range []string{"a.nix", "b.nix", "hosts/x.nix"} {
+		write(t, r, f, "committed\n")
+	}
+	commitAll(t, r, "init")
+	for _, f := range []string{"a.nix", "b.nix", "hosts/x.nix"} {
+		write(t, r, f, "unstaged edit\n")
+	}
+	for _, glob := range []string{"*.nix", "hosts/*", ":(glob)**/*.nix", ":(exclude)a.nix"} {
+		if err := r.Discard(ctx, []string{glob}); err == nil {
+			t.Errorf("discard %q matched nothing but reported success", glob)
+		}
+		_ = r.Stage(ctx, []string{glob})
+		if d := must[string](t)(r.Diff(ctx, glob, false)); d != "" {
+			t.Errorf("diff %q expanded the pattern:\n%s", glob, d)
+		}
+	}
+	for _, f := range []string{"a.nix", "b.nix", "hosts/x.nix"} {
+		if c, _, _ := r.Read(f); c != "unstaged edit\n" {
+			t.Fatalf("%s lost its unstaged edit: %q", f, c)
+		}
+	}
+	if st := must[Status](t)(r.Status(ctx)); len(st.Files) != 3 || st.Files[0].Staged != "" {
+		t.Fatalf("a pattern staged files: %+v", st.Files)
+	}
+	// The empty list still means everything.
+	ok(t, r.Stage(ctx, nil))
+	if st := must[Status](t)(r.Status(ctx)); st.Files[0].Staged != "M" {
+		t.Fatalf("stage all after literal pathspecs: %+v", st.Files)
+	}
+	ok(t, r.Unstage(ctx, nil))
 }
 
 func TestBranches(t *testing.T) {

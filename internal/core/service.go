@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Service is the one entry point for the web API and the MCP server, so both
 // get the same rules: the commit gate, path checks and the commit identity.
@@ -33,4 +36,25 @@ func (s *Service) Commit(ctx context.Context, message string, force bool) (strin
 		return "", errorf(ErrNotChecked, "the staged changes have not passed a check yet: run the checks first, or commit without checks")
 	}
 	return s.Repo.commit(ctx, message)
+}
+
+// Push sends the current branch to origin. Unless force is set, the commit
+// being pushed must have a checked tree: a pull that rebased local commits
+// creates a combination nobody checked, and comin would deploy it.
+func (s *Service) Push(ctx context.Context, force bool) (string, error) {
+	s.Repo.mu.Lock()
+	defer s.Repo.mu.Unlock()
+	if !force {
+		if n, err := s.Repo.git(ctx, "rev-list", "--count", "@{upstream}..HEAD"); err == nil && strings.TrimSpace(n) == "0" {
+			return s.Repo.push(ctx) // nothing new to send
+		}
+		tree, err := s.Repo.git(ctx, "rev-parse", "--verify", "-q", "HEAD^{tree}")
+		if err != nil {
+			return "", errorf(ErrInvalid, "there is nothing to push yet")
+		}
+		if !s.Jobs.Passed(strings.TrimSpace(tree)) {
+			return "", errorf(ErrNotChecked, "the commit to push was never checked as a whole (for example after a pull that rebased your commits): run the checks with no staged or unstaged changes, then push, or push without checks")
+		}
+	}
+	return s.Repo.push(ctx)
 }

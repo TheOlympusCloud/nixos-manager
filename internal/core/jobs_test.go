@@ -189,3 +189,51 @@ func TestJobReadStreams(t *testing.T) {
 		t.Fatalf("second read %q+%q %v", chunk, rest, done)
 	}
 }
+
+func check(t *testing.T, s *Service) {
+	t.Helper()
+	if info := wait(t, must[*Job](t)(s.Jobs.Submit(context.Background(), JobRequest{Kind: "check"}))); info.State != "passed" {
+		t.Fatalf("check failed:\n%s", info.Output)
+	}
+}
+
+// A pull that rebases local commits produces a tree nobody checked; it must
+// not reach the remote (and comin) until it is checked or the push is forced.
+func TestPushNeedsACheckedHead(t *testing.T) {
+	ctx := context.Background()
+	r, other := remotePair(t)
+	s := NewService(r)
+	s.Jobs.Nix = script(t, "nix", fakeNix)
+
+	write(t, r, "c.nix", "c\n")
+	ok(t, s.Stage(ctx, nil))
+	check(t, s)
+	must[string](t)(s.Commit(ctx, "add c", false))
+	must[string](t)(s.Push(ctx, false)) // checked commit: allowed
+
+	gitOut(t, other, "pull", "-q")
+	otherCommit(t, other, "d.nix", "d\n")
+	must[string](t)(s.Pull(ctx)) // fast-forward: nothing of ours to push
+	must[string](t)(s.Push(ctx, false))
+
+	otherCommit(t, other, "e.nix", "e\n")
+	write(t, r, "f.nix", "f\n")
+	ok(t, s.Stage(ctx, nil))
+	check(t, s)
+	must[string](t)(s.Commit(ctx, "add f", false))
+	must[string](t)(s.Pull(ctx)) // rebases "add f" onto e.nix: a new, unchecked tree
+	_, err := s.Push(ctx, false)
+	isErr(t, err, ErrNotChecked)
+	if gitOut(t, other, "ls-remote", "origin", "main") == gitOut(t, r.Dir, "rev-parse", "HEAD") {
+		t.Fatal("the unchecked rebase reached the remote")
+	}
+	check(t, s) // clean working copy: the staged tree is HEAD's tree
+	must[string](t)(s.Push(ctx, false))
+
+	write(t, r, "g.nix", "g\n")
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "add g unchecked", true))
+	_, err = s.Push(ctx, false)
+	isErr(t, err, ErrNotChecked)
+	must[string](t)(s.Push(ctx, true))
+}

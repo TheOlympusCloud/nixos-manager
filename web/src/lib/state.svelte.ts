@@ -307,7 +307,17 @@ export async function restoreVersion(path: string, rev: string, short: string) {
     ok: 'Restore',
     danger: true,
   })
-  if (!ok || !(await act(() => api.restore(path, rev), { tree: true }))) return
+  // The server only replaces the version we saw: the open tab's, or what is on disk now ('' if absent).
+  const seen = async (): Promise<string> => {
+    if (tab) return tab.hash
+    try {
+      return (await api.file(path)).hash
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return ''
+      throw e
+    }
+  }
+  if (!ok || !(await act(async () => api.restore(path, rev, await seen()), { tree: true }))) return
   if (tab) await reloadTab(tab)
   await openFile(path)
   note(`Restored ${path} from ${short}`)

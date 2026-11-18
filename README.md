@@ -11,7 +11,8 @@ so automation can use the same features.
 - History: repository and per-file log, diffs, restore a file from any commit.
 - Checks: `nix flake check` plus a dry build of the chosen configurations, run on
   exactly the staged changes, with live output. A commit needs a passing check
-  of the staged changes (or an explicit "commit without checks").
+  of the staged changes, and a push needs a passing check of the commit being
+  pushed. In the web UI you can override both explicitly; MCP clients cannot.
 - `nix flake lock` and `nix flake update` for adding or updating inputs.
 - Login for the UI; named, revocable API tokens for MCP clients.
 - Every commit uses the configured person's name and email.
@@ -63,6 +64,10 @@ host's Tailscale address. For HTTPS on the tailnet, run
 3. In **Checks**, pick the configurations to dry-build and run the check.
 4. Commit with a message, then **Push**. comin deploys on each machine.
 
+When **Pull** rebases your local commits onto new remote commits, the result
+was never checked as a whole, so **Push** refuses it: run the checks again with
+nothing staged or changed, then push.
+
 A branch named `testing-<hostname>` is deployed by comin to that one machine
 only, for trying a change before merging it into `main`.
 
@@ -89,7 +94,9 @@ Tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
 `list_branches`, `create_branch`, `switch_branch`, `push`, `pull`,
 `list_targets`, `run_check`, `flake_lock`, `flake_update`. They call the same
-code as the web UI, including the check-before-commit rule.
+code as the web UI, including the check rules for commit and push, which MCP
+clients cannot override. Writes and restores need the `base_hash` from
+`read_file`, so a client never overwrites an edit it has not seen.
 
 ## Configuration
 

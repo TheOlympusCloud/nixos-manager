@@ -109,6 +109,9 @@ func TestEditCheckCommitFlow(t *testing.T) {
 	if res := call(t, cs, "commit", map[string]any{"message": "feat: add web"}, nil); !res.IsError || !strings.Contains(text(res), "run the checks first") {
 		t.Fatalf("unchecked commit not refused: %s", text(res))
 	}
+	if res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "commit", Arguments: map[string]any{"message": "x", "force": true}}); err == nil && !res.IsError {
+		t.Fatal("an agent bypassed the check with force")
+	}
 	var job struct{ State, Output string }
 	call(t, cs, "run_check", map[string]any{"targets": []string{"nixosConfigurations.web.config.system.build.toplevel"}}, &job)
 	if job.State != "passed" || !strings.Contains(job.Output, "flake check") {
@@ -131,5 +134,15 @@ func TestEditCheckCommitFlow(t *testing.T) {
 	call(t, cs, "show_commit", map[string]any{"rev": c.SHA}, &info)
 	if !strings.Contains(info.Diff, "hosts/web/default.nix") {
 		t.Fatalf("show_commit %+v", info)
+	}
+
+	// restore_file refuses to overwrite an edit it has not seen.
+	call(t, cs, "write_file", map[string]any{"path": "hosts/web/default.nix", "content": "{ edited = true; }\n", "base_hash": r.Hash}, nil)
+	if res := call(t, cs, "restore_file", map[string]any{"path": "hosts/web/default.nix", "rev": c.SHA, "base_hash": r.Hash}, nil); !res.IsError {
+		t.Fatal("restore over an unseen edit was accepted")
+	}
+	call(t, cs, "read_file", map[string]any{"path": "hosts/web/default.nix"}, &r)
+	if res := call(t, cs, "restore_file", map[string]any{"path": "hosts/web/default.nix", "rev": c.SHA, "base_hash": r.Hash}, nil); res.IsError {
+		t.Fatalf("restore with the current hash: %s", text(res))
 	}
 }

@@ -104,8 +104,11 @@ func (s *Server) Handler() http.Handler {
 		content, err := s.Svc.FileAt(r.Context(), q.Get("rev"), q.Get("path"))
 		return map[string]string{"content": content}, err
 	}))
-	api.HandleFunc("POST /api/restore", post(func(r *http.Request, in struct{ Path, Rev string }) (any, error) {
-		return nil, s.Svc.Restore(r.Context(), in.Path, in.Rev)
+	api.HandleFunc("POST /api/restore", post(func(r *http.Request, in struct {
+		Path, Rev string
+		BaseHash  string `json:"base_hash"`
+	}) (any, error) {
+		return nil, s.Svc.Restore(r.Context(), in.Path, in.Rev, in.BaseHash)
 	}))
 	api.HandleFunc("GET /api/branches", get(func(r *http.Request) (any, error) { return s.Svc.Branches(r.Context()) }))
 	api.HandleFunc("POST /api/branches", post(func(r *http.Request, in struct{ Name, From string }) (any, error) {
@@ -114,8 +117,8 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /api/switch", post(func(r *http.Request, in struct{ Name string }) (any, error) {
 		return nil, s.Svc.Switch(r.Context(), in.Name)
 	}))
-	api.HandleFunc("POST /api/push", post(func(r *http.Request, _ struct{}) (any, error) {
-		out, err := s.Svc.Push(r.Context())
+	api.HandleFunc("POST /api/push", post(func(r *http.Request, in struct{ Force bool }) (any, error) {
+		out, err := s.Svc.Push(r.Context(), in.Force)
 		return map[string]string{"output": out}, err
 	}))
 	api.HandleFunc("POST /api/pull", post(func(r *http.Request, _ struct{}) (any, error) {

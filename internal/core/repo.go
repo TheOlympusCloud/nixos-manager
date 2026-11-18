@@ -121,7 +121,8 @@ func (r *Repo) gitRun(ctx context.Context, env []string, stdin []byte, args ...s
 	full := append([]string{"-c", "user.name=" + r.AuthorName, "-c", "user.email=" + r.AuthorEmail, "-c", "core.quotePath=false"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = r.Dir
-	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"), env...)
+	// Literal pathspecs: a path like "*.nix" names that file, never every .nix file.
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_LITERAL_PATHSPECS=1"), env...)
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new")
 	}
@@ -239,21 +240,30 @@ func (r *Repo) Write(p, content, baseHash string) (string, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cur, err := r.root.ReadFile(p)
-	switch {
-	case err == nil && baseHash == "":
-		return "", errorf(ErrExists, "%s already exists", p)
-	case err == nil && hashOf(cur) != baseHash:
-		return "", errorf(ErrConflict, "%s changed since it was loaded", p)
-	case errors.Is(err, fs.ErrNotExist) && baseHash != "":
-		return "", errorf(ErrConflict, "%s was deleted since it was loaded", p)
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return "", r.folderOr(p, err)
+	if err := r.checkBase(p, baseHash); err != nil {
+		return "", err
 	}
 	if err := r.writeFile(p, []byte(content)); err != nil {
 		return "", err
 	}
 	return hashOf([]byte(content)), nil
+}
+
+// checkBase makes sure p on disk is still the version the caller saw: hash
+// baseHash, or absent when baseHash is "". Needs r.mu held.
+func (r *Repo) checkBase(p, baseHash string) error {
+	cur, err := r.root.ReadFile(p)
+	switch {
+	case err == nil && baseHash == "":
+		return errorf(ErrExists, "%s already exists", p)
+	case err == nil && hashOf(cur) != baseHash:
+		return errorf(ErrConflict, "%s changed since it was loaded", p)
+	case errors.Is(err, fs.ErrNotExist) && baseHash != "":
+		return errorf(ErrConflict, "%s was deleted since it was loaded", p)
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return r.folderOr(p, err)
+	}
+	return nil
 }
 
 // folderOr explains a failed file operation on a folder, else returns err.
@@ -692,7 +702,8 @@ func (r *Repo) FileAt(ctx context.Context, rev, p string) (string, error) {
 }
 
 // Restore writes a file as it was at rev into the working copy (not committed).
-func (r *Repo) Restore(ctx context.Context, p, rev string) error {
+// Like Write, baseHash is the version on disk the caller saw ("" if absent).
+func (r *Repo) Restore(ctx context.Context, p, rev, baseHash string) error {
 	content, err := r.FileAt(ctx, rev, p)
 	if err != nil {
 		return err
@@ -700,6 +711,9 @@ func (r *Repo) Restore(ctx context.Context, p, rev string) error {
 	p, _ = cleanPath(p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.checkBase(p, baseHash); err != nil {
+		return err
+	}
 	return r.writeFile(p, []byte(content))
 }
 
@@ -799,6 +813,11 @@ func (r *Repo) currentBranch(ctx context.Context) (string, error) {
 func (r *Repo) Push(ctx context.Context) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.push(ctx)
+}
+
+// push needs r.mu held.
+func (r *Repo) push(ctx context.Context) (string, error) {
 	branch, err := r.currentBranch(ctx)
 	if err != nil {
 		return "", err

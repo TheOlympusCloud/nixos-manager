@@ -109,8 +109,17 @@ api POST /api/push -d '{}' > /dev/null
 echo "ok   edit, diff, check, commit, push"
 
 [ "$(api GET "/api/log?path=$file" | json '["commits"].__len__()')" = 2 ] || fail "file history"
-[ "$(code POST /api/restore -d "{\"path\":\"$file\",\"rev\":\"$sha\"}")" = 204 ] || fail "restore"
+[ "$(code POST /api/restore -d "{\"path\":\"$file\",\"rev\":\"$sha\",\"base_hash\":\"stale\"}")" = 409 ] || fail "restore over an unseen version not refused"
+hash=$(api GET "/api/file?path=$file" | json '["hash"]')
+[ "$(code POST /api/restore -d "{\"path\":\"$file\",\"rev\":\"$sha\",\"base_hash\":\"$hash\"}")" = 204 ] || fail "restore"
 api GET "/api/file?path=$file" | json '["content"]' | grep -q timeZone && fail "restore did not bring back the old version"
 echo "ok   history and restore"
+
+api PUT /api/file -d '{"path":"modules/new.nix","content":"{ }\n","base_hash":""}' > /dev/null
+api POST /api/stage -d '{"paths":[]}' > /dev/null
+api POST /api/commit -d '{"message":"chore: unchecked change","force":true}' > /dev/null
+[ "$(code POST /api/push -d '{}')" = 412 ] || fail "unchecked commit pushed without force"
+[ "$(code POST /api/push -d '{"force":true}')" = 200 ] || fail "forced push"
+echo "ok   push needs a checked commit unless forced"
 
 echo "PASS"

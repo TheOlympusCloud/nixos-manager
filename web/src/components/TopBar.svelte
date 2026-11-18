@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ApiError, api } from '../lib/api'
   import { app, fileTabs, logout, refresh, syncOpenTabs } from '../lib/state.svelte'
-  import { alertBox, report, toast } from '../lib/ui.svelte'
+  import { alertBox, confirmBox, report, toast } from '../lib/ui.svelte'
   import Icon from './Icon.svelte'
 
   let menuOpen = $state(false)
@@ -65,7 +65,21 @@
   async function git(kind: 'pull' | 'push') {
     busy = kind
     try {
-      const out = await api[kind]()
+      let out: string
+      try {
+        out = await api[kind]()
+      } catch (e) {
+        // 412: the commit to push was never checked as a whole (e.g. after a rebasing pull).
+        if (!(kind === 'push' && e instanceof ApiError && e.status === 412)) throw e
+        const force = await confirmBox({
+          title: 'Push without checks?',
+          message: 'This commit has not passed a check, for example because a pull rebased it onto new remote commits. Run the checks with nothing staged or changed, or push anyway: the machines will deploy it unchecked.',
+          ok: 'Push without checks',
+          danger: true,
+        })
+        if (!force) return
+        out = await api.push(true)
+      }
       await alertBox({ title: `git ${kind}`, pre: out.trim() || '(no output)' })
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401)) await alertBox({ title: `git ${kind} failed`, pre: e instanceof Error ? e.message : String(e) })

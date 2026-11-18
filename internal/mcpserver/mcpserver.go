@@ -14,7 +14,7 @@ const outputTail = 20000
 
 const instructions = `This server edits a git-backed Nix flake repository (NixOS, home-manager and other flake outputs).
 Typical flow: list_files / read_file, write_file with the base_hash from read_file, stage, run_check, commit, push.
-Commits are only accepted after run_check passed for exactly the staged changes. Never store secrets in the repository.`
+Commits and pushes are only accepted after run_check passed for exactly that content. Never store secrets in the repository.`
 
 type done struct {
 	Done bool `json:"done"`
@@ -115,11 +115,11 @@ func New(svc *core.Service, version string) *mcp.Server {
 	}) (done, error) {
 		return done{true}, svc.Discard(ctx, in.Paths)
 	})
-	tool(s, "commit", "Commit the staged changes. Refused unless run_check passed for exactly these staged changes; force skips that and should only be used when asked.", func(ctx context.Context, in struct {
+	// Agents never get the force flag: only a person in the web UI may skip a check.
+	tool(s, "commit", "Commit the staged changes. Refused unless run_check passed for exactly these staged changes.", func(ctx context.Context, in struct {
 		Message string `json:"message"`
-		Force   bool   `json:"force,omitempty"`
 	}) (map[string]string, error) {
-		sha, err := svc.Commit(ctx, in.Message, in.Force)
+		sha, err := svc.Commit(ctx, in.Message, false)
 		return map[string]string{"sha": sha}, err
 	})
 	tool(s, "log", "List commits newest first, for the repository or one file (following renames).", func(ctx context.Context, in struct {
@@ -142,11 +142,12 @@ func New(svc *core.Service, version string) *mcp.Server {
 		c, err := svc.FileAt(ctx, in.Rev, in.Path)
 		return map[string]string{"content": c}, err
 	})
-	tool(s, "restore_file", "Put a file back the way it was at a commit (as an uncommitted change).", func(ctx context.Context, in struct {
-		Path string `json:"path"`
-		Rev  string `json:"rev"`
+	tool(s, "restore_file", "Put a file back the way it was at a commit (as an uncommitted change). Pass base_hash from read_file, or an empty base_hash when the file does not exist now; it is refused if the file changed since.", func(ctx context.Context, in struct {
+		Path     string `json:"path"`
+		Rev      string `json:"rev"`
+		BaseHash string `json:"base_hash,omitempty" jsonschema:"hash from read_file; empty when the file does not exist now"`
 	}) (done, error) {
-		return done{true}, svc.Restore(ctx, in.Path, in.Rev)
+		return done{true}, svc.Restore(ctx, in.Path, in.Rev, in.BaseHash)
 	})
 	tool(s, "list_branches", "List local branches and the current one.", func(ctx context.Context, _ struct{}) (core.Branches, error) {
 		return svc.Branches(ctx)
@@ -162,8 +163,8 @@ func New(svc *core.Service, version string) *mcp.Server {
 	}) (done, error) {
 		return done{true}, svc.Switch(ctx, in.Name)
 	})
-	tool(s, "push", "Push the current branch to the remote.", func(ctx context.Context, _ struct{}) (map[string]string, error) {
-		out, err := svc.Push(ctx)
+	tool(s, "push", "Push the current branch to the remote. Refused until the commit being pushed has passed run_check (e.g. after a pull rebased local commits: run_check, then push).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
+		out, err := svc.Push(ctx, false)
 		return map[string]string{"output": out}, err
 	})
 	tool(s, "pull", "Bring the current branch up to date with the remote (fast-forward, or rebase local commits; nothing changes on conflict).", func(ctx context.Context, _ struct{}) (map[string]string, error) {

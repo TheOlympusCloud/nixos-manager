@@ -114,11 +114,11 @@ export const api = {
     get<{ commits: Commit[] }>('/api/log', opts).then((r) => r.commits ?? []),
   commitDetail: (rev: string) => get<CommitDetail>('/api/commit', { rev }),
   fileAt: (rev: string, path: string) => get<{ content: string }>('/api/file-at', { rev, path }).then((r) => r.content),
-  restore: (path: string, rev: string) => post('/api/restore', { path, rev }),
+  restore: (path: string, rev: string, base_hash: string) => post('/api/restore', { path, rev, base_hash }),
   branches: () => get<{ current: string; branches: string[] }>('/api/branches'),
   createBranch: (name: string) => post('/api/branches', { name, from: '' }),
   switchBranch: (name: string) => post('/api/switch', { name }),
-  push: () => post<{ output: string }>('/api/push').then((r) => r.output),
+  push: (force = false) => post<{ output: string }>('/api/push', { force }).then((r) => r.output),
   pull: () => post<{ output: string }>('/api/pull').then((r) => r.output),
 
   targets: () => get<{ targets: Target[] }>('/api/targets').then((r) => r.targets ?? []),
