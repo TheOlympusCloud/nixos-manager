@@ -260,6 +260,8 @@ func (js *Jobs) run(job *Job) error {
 			steps = append(steps, js.nixArgs("build", "--dry-run", "--no-link", "-L", "--no-update-lock-file", "path:"+src+"#"+t))
 		}
 	case "lock":
+		// lock and update write flake.lock without Repo.mu, which would block every edit for
+		// the whole download. Safe: a concurrent save of flake.lock is hash-checked and atomic.
 		// shortcut: path: copies the whole folder (with .git) to the store; fine for a config repo, revisit if .git grows large.
 		steps = append(steps, js.nixArgs("flake", "lock", "path:"+dir))
 	case "update":

@@ -54,8 +54,11 @@ branch.
 ### LAN and Tailscale
 
 The port is published on the host, so it is reachable on the LAN and on the
-host's Tailscale address. For HTTPS on the tailnet, run
-`tailscale serve --bg 8080` on the host.
+host's Tailscale address. On the LAN it is plain HTTP: the password and the
+session cookie cross the LAN unencrypted. Tailscale traffic is encrypted, and
+`tailscale serve --bg 8080` on the host adds HTTPS on the tailnet. If the LAN is
+not trusted, publish the port on loopback only (`"127.0.0.1:8080:8080"`) and use
+it through Tailscale.
 
 ## Using it
 
