@@ -482,3 +482,71 @@ func TestSeedOnlyIntoEmptyRepo(t *testing.T) {
 		t.Fatal("seeded a repo that already has files")
 	}
 }
+
+// Reverting stages the inverse changes; the user checks and commits them like any change.
+func TestRevertStagesTheInverse(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "a.nix", "one\n")
+	commitAll(t, r, "first")
+	write(t, r, "a.nix", "two\n")
+	bad := commitAll(t, r, "second")
+	ok(t, r.Revert(ctx, bad))
+	if c, _, _ := r.Read("a.nix"); c != "one\n" {
+		t.Fatalf("after revert a.nix = %q", c)
+	}
+	st := must[Status](t)(r.Status(ctx))
+	if len(st.Files) != 1 || st.Files[0].Staged != "M" {
+		t.Fatalf("revert should be staged, not committed: %+v", st.Files)
+	}
+	if head := gitOut(t, r.Dir, "rev-parse", "HEAD"); head != bad {
+		t.Fatal("revert made a commit")
+	}
+	isErr(t, r.Revert(ctx, bad), ErrConflict) // local changes in the way
+	_, err := r.FileAt(ctx, "nope", "a.nix")
+	isErr(t, err, ErrNotFound)
+}
+
+func TestMergeStagesTheBranch(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "a.nix", "base\n")
+	commitAll(t, r, "base")
+	ok(t, r.CreateBranch(ctx, "testing-pi", ""))
+	write(t, r, "pi.nix", "tried on pi\n")
+	commitAll(t, r, "try on pi")
+	ok(t, r.Switch(ctx, "main"))
+	write(t, r, "main.nix", "meanwhile\n")
+	commitAll(t, r, "meanwhile on main")
+	head := gitOut(t, r.Dir, "rev-parse", "HEAD")
+	msg := must[string](t)(r.Merge(ctx, "testing-pi"))
+	if c, _, _ := r.Read("pi.nix"); c != "tried on pi\n" || gitOut(t, r.Dir, "rev-parse", "HEAD") != head {
+		t.Fatal("merge must stage the branch without committing")
+	}
+	if !strings.Contains(msg, "testing-pi") {
+		t.Fatalf("suggested message %q", msg)
+	}
+	ok(t, r.Stage(ctx, nil))
+	sha := must[string](t)(r.Commit(ctx, msg))
+	if parents := gitOut(t, r.Dir, "rev-list", "--parents", "-n1", sha); len(strings.Fields(parents)) != 2 {
+		t.Fatalf("a squashed merge is an ordinary commit: %s", parents)
+	}
+	if _, err := os.Stat(filepath.Join(r.Dir, ".git", "MERGE_HEAD")); err == nil {
+		t.Fatal("git was left in the middle of a merge")
+	}
+
+	// A conflicting merge is undone and reported.
+	ok(t, r.CreateBranch(ctx, "clash", ""))
+	write(t, r, "a.nix", "theirs\n")
+	commitAll(t, r, "theirs")
+	ok(t, r.Switch(ctx, "main"))
+	write(t, r, "a.nix", "ours\n")
+	commitAll(t, r, "ours")
+	_, err := r.Merge(ctx, "clash")
+	isErr(t, err, ErrConflict)
+	if st := must[Status](t)(r.Status(ctx)); len(st.Files) != 0 {
+		t.Fatalf("a failed merge left changes: %+v", st.Files)
+	}
+	_, err = r.Merge(ctx, "-x")
+	isErr(t, err, ErrInvalid)
+}

@@ -125,6 +125,13 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /api/switch", post(func(r *http.Request, in struct{ Name string }) (any, error) {
 		return nil, s.Svc.Switch(r.Context(), in.Name)
 	}))
+	api.HandleFunc("POST /api/revert", post(func(r *http.Request, in struct{ Rev string }) (any, error) {
+		return nil, s.Svc.Revert(r.Context(), in.Rev)
+	}))
+	api.HandleFunc("POST /api/merge", post(func(r *http.Request, in struct{ Branch string }) (any, error) {
+		msg, err := s.Svc.Merge(r.Context(), in.Branch)
+		return map[string]string{"message": msg}, err
+	}))
 	api.HandleFunc("POST /api/push", post(func(r *http.Request, in struct{ Force bool }) (any, error) {
 		out, err := s.Svc.Push(r.Context(), in.Force)
 		return map[string]string{"output": out}, err

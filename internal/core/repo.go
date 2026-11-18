@@ -796,6 +796,65 @@ func (r *Repo) Switch(ctx context.Context, name string) error {
 	return nil
 }
 
+// clean refuses operations that would mix with uncommitted changes to tracked files. Needs r.mu.
+func (r *Repo) clean(ctx context.Context) error {
+	dirty, err := r.git(ctx, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return err
+	}
+	if dirty != "" {
+		return errorf(ErrConflict, "commit or discard your changes first")
+	}
+	return nil
+}
+
+// Revert stages the inverse of a commit; the user checks and commits it like any change.
+func (r *Repo) Revert(ctx context.Context, rev string) error {
+	sha, err := r.resolve(ctx, rev)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.clean(ctx); err != nil {
+		return err
+	}
+	if _, err := r.git(ctx, "revert", "--no-commit", sha); err != nil {
+		r.git(ctx, "revert", "--abort")
+		return errorf(ErrConflict, "%.12s cannot be reverted cleanly; later commits changed the same lines.\n%v", sha, err)
+	}
+	_, err = r.git(ctx, "revert", "--quit") // keep the staged changes, drop git's "revert in progress"
+	return err
+}
+
+// Merge stages another branch squashed into the current one and returns a suggested
+// commit message. Nothing is committed, and git is never left mid-merge.
+func (r *Repo) Merge(ctx context.Context, branch string) (string, error) {
+	if err := r.checkBranch(ctx, branch); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.clean(ctx); err != nil {
+		return "", err
+	}
+	cur, err := r.git(ctx, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil {
+		return "", errorf(ErrInvalid, "not on a branch")
+	}
+	if _, err := r.git(ctx, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err != nil {
+		return "", errorf(ErrNotFound, "no branch named %s", branch)
+	}
+	if _, err := r.git(ctx, "merge", "--squash", "refs/heads/"+branch); err != nil {
+		r.git(ctx, "reset", "-q", "--merge")
+		return "", errorf(ErrConflict, "%s cannot be merged cleanly; the branches changed the same lines.\n%v", branch, err)
+	}
+	if staged, _ := r.git(ctx, "diff", "--cached", "--name-only"); strings.TrimSpace(staged) == "" {
+		return "", errorf(ErrInvalid, "%s has nothing that %s does not already have", branch, strings.TrimSpace(cur))
+	}
+	return fmt.Sprintf("Merge %s into %s", branch, strings.TrimSpace(cur)), nil
+}
+
 const netTimeout = 2 * time.Minute
 
 func (r *Repo) currentBranch(ctx context.Context) (string, error) {

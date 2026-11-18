@@ -247,6 +247,10 @@ export const api = {
   optionValues: (names: string[], hosts: string[] = []) =>
     get<ValuesReply>('/api/fleet/values', { name: names, host: hosts }),
   createMachine: (spec: MachineSpec) => post<MachineCreated>('/api/machines', spec),
+  /** Stages the inverse of a commit (nothing is committed). 409: local changes or a conflict. */
+  revert: (rev: string) => post('/api/revert', { rev }),
+  /** Stages a branch squashed into the current one; returns a suggested commit message. 409 on conflict. */
+  merge: (branch: string) => post<{ message: string }>('/api/merge', { branch }).then((r) => r.message),
   refreshModel: () => post<{ job: string }>('/api/model/refresh').then((r) => r.job),
   managed: (host: string) => get<Managed>(`/api/hosts/${encodeURIComponent(host)}/managed`),
   editPackages: (host: string, edit: { add?: string[]; remove?: string[] }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/packages`, edit),

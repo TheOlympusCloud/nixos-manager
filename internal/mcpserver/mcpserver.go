@@ -179,6 +179,17 @@ func New(svc *core.Service, version string) *mcp.Server {
 	}) (done, error) {
 		return done{true}, svc.Switch(ctx, in.Name)
 	})
+	tool(s, "revert_commit", "Stage the inverse of a commit (nothing is committed): run_check, then commit, like any change. Refused if there are local changes or it would conflict.", func(ctx context.Context, in struct {
+		Rev string `json:"rev"`
+	}) (done, error) {
+		return done{true}, svc.Revert(ctx, in.Rev)
+	})
+	tool(s, "merge_branch", "Stage another branch (e.g. testing-<host>) squashed into the current one and return a suggested commit message; run_check, then commit.", func(ctx context.Context, in struct {
+		Branch string `json:"branch"`
+	}) (map[string]string, error) {
+		msg, err := svc.Merge(ctx, in.Branch)
+		return map[string]string{"message": msg}, err
+	})
 	tool(s, "push", "Push the current branch to the remote. Refused until the commit being pushed has passed run_check (e.g. after a pull rebased local commits: run_check, then push).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
 		out, err := svc.Push(ctx, false)
 		return map[string]string{"output": out}, err

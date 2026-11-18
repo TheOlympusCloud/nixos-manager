@@ -713,6 +713,57 @@ func TestStaticAssetsAreCachedAndCompressed(t *testing.T) {
 	}
 }
 
+func TestRevertAndMergeOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	commit := func(path, content, msg string) string {
+		cur := ""
+		if _, h, err := e.svc.Read(path); err == nil {
+			cur = h
+		}
+		if _, err := e.svc.Write(path, content, cur); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.svc.Stage(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		sha, err := e.svc.Commit(ctx, msg, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sha
+	}
+	commit("a.nix", "1\n", "one")
+	two := commit("a.nix", "2\n", "two")
+	if code := e.do(t, "POST", "/api/revert", map[string]string{"rev": two}, nil); code != 204 {
+		t.Fatalf("revert: %d", code)
+	}
+	if c, _, _ := e.svc.Read("a.nix"); c != "1\n" {
+		t.Fatalf("after revert %q", c)
+	}
+	if err := e.svc.Discard(ctx, []string{"a.nix"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Unstage(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Discard(ctx, []string{"a.nix"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.CreateBranch(ctx, "testing-pi", ""); err != nil {
+		t.Fatal(err)
+	}
+	commit("pi.nix", "x\n", "pi")
+	if err := e.svc.Switch(ctx, "main"); err != nil {
+		t.Fatal(err)
+	}
+	var m struct{ Message string }
+	if code := e.do(t, "POST", "/api/merge", map[string]string{"branch": "testing-pi"}, &m); code != 200 || !strings.Contains(m.Message, "testing-pi") {
+		t.Fatalf("merge: %d %+v", code, m)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {
