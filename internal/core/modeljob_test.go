@@ -120,6 +120,13 @@ func TestModelOfABrokenFlake(t *testing.T) {
 	if again, j, _ := s.Jobs.Model(context.Background(), "working"); again != m || j != nil {
 		t.Fatal("a broken flake is evaluated again on every request")
 	}
+	// After a transient failure (no network, say), the user can ask again.
+	t.Setenv("NIXMGR_FAKE_FIXTURES", must[string](t)(filepath.Abs("testdata/fleet")))
+	j := must[*Job](t)(s.Jobs.RefreshModel(context.Background()))
+	wait(t, j)
+	if fixed := readyModel(t, s, "working"); fixed.Error != "" || len(fixed.Hosts) != 4 {
+		t.Fatalf("model after a refresh %+v", fixed)
+	}
 }
 
 // Quick edits must not pile up full fleet evaluations: a newer request skips

@@ -484,6 +484,10 @@ func TestModelAndDiffOverHTTP(t *testing.T) {
 	if len(diff.Hosts) != 4 || diff.Hosts[3].Host != "workstation" || diff.Hosts[3].Status != "added" || len(diff.Hosts[3].PackagesAdded) == 0 {
 		t.Fatalf("diff against an empty history %+v", diff)
 	}
+	var refresh struct{ Job string }
+	if code := e.do(t, "POST", "/api/model/refresh", struct{}{}, &refresh); code != 200 || refresh.Job == "" {
+		t.Fatalf("refresh: %d %+v", code, refresh)
+	}
 	if code := e.do(t, "GET", "/api/model?at=tomorrow", nil, nil); code != 400 {
 		t.Fatalf("bad at: %d", code)
 	}

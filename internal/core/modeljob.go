@@ -107,6 +107,23 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 	return nil, j, err
 }
 
+// RefreshModel evaluates the working copy again, for when the last evaluation
+// failed for a reason outside the files (no network, a fixed Nix setup).
+func (js *Jobs) RefreshModel(ctx context.Context) (*Job, error) {
+	tree, err := js.Repo.WorkingTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	js.mu.Lock()
+	delete(js.models, tree)
+	js.mu.Unlock()
+	_, j, err := js.Model(ctx, "working")
+	if err == nil && j == nil {
+		err = errorf(ErrConflict, "the model is already being refreshed")
+	}
+	return j, err
+}
+
 func (j *Job) finishedState() bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()

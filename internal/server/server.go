@@ -182,6 +182,13 @@ func (s *Server) Handler() http.Handler {
 		return map[string]string{"job": j.ID}, nil
 	}))
 	api.HandleFunc("GET /api/model", s.model)
+	api.HandleFunc("POST /api/model/refresh", post(func(r *http.Request, _ struct{}) (any, error) {
+		j, err := s.Svc.Jobs.RefreshModel(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"job": j.ID}, nil
+	}))
 	api.HandleFunc("GET /api/model/diff", s.modelDiff)
 	api.HandleFunc("GET /api/targets", get(func(r *http.Request) (any, error) {
 		t, err := s.Svc.Jobs.Targets(r.Context())
