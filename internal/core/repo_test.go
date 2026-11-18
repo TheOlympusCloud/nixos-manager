@@ -121,6 +121,10 @@ func TestWriteReadConflicts(t *testing.T) {
 	ok(t, os.WriteFile(filepath.Join(r.Dir, "blob.bin"), []byte{0xff, 0xfe, 0}, 0o644))
 	_, _, err = r.Read("blob.bin")
 	isErr(t, err, ErrInvalid)
+	_, _, err = r.Read("hosts")
+	isErr(t, err, ErrInvalid)
+	_, err = r.Write("hosts", "x", "")
+	isErr(t, err, ErrInvalid)
 }
 
 func TestTreeMkdirMoveDelete(t *testing.T) {
@@ -403,6 +407,11 @@ func TestOpenAddsRemoteToExistingRepo(t *testing.T) {
 	r2 := must[*Repo](t)(OpenRepo(r.Dir, bare, testName, testEmail))
 	if got := gitOut(t, r2.Dir, "remote", "get-url", "origin"); got != bare || r2.Remote(context.Background()) != bare {
 		t.Fatalf("origin = %q", got)
+	}
+	other := filepath.Join(t.TempDir(), "moved.git")
+	r3 := must[*Repo](t)(OpenRepo(r.Dir, other, testName, testEmail))
+	if got := gitOut(t, r3.Dir, "remote", "get-url", "origin"); got != other {
+		t.Fatalf("changed remote not applied: %q", got)
 	}
 	gitOut(t, r2.Dir, "remote", "set-url", "origin", "https://pablo:secret-token@forgejo.lan/pablo/nixos-config.git")
 	if got := r2.Remote(context.Background()); strings.Contains(got, "secret-token") {

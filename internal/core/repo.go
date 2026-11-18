@@ -59,8 +59,8 @@ type Repo struct {
 }
 
 // OpenRepo opens the working copy in dir. A missing or empty dir is cloned from
-// remote, or initialised empty when there is no remote yet. An existing repo
-// without an origin gets remote added as origin.
+// remote, or initialised empty when there is no remote yet. In an existing repo
+// a non-empty remote becomes (or replaces) origin.
 func OpenRepo(dir, remote, name, email string) (*Repo, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -83,10 +83,14 @@ func OpenRepo(dir, remote, name, email string) (*Repo, error) {
 	} else if err != nil {
 		return nil, err
 	} else if remote != "" {
-		if _, err := r.git(ctx, "remote", "get-url", "origin"); err != nil {
-			if _, err := r.git(ctx, "remote", "add", "origin", remote); err != nil {
-				return nil, err
-			}
+		cur, err := r.git(ctx, "remote", "get-url", "origin")
+		if err != nil {
+			_, err = r.git(ctx, "remote", "add", "origin", remote)
+		} else if strings.TrimSpace(cur) != remote {
+			_, err = r.git(ctx, "remote", "set-url", "origin", remote)
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 	if r.root, err = os.OpenRoot(dir); err != nil {
@@ -217,7 +221,7 @@ func (r *Repo) Read(p string) (string, string, error) {
 		return "", "", errorf(ErrNotFound, "%s does not exist", p)
 	}
 	if err != nil {
-		return "", "", err
+		return "", "", r.folderOr(p, err)
 	}
 	s, err := textOrError(p, b)
 	if err != nil {
@@ -244,12 +248,20 @@ func (r *Repo) Write(p, content, baseHash string) (string, error) {
 	case errors.Is(err, fs.ErrNotExist) && baseHash != "":
 		return "", errorf(ErrConflict, "%s was deleted since it was loaded", p)
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return "", err
+		return "", r.folderOr(p, err)
 	}
 	if err := r.writeFile(p, []byte(content)); err != nil {
 		return "", err
 	}
 	return hashOf([]byte(content)), nil
+}
+
+// folderOr explains a failed file operation on a folder, else returns err.
+func (r *Repo) folderOr(p string, err error) error {
+	if fi, serr := r.root.Stat(p); serr == nil && fi.IsDir() {
+		return errorf(ErrInvalid, "%s is a folder", p)
+	}
+	return err
 }
 
 // writeFile replaces p atomically, creating parent folders and keeping the mode.
