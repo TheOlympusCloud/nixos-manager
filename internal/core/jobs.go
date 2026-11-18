@@ -35,10 +35,12 @@ type Jobs struct {
 	queue      chan *Job
 	models     map[string]*Model // by git tree
 	modelOrder []string
+	indexes    map[string]any   // search indexes by key
+	indexErrs  map[string]error // why the last build of an index failed
 }
 
 func newJobs(repo *Repo) *Jobs {
-	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", passed: map[string]bool{}, models: map[string]*Model{}, queue: make(chan *Job, queueLength)}
+	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", passed: map[string]bool{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{}, queue: make(chan *Job, queueLength)}
 	go j.worker()
 	return j
 }
@@ -51,6 +53,7 @@ type JobRequest struct {
 	Kind    string   `json:"kind"`
 	Targets []string `json:"targets,omitempty"`
 	Inputs  []string `json:"inputs,omitempty"`
+	Host    string   `json:"host,omitempty"` // options index jobs
 }
 
 type Job struct {
@@ -59,6 +62,7 @@ type Job struct {
 
 	mu       sync.Mutex
 	tree     string
+	key      string // search index jobs
 	state    string
 	started  time.Time
 	finished time.Time
@@ -172,14 +176,14 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
-	return js.enqueue(req, tree)
+	return js.enqueue(req, tree, "")
 }
 
 // enqueue queues a job for the worker; js.mu must be held.
-func (js *Jobs) enqueue(req JobRequest, tree string) (*Job, error) {
+func (js *Jobs) enqueue(req JobRequest, tree, key string) (*Job, error) {
 	js.nextID++
 	job := newJob(fmt.Sprintf("j%d", js.nextID), req)
-	job.tree = tree
+	job.tree, job.key = tree, key
 	select {
 	case js.queue <- job:
 	default:
@@ -246,8 +250,11 @@ func (js *Jobs) nixArgs(args ...string) []string {
 func (js *Jobs) run(job *Job) error {
 	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
 	defer cancel()
-	if job.Req.Kind == "model" {
+	switch job.Req.Kind {
+	case "model":
 		return js.runModel(ctx, job)
+	case "packages", "options":
+		return js.runIndex(ctx, job)
 	}
 	dir := js.Repo.Dir
 	var steps [][]string

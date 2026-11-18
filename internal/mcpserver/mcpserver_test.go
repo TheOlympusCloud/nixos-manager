@@ -82,10 +82,67 @@ func TestToolsList(t *testing.T) {
 	}
 	for _, want := range []string{"list_files", "read_file", "write_file", "create_folder", "move_path", "delete_path", "format_nix",
 		"status", "diff", "stage", "unstage", "discard", "commit", "log", "show_commit", "read_file_at", "restore_file",
-		"list_branches", "create_branch", "switch_branch", "push", "pull", "list_targets", "run_check", "flake_lock", "flake_update"} {
+		"list_branches", "create_branch", "switch_branch", "push", "pull", "list_targets", "run_check", "flake_lock", "flake_update",
+		"fleet_overview", "host_details", "model_diff", "add_packages", "remove_packages", "set_option", "unset_option",
+		"search_packages", "search_options"} {
 		if !have[want] {
 			t.Errorf("missing tool %s", want)
 		}
+	}
+}
+
+// fleetSession is a session whose nix is scripts/dev/fake-nix serving the fixture fleet.
+func fleetSession(t *testing.T) *mcp.ClientSession {
+	t.Helper()
+	cs, svc := session(t)
+	nix, _ := filepath.Abs("../../scripts/dev/fake-nix")
+	fixtures, _ := filepath.Abs("../core/testdata/fleet")
+	t.Setenv("NIXMGR_FAKE_FIXTURES", fixtures)
+	svc.Jobs.Nix = nix
+	lock, _ := os.ReadFile("../core/testdata/fleet/flake.lock")
+	if _, err := svc.Write("flake.lock", string(lock), ""); err != nil {
+		t.Fatal(err)
+	}
+	return cs
+}
+
+func TestFleetTools(t *testing.T) {
+	cs := fleetSession(t)
+	var overview struct {
+		Hosts []struct {
+			Name     string
+			Packages int
+			Features []string
+			Error    string
+		}
+		Inputs []core.Input
+	}
+	call(t, cs, "fleet_overview", nil, &overview)
+	if len(overview.Hosts) != 4 || overview.Hosts[3].Name != "workstation" || overview.Hosts[3].Packages < 20 || overview.Hosts[1].Error == "" || len(overview.Inputs) != 3 {
+		t.Fatalf("overview %+v", overview)
+	}
+	var h core.Host
+	call(t, cs, "host_details", map[string]any{"host": "pi"}, &h)
+	if h.System != "aarch64-linux" || len(h.Features) == 0 {
+		t.Fatalf("host details %+v", h)
+	}
+	if res := call(t, cs, "host_details", map[string]any{"host": "nope"}, nil); !res.IsError {
+		t.Fatal("unknown host accepted")
+	}
+	var diff struct{ Hosts []core.HostDiff }
+	call(t, cs, "model_diff", nil, &diff)
+	if len(diff.Hosts) != 4 || diff.Hosts[0].Status != "added" {
+		t.Fatalf("diff %+v", diff)
+	}
+	var pk struct{ Results []core.PackageResult }
+	call(t, cs, "search_packages", map[string]any{"query": "btop"}, &pk)
+	if len(pk.Results) != 1 || pk.Results[0].Attr != "btop" {
+		t.Fatalf("package search %+v", pk)
+	}
+	var op struct{ Results []core.OptionDoc }
+	call(t, cs, "search_options", map[string]any{"host": "workstation", "query": "jellyfin"}, &op)
+	if len(op.Results) != 2 || op.Results[0].Name != "services.jellyfin.enable" {
+		t.Fatalf("option search %+v", op)
 	}
 }
 

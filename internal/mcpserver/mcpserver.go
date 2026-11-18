@@ -54,6 +54,21 @@ func waitJob(ctx context.Context, j *core.Job) jobOut {
 	return jobOut{ID: info.ID, State: info.State, Output: info.Output}
 }
 
+// ready waits for the job that computes a model or index, then asks again.
+func ready[T any](ctx context.Context, f func() (T, *core.Job, error)) (T, error) {
+	for {
+		v, j, err := f()
+		if err != nil || j == nil {
+			return v, err
+		}
+		select {
+		case <-j.Done():
+		case <-ctx.Done():
+			return v, ctx.Err()
+		}
+	}
+}
+
 // New builds the MCP server. Every tool calls the shared service.
 func New(svc *core.Service, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "nixos-manager", Version: version}, &mcp.ServerOptions{Instructions: instructions})
@@ -170,6 +185,86 @@ func New(svc *core.Service, version string) *mcp.Server {
 	tool(s, "pull", "Bring the current branch up to date with the remote (fast-forward, or rebase local commits; nothing changes on conflict).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
 		out, err := svc.Pull(ctx)
 		return map[string]string{"output": out}, err
+	})
+
+	working := func(ctx context.Context) (*core.Model, error) {
+		return ready(ctx, func() (*core.Model, *core.Job, error) { return svc.Jobs.Model(ctx, "working") })
+	}
+	type hostSummary struct {
+		Name        string   `json:"name"`
+		System      string   `json:"system"`
+		Release     string   `json:"release"`
+		ManagedFile *string  `json:"managedFile"`
+		Packages    int      `json:"packages"`
+		Features    []string `json:"features"`
+		Users       []string `json:"users"`
+		Error       string   `json:"error,omitempty"`
+	}
+	tool(s, "fleet_overview", "Summarise every machine of the flake as Nix evaluates the working copy: system, NixOS release, package count, enabled services/programs, users, evaluation errors, and the flake inputs.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
+		m, err := working(ctx)
+		if err != nil {
+			return nil, err
+		}
+		hosts := []hostSummary{}
+		for _, h := range m.Hosts {
+			sum := hostSummary{Name: h.Name, System: h.System, Release: h.Release, ManagedFile: h.ManagedFile, Packages: len(h.Packages), Features: []string{}, Users: []string{}, Error: h.Error}
+			for _, f := range h.Features {
+				sum.Features = append(sum.Features, f.Group+"."+f.Name)
+			}
+			for _, u := range h.Users {
+				sum.Users = append(sum.Users, u.Name)
+			}
+			hosts = append(hosts, sum)
+		}
+		out := map[string]any{"hosts": hosts, "homes": m.Homes, "inputs": m.Inputs}
+		if m.Error != "" {
+			out["error"] = m.Error
+		}
+		return out, nil
+	})
+	tool(s, "host_details", "Everything the fleet model knows about one machine: packages with the files that add them, enabled features, users and home-manager, ports, file systems, files, and whether it has a managed.json.", func(ctx context.Context, in struct {
+		Host string `json:"host"`
+	}) (core.Host, error) {
+		m, err := working(ctx)
+		if err != nil {
+			return core.Host{}, err
+		}
+		for _, h := range m.Hosts {
+			if h.Name == in.Host {
+				return h, nil
+			}
+		}
+		return core.Host{}, &core.Error{Kind: core.ErrNotFound, Msg: "no machine named " + in.Host}
+	})
+	tool(s, "model_diff", "What the uncommitted changes do to each machine: packages, services/programs, users and ports added or removed, compared with the last commit.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
+		head, err := ready(ctx, func() (*core.Model, *core.Job, error) { return svc.Jobs.Model(ctx, "head") })
+		if err != nil {
+			return nil, err
+		}
+		work, err := working(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"hosts": core.DiffModels(head, work)}, nil
+	})
+	tool(s, "search_packages", "Search the nixpkgs the flake locks. The first search builds the index, which can take minutes.", func(ctx context.Context, in struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit,omitempty"`
+	}) (map[string][]core.PackageResult, error) {
+		res, err := ready(ctx, func() ([]core.PackageResult, *core.Job, error) {
+			return svc.Jobs.SearchPackages(ctx, in.Query, in.Limit)
+		})
+		return map[string][]core.PackageResult{"results": res}, err
+	})
+	tool(s, "search_options", "Search the documented NixOS options of a machine (name, type, description, default, example). A prefix such as services.openssh lists that module's options, enable first.", func(ctx context.Context, in struct {
+		Host  string `json:"host"`
+		Query string `json:"query"`
+		Limit int    `json:"limit,omitempty"`
+	}) (map[string][]core.OptionDoc, error) {
+		res, err := ready(ctx, func() ([]core.OptionDoc, *core.Job, error) {
+			return svc.Jobs.SearchOptions(ctx, in.Host, in.Query, in.Limit)
+		})
+		return map[string][]core.OptionDoc{"results": res}, err
 	})
 
 	type hostPackages struct {

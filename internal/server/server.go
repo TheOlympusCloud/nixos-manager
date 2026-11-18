@@ -153,6 +153,34 @@ func (s *Server) Handler() http.Handler {
 		}
 		return s.Svc.SetOption(r.PathValue("host"), in.Path, in.Value)
 	}))
+	api.HandleFunc("GET /api/search/packages", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		res, j, err := s.Svc.Jobs.SearchPackages(r.Context(), q.Get("q"), limit)
+		indexed(w, res, j, err)
+	})
+	api.HandleFunc("GET /api/search/options", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("exact") == "1" {
+			o, j, err := s.Svc.Jobs.Option(r.Context(), q.Get("host"), q.Get("q"))
+			if o != nil {
+				indexed(w, []core.OptionDoc{*o}, nil, nil)
+			} else {
+				indexed[core.OptionDoc](w, nil, j, err)
+			}
+			return
+		}
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		res, j, err := s.Svc.Jobs.SearchOptions(r.Context(), q.Get("host"), q.Get("q"), limit)
+		indexed(w, res, j, err)
+	})
+	api.HandleFunc("POST /api/search/refresh", post(func(r *http.Request, in struct{ Kind, Host string }) (any, error) {
+		j, err := s.Svc.Jobs.RefreshIndex(r.Context(), in.Kind, in.Host)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"job": j.ID}, nil
+	}))
 	api.HandleFunc("GET /api/model", s.model)
 	api.HandleFunc("GET /api/model/diff", s.modelDiff)
 	api.HandleFunc("GET /api/targets", get(func(r *http.Request) (any, error) {
@@ -306,6 +334,18 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		respondCode(w, http.StatusAccepted, map[string]string{"state": "computing", "job": j.ID})
 	default:
 		respond(w, map[string]any{"state": "ready", "model": m}, nil)
+	}
+}
+
+// indexed answers a search: 202 while the index is being built, else the results.
+func indexed[T any](w http.ResponseWriter, results []T, j *core.Job, err error) {
+	switch {
+	case err != nil:
+		respond(w, nil, err)
+	case j != nil:
+		respondCode(w, http.StatusAccepted, map[string]string{"state": "indexing", "job": j.ID})
+	default:
+		respond(w, map[string]any{"state": "ready", "results": results}, nil)
 	}
 }
 

@@ -524,6 +524,41 @@ func TestManagedEditsOverHTTP(t *testing.T) {
 	}
 }
 
+func TestSearchOverHTTP(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	var pk struct {
+		State   string
+		Results []core.PackageResult
+	}
+	e.ready(t, "/api/search/packages?q=fire&limit=5", &pk)
+	if pk.State != "ready" || len(pk.Results) == 0 || pk.Results[0].Attr != "firefox" {
+		t.Fatalf("package search %+v", pk)
+	}
+	var op struct {
+		State   string
+		Results []core.OptionDoc
+	}
+	e.ready(t, "/api/search/options?host=workstation&q=services.openssh.", &op)
+	if len(op.Results) == 0 || op.Results[0].Name != "services.openssh.enable" {
+		t.Fatalf("option search %+v", op)
+	}
+	e.ready(t, "/api/search/options?host=workstation&exact=1&q=time.timeZone", &op)
+	if len(op.Results) != 1 || op.Results[0].Name != "time.timeZone" {
+		t.Fatalf("exact option %+v", op)
+	}
+	if code := e.do(t, "GET", "/api/search/options?host=workstation&exact=1&q=no.such", nil, nil); code != 404 {
+		t.Fatalf("missing exact option: %d", code)
+	}
+	var job struct{ Job string }
+	if code := e.do(t, "POST", "/api/search/refresh", map[string]string{"kind": "packages"}, &job); code != 200 || job.Job == "" {
+		t.Fatalf("refresh: %d %+v", code, job)
+	}
+	if code := e.do(t, "POST", "/api/search/refresh", map[string]string{"kind": "everything"}, nil); code != 400 {
+		t.Fatalf("bad refresh kind: %d", code)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {

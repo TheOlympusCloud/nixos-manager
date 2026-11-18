@@ -92,7 +92,7 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 			return nil, j, nil
 		}
 	}
-	j, err := js.enqueue(JobRequest{Kind: "model"}, tree)
+	j, err := js.enqueue(JobRequest{Kind: "model"}, tree, "")
 	return nil, j, err
 }
 
