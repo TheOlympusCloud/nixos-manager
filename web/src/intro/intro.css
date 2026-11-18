@@ -1,0 +1,261 @@
+/* The intro's own world: near-black, NixOS blues, Geist, hairlines. Everything is scoped under .intro
+   so the console keeps its own tokens. Scroll-scrubbed reveals read --p (the chapter's progress, 0..1)
+   from the chapter element and --a/--b (their own window) from the revealed element. */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+.intro {
+  --i-bg: #05070a;
+  --i-fg: #f2f5f9;
+  --i-muted: #8f9bab;
+  --i-blue: #7eb6ff;
+  --i-blue-deep: #5277c3;
+  --i-cta: #2468e0;
+  --i-orange: #ff8a3a;
+  --i-green: #4fd18b;
+  --i-line: rgb(255 255 255 / 0.12);
+  --i-line-soft: rgb(255 255 255 / 0.07);
+  --i-sans: 'Geist Variable', system-ui, -apple-system, sans-serif;
+  --i-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', monospace;
+  --i-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --gutter: clamp(20px, 4vw, 64px);
+  --p: 0;
+
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  color: var(--i-fg);
+  font: 400 16px / 1.5 var(--i-sans);
+  font-feature-settings: 'ss01', 'cv05';
+  background: var(--i-bg);
+  outline: none;
+  scrollbar-color: #1c2430 transparent;
+  scrollbar-width: thin;
+  -webkit-font-smoothing: antialiased;
+}
+.intro ::selection {
+  color: var(--i-bg);
+  background: var(--i-blue);
+}
+.intro :focus-visible {
+  outline: 2px solid var(--i-blue);
+  outline-offset: 3px;
+  border-radius: 0;
+}
+.intro h1,
+.intro h2,
+.intro h3,
+.intro p {
+  margin: 0;
+  color: inherit;
+  font-weight: inherit;
+}
+
+/* ---- type ---- */
+.intro .display {
+  font-weight: 800;
+  font-size: clamp(2.9rem, 9.4vw, 9.75rem);
+  line-height: 0.88;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+.intro .display.sm {
+  font-size: clamp(2.4rem, 6.4vw, 6.4rem);
+}
+.intro .statement {
+  font-weight: 600;
+  font-size: clamp(1.7rem, 3.4vw, 3.3rem);
+  line-height: 1.06;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+}
+.intro .lede {
+  max-width: 44ch;
+  color: var(--i-muted);
+  font-size: clamp(1rem, 1.1vw, 1.2rem);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+.intro .lede b {
+  color: var(--i-fg);
+  font-weight: 500;
+}
+.intro .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--i-blue);
+  font: 500 0.72rem / 1 var(--i-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.intro .eyebrow::before {
+  content: '';
+  width: 22px;
+  height: 1px;
+  background: currentColor;
+}
+.intro .eyebrow.warm {
+  color: var(--i-orange);
+}
+.intro .mono {
+  font-family: var(--i-mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+}
+.intro .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- controls ---- */
+.intro .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 26px;
+  color: var(--i-fg);
+  font: 600 0.78rem / 1 var(--i-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  background: none;
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: 0;
+  cursor: pointer;
+  transition:
+    background 220ms var(--i-ease),
+    border-color 220ms var(--i-ease),
+    color 220ms var(--i-ease),
+    transform 220ms var(--i-ease);
+}
+.intro .btn:hover {
+  border-color: rgb(255 255 255 / 0.4);
+  background: rgb(255 255 255 / 0.04);
+}
+.intro .btn:active {
+  transform: translateY(1px);
+}
+.intro .btn.solid {
+  color: #fff;
+  background: var(--i-cta);
+  border-color: var(--i-cta);
+}
+.intro .btn.solid:hover {
+  background: #2f74ea;
+  border-color: #2f74ea;
+}
+.intro .btn.small {
+  height: 40px;
+  padding: 0 18px;
+  font-size: 0.7rem;
+}
+
+/* ---- chapters ---- */
+.intro .chapter {
+  position: relative;
+  height: calc(var(--len) * 100vh);
+}
+.intro .chapter.flow {
+  height: auto;
+}
+.intro .stage {
+  position: sticky;
+  top: 0;
+  display: grid;
+  height: 100vh;
+  overflow: hidden;
+}
+.intro .stage > .inner {
+  display: grid;
+  align-content: center;
+  padding: clamp(80px, 12vh, 140px) var(--gutter);
+}
+
+/* A text block over the scene keeps a soft dark halo so it stays legible whatever is behind it. */
+.intro .halo {
+  text-shadow: 0 2px 28px rgb(5 7 10 / 0.75);
+}
+
+/* ---- scroll-scrubbed reveals ---- */
+.intro .rv,
+.intro .clip > span:not(.rise) {
+  --a: 0;
+  --b: 0.25;
+  --k: clamp(0, calc((var(--p) - var(--a)) / (var(--b) - var(--a))), 1);
+}
+.intro .rv {
+  opacity: var(--k);
+  transform: translate3d(0, calc((1 - var(--k)) * 0.6em), 0);
+  filter: blur(calc((1 - var(--k)) * 5px));
+  will-change: opacity, transform;
+}
+.intro .clip {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.08em;
+  margin-bottom: -0.08em;
+}
+.intro .clip > span {
+  display: block;
+  will-change: transform;
+}
+.intro .clip > span:not(.rise) {
+  transform: translate3d(0, calc((1 - var(--k)) * 112%), 0);
+}
+/* Fade out at the end of a window (--c..--d) so a chapter can hand the stage to the next statement. */
+.intro .out {
+  --c: 2;
+  --d: 3;
+  opacity: calc(1 - clamp(0, calc((var(--p) - var(--c)) / (var(--d) - var(--c))), 1));
+}
+
+/* ---- hairline rule ---- */
+.intro .rule {
+  height: 1px;
+  background: var(--i-line);
+}
+
+/* ---- reduced motion: no pinning, no scrubbing, everything readable ---- */
+.intro.rm .chapter {
+  height: auto;
+  min-height: 100vh;
+}
+.intro.rm .stage {
+  position: relative;
+  height: auto;
+  min-height: 100vh;
+}
+.intro.rm .rv,
+.intro.rm .clip > span {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+.intro.rm .out {
+  opacity: 1;
+}
+.intro.rm .btn {
+  transition: none;
+}
+
+@media (max-width: 720px) {
+  .intro {
+    font-size: 15px;
+  }
+  .intro .stage > .inner {
+    padding-top: 92px;
+  }
+  .intro .rv {
+    filter: none;
+  }
+  .intro .btn {
+    height: 48px;
+    padding: 0 20px;
+  }
+}

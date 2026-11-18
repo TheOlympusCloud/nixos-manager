@@ -29,6 +29,16 @@
   // CodeMirror and the history viewers load only when first needed.
   const loadCode = () => import('./views/CodeWorkspace.svelte')
   const loadHistory = () => import('./views/HistoryView.svelte')
+  // The intro plays before login (and again at #/intro); its WebGL scene loads on demand inside it.
+  const loadIntro = () => import('./intro/Intro.svelte')
+  let loginOpen = $state(false)
+  $effect(() => {
+    if (!app.needLogin && loginOpen) {
+      loginOpen = false
+      if (route.view === 'intro') go('#/fleet')
+    }
+  })
+  const leaveIntro = () => go('#/fleet')
 
   let collapsed = $state(localStorage.getItem('nixmgr.rail') ? localStorage.getItem('nixmgr.rail') === 'collapsed' : innerWidth < 1200)
 
@@ -114,6 +124,9 @@
       </main>
     </div>
   </div>
+  {#if route.view === 'intro'}
+    {#await loadIntro() then { default: Intro }}<Intro onEnter={leaveIntro} back={leaveIntro} />{/await}
+  {/if}
 {:else if !app.needLogin}
   <div class="boot" role="status">
     <span class="boot-mark"><Icon name="mark" size={22} /></span>
@@ -122,7 +135,10 @@
   </div>
 {/if}
 
-{#if app.needLogin}<Login />{/if}
+{#if app.needLogin && !app.info}
+  {#await loadIntro() then { default: Intro }}<Intro onEnter={() => (loginOpen = true)} />{/await}
+{/if}
+{#if app.needLogin && (app.info || loginOpen)}<Login dismiss={app.info ? undefined : () => (loginOpen = false)} />{/if}
 {#if pkgSearch.open && !app.needLogin}<PackageSearch />{/if}
 <Dialog />
 <Toasts />

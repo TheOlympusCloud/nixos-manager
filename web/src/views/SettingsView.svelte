@@ -37,6 +37,11 @@
     <div class="card block"><TokensPanel /></div>
 
     <section class="card block">
+      <h2>About</h2>
+      <p class="muted small">The story shown before login: how NixOS and this console fit together. <a href="#/intro">Watch the intro again</a>.</p>
+    </section>
+
+    <section class="card block">
       <h2>Keyboard shortcuts</h2>
       <dl class="keys">
         {#each shortcuts as [keys, what] (what)}

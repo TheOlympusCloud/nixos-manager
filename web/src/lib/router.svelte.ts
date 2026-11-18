@@ -1,6 +1,6 @@
 // Hash routes, so reload and back work: #/fleet, #/machines/pi/packages, #/code/hosts/pi/default.nix, ...
 
-export const views = ['fleet', 'machines', 'packages', 'services', 'options', 'changes', 'history', 'code', 'settings'] as const
+export const views = ['fleet', 'machines', 'packages', 'services', 'options', 'changes', 'history', 'code', 'settings', 'intro'] as const
 export type View = (typeof views)[number]
 export type Route = { view: View; parts: string[]; query: Record<string, string> }
 
