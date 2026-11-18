@@ -129,6 +129,8 @@ func (s *Server) Handler() http.Handler {
 		return map[string]string{"output": out}, err
 	}))
 
+	api.HandleFunc("GET /api/model", s.model)
+	api.HandleFunc("GET /api/model/diff", s.modelDiff)
 	api.HandleFunc("GET /api/targets", get(func(r *http.Request) (any, error) {
 		t, err := s.Svc.Jobs.Targets(r.Context())
 		return map[string]any{"targets": t}, err
@@ -270,6 +272,48 @@ func (s *Server) info(r *http.Request) (any, error) {
 	}, err
 }
 
+// model answers 202 with the job while Nix evaluates the fleet, then 200.
+func (s *Server) model(w http.ResponseWriter, r *http.Request) {
+	m, j, err := s.Svc.Jobs.Model(r.Context(), r.URL.Query().Get("at"))
+	switch {
+	case err != nil:
+		respond(w, nil, err)
+	case m == nil:
+		respondCode(w, http.StatusAccepted, map[string]string{"state": "computing", "job": j.ID})
+	default:
+		respond(w, map[string]any{"state": "ready", "model": m}, nil)
+	}
+}
+
+// modelDiff compares the last commit with the working copy, machine by machine.
+func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
+	head, hj, err := s.Svc.Jobs.Model(r.Context(), "head")
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
+	work, wj, err := s.Svc.Jobs.Model(r.Context(), "working")
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
+	if head == nil || work == nil {
+		jobs := []string{}
+		for _, j := range []*core.Job{hj, wj} {
+			if j != nil {
+				jobs = append(jobs, j.ID)
+			}
+		}
+		respondCode(w, http.StatusAccepted, map[string]any{"state": "computing", "jobs": jobs})
+		return
+	}
+	out := map[string]any{"state": "ready", "hosts": core.DiffModels(head, work)}
+	if work.Error != "" {
+		out["error"] = work.Error
+	}
+	respond(w, out, nil)
+}
+
 // jobEvents streams a job's output as server-sent events, then a done event.
 func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	j, ok := s.Svc.Jobs.Get(r.PathValue("id"))
@@ -384,6 +428,12 @@ func respond(w http.ResponseWriter, out any, err error) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+func respondCode(w http.ResponseWriter, code int, out any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(out)
 }
 

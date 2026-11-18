@@ -422,6 +422,73 @@ func TestLSPConnectionsAreCapped(t *testing.T) {
 	}
 }
 
+// fleetEnv serves the fixture fleet through scripts/dev/fake-nix.
+func fleetEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	nix, _ := filepath.Abs("../../scripts/dev/fake-nix")
+	fixtures, _ := filepath.Abs("../core/testdata/fleet")
+	t.Setenv("NIXMGR_FAKE_FIXTURES", fixtures)
+	e.svc.Jobs.Nix = nix
+	lock, _ := os.ReadFile("../core/testdata/fleet/flake.lock")
+	if _, err := e.svc.Write("flake.lock", string(lock), ""); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// ready polls an endpoint that answers 202 while Nix works, until it answers 200.
+func (e *env) ready(t *testing.T, path string, out any) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		var pending struct {
+			State string
+			Job   string
+		}
+		switch code := e.do(t, "GET", path, nil, &pending); code {
+		case 200:
+			e.do(t, "GET", path, nil, out)
+			return
+		case 202:
+			if pending.State == "" {
+				t.Fatalf("%s: 202 without a state", path)
+			}
+			time.Sleep(20 * time.Millisecond)
+		default:
+			t.Fatalf("%s: %d", path, code)
+		}
+	}
+	t.Fatalf("%s never became ready", path)
+}
+
+func TestModelAndDiffOverHTTP(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	var first struct{ State, Job string }
+	if code := e.do(t, "GET", "/api/model?at=working", nil, &first); code != 202 || first.State != "computing" || first.Job == "" {
+		t.Fatalf("first model request: %d %+v", code, first)
+	}
+	var res struct {
+		State string
+		Model core.Model
+	}
+	e.ready(t, "/api/model?at=working", &res)
+	if res.State != "ready" || len(res.Model.Hosts) != 4 {
+		t.Fatalf("model %+v", res)
+	}
+	var diff struct {
+		State string
+		Hosts []core.HostDiff
+	}
+	e.ready(t, "/api/model/diff", &diff)
+	if len(diff.Hosts) != 4 || diff.Hosts[3].Host != "workstation" || diff.Hosts[3].Status != "added" || len(diff.Hosts[3].PackagesAdded) == 0 {
+		t.Fatalf("diff against an empty history %+v", diff)
+	}
+	if code := e.do(t, "GET", "/api/model?at=tomorrow", nil, nil); code != 400 {
+		t.Fatalf("bad at: %d", code)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {
