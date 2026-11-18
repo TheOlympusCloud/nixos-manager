@@ -30,11 +30,14 @@ type Server struct {
 	UI   fs.FS        // the built web UI; index.html at its root
 	MCP  http.Handler // MCP endpoint, guarded here by bearer tokens
 	Nixd []string     // language server command
+
+	lspSlots chan struct{}
 }
 
 // Handler wires every route. Everything except the login call, the static UI
 // and /mcp (which has its own token check) needs a session.
 func (s *Server) Handler() http.Handler {
+	s.lspSlots = make(chan struct{}, maxNixd)
 	api := http.NewServeMux()
 	api.HandleFunc("POST /api/logout", s.logout)
 	api.HandleFunc("GET /api/info", get(s.info))

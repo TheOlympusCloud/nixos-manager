@@ -17,11 +17,21 @@ import (
 	"github.com/coder/websocket"
 )
 
+// maxNixd caps concurrent language servers (one per open browser tab).
+const maxNixd = 4
+
 // lsp bridges one browser WebSocket to one nixd process: each text message is
 // one JSON-RPC message, framed with Content-Length on the nixd side. The bridge
 // answers nixd's workspace/configuration requests itself, so completion and
 // option docs come from this repository's flake whatever the editor sends.
 func (s *Server) lsp(w http.ResponseWriter, r *http.Request) {
+	select { // each nixd can take a lot of memory on the server
+	case s.lspSlots <- struct{}{}:
+		defer func() { <-s.lspSlots }()
+	default:
+		writeError(w, http.StatusServiceUnavailable, "too many editor connections; close some browser tabs")
+		return
+	}
 	opts := &websocket.AcceptOptions{} // same-origin only
 	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
 		opts.OriginPatterns = []string{fh} // behind a reverse proxy such as tailscale serve

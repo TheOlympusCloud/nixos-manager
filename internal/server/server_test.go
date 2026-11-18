@@ -401,6 +401,27 @@ func TestLSPAcceptsForwardedHost(t *testing.T) {
 	}
 }
 
+func TestLSPConnectionsAreCapped(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	t.Setenv("FAKE_NIXD", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	u, _ := http.NewRequest("GET", e.srv.URL, nil)
+	hdr := http.Header{"Cookie": {cookieHeader(e.client.Jar.Cookies(u.URL))}}
+	url := "ws" + strings.TrimPrefix(e.srv.URL, "http") + "/api/lsp"
+	for i := 0; i < maxNixd; i++ {
+		c, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr})
+		if err != nil {
+			t.Fatalf("connection %d: %v", i+1, err)
+		}
+		defer c.CloseNow()
+	}
+	if _, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr}); err == nil || resp == nil || resp.StatusCode != 503 {
+		t.Fatalf("connection over the cap: %v %v", err, resp)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {
