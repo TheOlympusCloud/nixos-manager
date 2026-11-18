@@ -32,8 +32,13 @@ if [ "${E2E_STUB_NIX:-}" = 1 ]; then
   mkdir -p "$work/bin"
   cat > "$work/bin/nix" <<'EOF'
 #!/bin/sh
-echo "nix $*"
+# Evaluations answer with JSON only, like nix eval --json; other commands echo.
 case "$*" in
+  *"eval --json"*) ;;
+  *) echo "nix $*" ;;
+esac
+case "$*" in
+  *"nixmgr:host"*) echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
 esac
@@ -97,7 +102,7 @@ echo "ok   committed and pushed as the configured person"
 
 file=hosts/example/default.nix
 hash=$(api GET "/api/file?path=$file" | json '["hash"]')
-new=$(api GET "/api/file?path=$file" | python3 -c 'import sys, json; print(json.dumps(json.load(sys.stdin)["content"].replace("services.openssh.enable = true;", "services.openssh.enable = true;\n  time.timeZone = \"Europe/Madrid\";")))')
+new=$(api GET "/api/file?path=$file" | python3 -c 'import sys, json; print(json.dumps(json.load(sys.stdin)["content"].replace("system.stateVersion", "time.timeZone = \"Europe/Madrid\";\n  system.stateVersion")))')
 [ "$(code PUT /api/file -d "{\"path\":\"$file\",\"content\":$new,\"base_hash\":\"$hash\"}")" = 200 ] || fail "save"
 [ "$(code PUT /api/file -d "{\"path\":\"$file\",\"content\":\"{ }\",\"base_hash\":\"$hash\"}")" = 409 ] || fail "stale save not refused"
 api GET "/api/diff?staged=false&path=$file" | json '["diff"]' | grep -q '+  time.timeZone' || fail "diff"
@@ -121,5 +126,26 @@ api POST /api/commit -d '{"message":"chore: unchecked change","force":true}' > /
 [ "$(code POST /api/push -d '{}')" = 412 ] || fail "unchecked commit pushed without force"
 [ "$(code POST /api/push -d '{"force":true}')" = 200 ] || fail "forced push"
 echo "ok   push needs a checked commit unless forced"
+
+# ready <path> polls an endpoint that answers 202 while Nix works and prints the 200 body.
+ready() {
+  for _ in $(seq 600); do
+    if [ "$(code GET "$1")" = 200 ]; then api GET "$1"; return; fi
+    sleep 0.5
+  done
+  fail "$1 never became ready"
+}
+model=$(ready '/api/model?at=working')
+[ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
+[ "$(echo "$model" | json '["model"].get("error", "")')" = "" ] || fail "the starter flake does not evaluate: $model"
+echo "ok   fleet model: the example machine evaluates"
+
+[ "$(code POST /api/hosts/example/packages -d '{"add":["ripgrep"]}')" = 200 ] || fail "add a package by clicking"
+api GET /api/hosts/example/managed | json '["packages"]' | grep -q ripgrep || fail "managed.json lacks the package"
+api GET /api/status | json '["files"]' | grep -q 'hosts/example/managed.json' || fail "the edit is not a git change"
+if [ "${E2E_STUB_NIX:-}" != 1 ]; then # the stub cannot evaluate the edit
+  ready /api/model/diff | json '["hosts"][0]["packagesAdded"]' | grep -q ripgrep || fail "the diff does not show the new package"
+fi
+echo "ok   package added by clicking shows up as a change"
 
 echo "PASS"
