@@ -359,12 +359,27 @@ func indexed[T any](w http.ResponseWriter, results []T, j *core.Job, err error) 
 
 // modelDiff compares the last commit with the working copy, machine by machine.
 func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
-	head, hj, err := s.Svc.Jobs.Model(r.Context(), "head")
+	// Default: the last commit against the working copy. With ?rev=: that commit against its parent.
+	from, to := "head", "working"
+	if rev := r.URL.Query().Get("rev"); rev != "" {
+		to = "rev:" + rev
+		from = "" // a root commit is compared with nothing
+		if parent, ok := s.Svc.Repo.Parent(r.Context(), rev); ok {
+			from = "rev:" + parent
+		}
+	}
+	model := func(at string) (*core.Model, *core.Job, error) {
+		if at == "" {
+			return &core.Model{}, nil, nil
+		}
+		return s.Svc.Jobs.Model(r.Context(), at)
+	}
+	head, hj, err := model(from)
 	if err != nil {
 		respond(w, nil, err)
 		return
 	}
-	work, wj, err := s.Svc.Jobs.Model(r.Context(), "working")
+	work, wj, err := model(to)
 	if err != nil {
 		respond(w, nil, err)
 		return
@@ -379,7 +394,7 @@ func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
 		respondCode(w, http.StatusAccepted, map[string]any{"state": "computing", "jobs": jobs})
 		return
 	}
-	out := map[string]any{"state": "ready", "hosts": core.DiffModels(head, work)}
+	out := map[string]any{"state": "ready", "hosts": core.DiffModels(head, work), "inputs": core.DiffInputs(head.Inputs, work.Inputs)}
 	if work.Error != "" {
 		out["error"] = work.Error
 	}

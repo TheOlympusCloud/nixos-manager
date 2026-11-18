@@ -26,7 +26,7 @@ func nixExpr(name string) string {
 	return string(b)
 }
 
-const keepModels = 8
+const keepModels = 16
 
 // WorkingTree is the tree object of everything in the working copy, untracked
 // files included, built in a private index so the real one is untouched.
@@ -55,6 +55,19 @@ func (r *Repo) WorkingTree(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// Parent returns the first parent of a commit, or false for a root commit.
+func (r *Repo) Parent(ctx context.Context, rev string) (string, bool) {
+	sha, err := r.resolve(ctx, rev)
+	if err != nil {
+		return "", false
+	}
+	out, err := r.git(ctx, "rev-parse", "--verify", "-q", sha+"^1")
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(out), true
+}
+
 func (r *Repo) headTree(ctx context.Context) (string, error) {
 	if !r.hasHead(ctx) {
 		return "", nil
@@ -74,7 +87,16 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 	case "head":
 		tree, err = js.Repo.headTree(ctx)
 	default:
-		return nil, nil, errorf(ErrInvalid, "unknown model %q (want working or head)", at)
+		rev, ok := strings.CutPrefix(at, "rev:")
+		if !ok {
+			return nil, nil, errorf(ErrInvalid, "unknown model %q (want working, head or rev:<commit>)", at)
+		}
+		var sha string
+		if sha, err = js.Repo.resolve(ctx, rev); err == nil {
+			var out string
+			out, err = js.Repo.git(ctx, "rev-parse", sha+"^{tree}")
+			tree = strings.TrimSpace(out)
+		}
 	}
 	if err != nil {
 		return nil, nil, err

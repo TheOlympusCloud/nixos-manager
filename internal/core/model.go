@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // Model is what the flake configures, machine by machine, as Nix evaluates it.
@@ -164,6 +165,14 @@ type HostDiff struct {
 	UsersRemoved    []string `json:"usersRemoved,omitempty"`
 	PortsAdded      []string `json:"portsAdded,omitempty"`
 	PortsRemoved    []string `json:"portsRemoved,omitempty"`
+	// Packages present before and after with a different version (e.g. after a nixpkgs update).
+	VersionsChanged []VersionChange `json:"versionsChanged,omitempty"`
+}
+
+type VersionChange struct {
+	Name string `json:"name"`
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 func setDiff(before, after []string) (added, removed []string) {
@@ -237,13 +246,14 @@ func DiffModels(head, working *Model) []HostDiff {
 		d.FeaturesAdded, d.FeaturesRemoved = setDiff(names(b.Features, feat), names(a.Features, feat))
 		d.UsersAdded, d.UsersRemoved = setDiff(names(b.Users, user), names(a.Users, user))
 		d.PortsAdded, d.PortsRemoved = setDiff(portNames(b.Ports), portNames(a.Ports))
+		d.VersionsChanged = versionChanges(b.Packages, a.Packages)
 		switch {
 		case !inBefore:
 			d.Status = "added"
 		case !inAfter:
 			d.Status = "removed"
 		case d.PackagesAdded != nil || d.PackagesRemoved != nil || d.FeaturesAdded != nil || d.FeaturesRemoved != nil ||
-			d.UsersAdded != nil || d.UsersRemoved != nil || d.PortsAdded != nil || d.PortsRemoved != nil:
+			d.UsersAdded != nil || d.UsersRemoved != nil || d.PortsAdded != nil || d.PortsRemoved != nil || d.VersionsChanged != nil:
 			d.Status = "changed"
 		default:
 			d.Status = "unchanged"
@@ -251,4 +261,74 @@ func DiffModels(head, working *Model) []HostDiff {
 		out = append(out, d)
 	}
 	return out
+}
+
+func versionChanges(before, after []Package) []VersionChange {
+	was := map[string]string{}
+	for _, p := range before {
+		was[p.Name] = p.Version
+	}
+	var out []VersionChange
+	for _, p := range after {
+		if v, ok := was[p.Name]; ok && v != p.Version && !slices.ContainsFunc(out, func(c VersionChange) bool { return c.Name == p.Name }) {
+			out = append(out, VersionChange{Name: p.Name, From: v, To: p.Version})
+		}
+	}
+	slices.SortFunc(out, func(a, b VersionChange) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+// InputChange is a flake input that the working copy adds, removes or moves to another revision.
+type InputChange struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"` // added, removed, updated
+	FromRev    string `json:"fromRev,omitempty"`
+	ToRev      string `json:"toRev,omitempty"`
+	FromDate   int64  `json:"fromDate,omitempty"`
+	ToDate     int64  `json:"toDate,omitempty"`
+	CompareURL string `json:"compareUrl,omitempty"` // GitHub inputs: the commits between the two revisions
+}
+
+// DiffInputs compares the flake inputs of two models, sorted by name.
+func DiffInputs(head, working []Input) []InputChange {
+	before := map[string]Input{}
+	for _, in := range head {
+		before[in.Name] = in
+	}
+	out := []InputChange{}
+	seen := map[string]bool{}
+	for _, a := range working {
+		seen[a.Name] = true
+		b, ok := before[a.Name]
+		switch {
+		case !ok:
+			out = append(out, InputChange{Name: a.Name, Status: "added", ToRev: a.Rev, ToDate: a.LastModified})
+		case b.Rev != a.Rev:
+			c := InputChange{Name: a.Name, Status: "updated", FromRev: b.Rev, ToRev: a.Rev, FromDate: b.LastModified, ToDate: a.LastModified}
+			if owner, repo, ok := githubRepo(a.URL); ok && b.Rev != "" && a.Rev != "" {
+				c.CompareURL = fmt.Sprintf("https://github.com/%s/%s/compare/%s...%s", owner, repo, b.Rev, a.Rev)
+			}
+			out = append(out, c)
+		}
+	}
+	for _, b := range head {
+		if !seen[b.Name] {
+			out = append(out, InputChange{Name: b.Name, Status: "removed", FromRev: b.Rev, FromDate: b.LastModified})
+		}
+	}
+	slices.SortFunc(out, func(x, y InputChange) int { return strings.Compare(x.Name, y.Name) })
+	return out
+}
+
+// githubRepo reads owner and repo from a "github:owner/repo[/ref]" flake URL.
+func githubRepo(url string) (string, string, bool) {
+	rest, ok := strings.CutPrefix(url, "github:")
+	if !ok {
+		return "", "", false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }

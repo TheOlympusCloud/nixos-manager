@@ -156,3 +156,28 @@ func TestNewerModelSkipsQueuedOlderOnes(t *testing.T) {
 		t.Fatal("latest model not cached")
 	}
 }
+
+// History can show what one commit changed: the model at any revision.
+func TestModelAtRevision(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, "testdata/fleet")
+	ok(t, s.Stage(ctx, nil))
+	c1 := must[string](t)(s.Commit(ctx, "first", true))
+	write(t, s.Repo, "hosts/a.nix", "{ }\n")
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "second", true))
+
+	m := readyModel(t, s, "rev:"+c1)
+	tree := strings.TrimSpace(gitOut(t, s.Repo.Dir, "rev-parse", c1+"^{tree}"))
+	if m.Tree != tree || len(m.Hosts) != 4 {
+		t.Fatalf("model at %s: tree %s, want %s", c1, m.Tree, tree)
+	}
+	if p, ok := s.Repo.Parent(ctx, c1); ok || p != "" {
+		t.Fatalf("root commit has a parent: %q", p)
+	}
+	if p, ok := s.Repo.Parent(ctx, "HEAD"); !ok || p != c1 {
+		t.Fatalf("parent of HEAD: %q %v", p, ok)
+	}
+	_, _, err := s.Jobs.Model(ctx, "rev:nope")
+	isErr(t, err, ErrNotFound)
+}

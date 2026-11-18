@@ -593,6 +593,30 @@ func TestDiffReportsABrokenHead(t *testing.T) {
 	}
 }
 
+func TestDiffOfOneCommit(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	if err := e.svc.Stage(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := e.svc.Commit(ctx, "first", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diff struct {
+		Hosts  []core.HostDiff
+		Inputs []core.InputChange
+	}
+	e.ready(t, "/api/model/diff?rev="+sha, &diff)
+	if len(diff.Hosts) != 4 || diff.Hosts[0].Status != "added" || len(diff.Inputs) != 3 || diff.Inputs[0].Status != "added" {
+		t.Fatalf("diff of the root commit %+v", diff)
+	}
+	if code := e.do(t, "GET", "/api/model/diff?rev=nope", nil, nil); code != 404 {
+		t.Fatalf("unknown commit: %d", code)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {

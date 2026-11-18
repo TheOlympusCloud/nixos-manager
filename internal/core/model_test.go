@@ -82,3 +82,34 @@ func TestDiffModels(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffModelsReportsVersionChanges(t *testing.T) {
+	head := &Model{Hosts: []Host{{Name: "web", Packages: []Package{{Name: "firefox", Version: "145.0"}, {Name: "git", Version: "2.51.0"}}}}}
+	work := &Model{Hosts: []Host{{Name: "web", Packages: []Package{{Name: "firefox", Version: "146.0"}, {Name: "git", Version: "2.51.0"}}}}}
+	d := DiffModels(head, work)[0]
+	if d.Status != "changed" || !reflect.DeepEqual(d.VersionsChanged, []VersionChange{{Name: "firefox", From: "145.0", To: "146.0"}}) {
+		t.Fatalf("version change %+v", d)
+	}
+}
+
+func TestDiffInputs(t *testing.T) {
+	head := []Input{
+		{Name: "nixpkgs", Type: "github", URL: "github:NixOS/nixpkgs/nixos-26.05", Rev: "aaa", LastModified: 100},
+		{Name: "home-manager", Type: "github", URL: "github:nix-community/home-manager", Rev: "hm1", LastModified: 50},
+		{Name: "old", Type: "git", URL: "https://x/old.git", Rev: "o1"},
+	}
+	work := []Input{
+		{Name: "nixpkgs", Type: "github", URL: "github:NixOS/nixpkgs/nixos-26.05", Rev: "bbb", LastModified: 200},
+		{Name: "home-manager", Type: "github", URL: "github:nix-community/home-manager", Rev: "hm1", LastModified: 50},
+		{Name: "sops-nix", Type: "github", URL: "github:Mic92/sops-nix", Rev: "s1", LastModified: 300},
+	}
+	got := DiffInputs(head, work)
+	want := []InputChange{
+		{Name: "nixpkgs", Status: "updated", FromRev: "aaa", ToRev: "bbb", FromDate: 100, ToDate: 200, CompareURL: "https://github.com/NixOS/nixpkgs/compare/aaa...bbb"},
+		{Name: "old", Status: "removed", FromRev: "o1"},
+		{Name: "sops-nix", Status: "added", ToRev: "s1", ToDate: 300},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("input changes\n got %+v\nwant %+v", got, want)
+	}
+}
