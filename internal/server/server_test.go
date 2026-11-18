@@ -617,6 +617,23 @@ func TestDiffOfOneCommit(t *testing.T) {
 	}
 }
 
+func TestInsightsOverHTTP(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	var res struct {
+		State    string
+		Insights []core.Insight
+	}
+	e.ready(t, "/api/insights", &res)
+	ids := map[string]bool{}
+	for _, in := range res.Insights {
+		ids[in.ID] = true
+	}
+	if !ids["eval-error"] || !ids["ssh-root-login"] || !ids["no-auto-gc"] {
+		t.Fatalf("insights for the fixture fleet: %+v", res.Insights)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {

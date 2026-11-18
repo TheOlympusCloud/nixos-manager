@@ -182,6 +182,17 @@ func (s *Server) Handler() http.Handler {
 		}
 		return map[string]string{"job": j.ID}, nil
 	}))
+	api.HandleFunc("GET /api/insights", func(w http.ResponseWriter, r *http.Request) {
+		m, j, err := s.Svc.Jobs.Model(r.Context(), "working")
+		switch {
+		case err != nil:
+			respond(w, nil, err)
+		case m == nil:
+			respondCode(w, http.StatusAccepted, map[string]string{"state": "computing", "job": j.ID})
+		default:
+			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, time.Now())}, nil)
+		}
+	})
 	api.HandleFunc("GET /api/model", s.model)
 	api.HandleFunc("POST /api/model/refresh", post(func(r *http.Request, _ struct{}) (any, error) {
 		j, err := s.Svc.Jobs.RefreshModel(r.Context())

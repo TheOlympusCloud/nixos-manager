@@ -257,5 +257,14 @@
   "hosts/homeserver/managed.json",
   "modules/common.nix",
   "modules/server.nix"
- ]
+ ],
+ "checks": {
+  "ssh": true,
+  "sshPasswordAuthentication": false,
+  "sshPermitRootLogin": "no",
+  "fail2ban": true,
+  "autoGC": true,
+  "autoOptimise": true,
+  "zram": false
+ }
 }

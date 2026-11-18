@@ -192,5 +192,14 @@
   "hosts/pi/default.nix",
   "hosts/pi/hardware-configuration.nix",
   "modules/common.nix"
- ]
+ ],
+ "checks": {
+  "ssh": true,
+  "sshPasswordAuthentication": true,
+  "sshPermitRootLogin": "yes",
+  "fail2ban": false,
+  "autoGC": false,
+  "autoOptimise": false,
+  "zram": true
+ }
 }

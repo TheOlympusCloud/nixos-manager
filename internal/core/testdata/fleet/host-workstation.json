@@ -340,5 +340,14 @@
   "modules/common.nix",
   "modules/desktop.nix",
   "home/pablo.nix"
- ]
+ ],
+ "checks": {
+  "ssh": true,
+  "sshPasswordAuthentication": null,
+  "sshPermitRootLogin": "prohibit-password",
+  "fail2ban": false,
+  "autoGC": true,
+  "autoOptimise": true,
+  "zram": true
+ }
 }

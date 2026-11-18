@@ -33,7 +33,19 @@ type Host struct {
 	Ports        Ports        `json:"ports"`
 	FileSystems  []FileSystem `json:"fileSystems"`
 	Files        []string     `json:"files"`
+	Checks       Checks       `json:"checks"`
 	Error        string       `json:"error,omitempty"`
+}
+
+// Checks are the security and maintenance facts the fleet insights look at.
+type Checks struct {
+	SSH                       bool    `json:"ssh"`
+	SSHPasswordAuthentication *bool   `json:"sshPasswordAuthentication"` // null: the NixOS default (allowed)
+	SSHPermitRootLogin        *string `json:"sshPermitRootLogin"`
+	Fail2ban                  bool    `json:"fail2ban"`
+	AutoGC                    bool    `json:"autoGC"`
+	AutoOptimise              bool    `json:"autoOptimise"`
+	Zram                      bool    `json:"zram"`
 }
 
 type Package struct {

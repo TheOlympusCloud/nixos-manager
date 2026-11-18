@@ -119,6 +119,15 @@ in
   timeZone = try config.time.timeZone null;
   kernel = try config.boot.kernelPackages.kernel.version null;
   managedFile = if managed == null then null else rel managed;
+  checks = {
+    ssh = try config.services.openssh.enable false;
+    sshPasswordAuthentication = try config.services.openssh.settings.PasswordAuthentication null;
+    sshPermitRootLogin = try config.services.openssh.settings.PermitRootLogin null;
+    fail2ban = try config.services.fail2ban.enable false;
+    autoGC = try config.nix.gc.automatic false;
+    autoOptimise = try (config.nix.optimise.automatic || config.nix.settings.auto-optimise-store) false;
+    zram = try config.zramSwap.enable false;
+  };
   ports = {
     tcp = try config.networking.firewall.allowedTCPPorts [ ];
     udp = try config.networking.firewall.allowedUDPPorts [ ];

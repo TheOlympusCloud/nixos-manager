@@ -4,6 +4,7 @@ package mcpserver
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -221,6 +222,13 @@ func New(svc *core.Service, version string) *mcp.Server {
 			out["error"] = m.Error
 		}
 		return out, nil
+	})
+	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine), each with a suggested fix.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
+		m, err := working(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string][]core.Insight{"insights": core.Insights(m, time.Now())}, nil
 	})
 	tool(s, "host_details", "Everything the fleet model knows about one machine: packages with the files that add them, enabled features, users and home-manager, ports, file systems, files, and whether it has a managed.json.", func(ctx context.Context, in struct {
 		Host string `json:"host"`
