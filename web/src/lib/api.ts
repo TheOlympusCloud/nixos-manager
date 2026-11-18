@@ -50,6 +50,8 @@ export type Host = {
   kernel: string | null
   /** "hosts/<name>/managed.json" when the machine loads it, else null (visual editing off). */
   managedFile: string | null
+  /** managed.json attribute -> package name (nodejs_22 -> nodejs), to remove a model package by attribute. */
+  managedPackages?: Record<string, string>
   packages: Package[]
   features: Feature[]
   users: User[]
