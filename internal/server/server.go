@@ -205,6 +205,9 @@ func (s *Server) Handler() http.Handler {
 			respond(w, map[string]any{"state": "ready", "values": res}, nil)
 		}
 	})
+	api.HandleFunc("POST /api/machines", post(func(r *http.Request, in core.MachineSpec) (any, error) {
+		return s.Svc.CreateMachine(in)
+	}))
 	api.HandleFunc("GET /api/model", s.model)
 	api.HandleFunc("POST /api/model/refresh", post(func(r *http.Request, _ struct{}) (any, error) {
 		j, err := s.Svc.Jobs.RefreshModel(r.Context())

@@ -17,8 +17,6 @@
   outputs =
     { nixpkgs, ... }@inputs:
     let
-      # One entry per machine: the name must match its networking.hostName,
-      # because comin deploys nixosConfigurations.<hostname>.
       mkHost =
         name:
         nixpkgs.lib.nixosSystem {
@@ -32,10 +30,15 @@
             inputs.home-manager.nixosModules.home-manager
           ];
         };
+      # Every folder in hosts/ with a default.nix is a machine named after the folder.
+      # The name must match its networking.hostName: comin deploys nixosConfigurations.<hostname>.
+      hosts = builtins.attrNames (
+        nixpkgs.lib.filterAttrs (
+          name: type: type == "directory" && builtins.pathExists (./hosts + "/${name}/default.nix")
+        ) (builtins.readDir ./hosts)
+      );
     in
     {
-      nixosConfigurations = {
-        example = mkHost "example";
-      };
+      nixosConfigurations = nixpkgs.lib.genAttrs hosts mkHost;
     };
 }

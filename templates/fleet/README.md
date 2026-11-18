@@ -1,6 +1,8 @@
 # NixOS configurations
 
-- `flake.nix`: inputs and the list of machines (`nixosConfigurations`).
+- `flake.nix`: inputs and how machines are built. Every folder in `hosts/` with a
+  `default.nix` becomes a machine (`nixosConfigurations.<folder>`), so adding one
+  is adding a folder; nixos-manager's "New machine" does it for you.
 - `hosts/<name>/`: one folder per machine, with its `hardware-configuration.nix`
   and `managed.json` (packages and options changed by clicking in nixos-manager;
   edit the other files by hand).

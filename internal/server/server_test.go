@@ -650,6 +650,18 @@ func TestOptionValuesOverHTTP(t *testing.T) {
 	}
 }
 
+func TestCreateMachineOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	var res core.MachineCreated
+	if code := e.do(t, "POST", "/api/machines", map[string]any{"name": "nas", "system": "x86_64-linux", "role": "server"}, &res); code != 200 || len(res.Files) != 3 {
+		t.Fatalf("create: %d %+v", code, res)
+	}
+	if code := e.do(t, "POST", "/api/machines", map[string]any{"name": "nas", "system": "x86_64-linux", "role": "server"}, nil); code != 409 {
+		t.Fatalf("duplicate: %d", code)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {
