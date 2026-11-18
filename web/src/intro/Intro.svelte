@@ -135,7 +135,6 @@
           bind:this={els[s.id]}
           style:--len={s.len || 1}
           style:--p={progressOf(i)}
-          aria-label={s.id}
         >
           {#if s.id === 'hero'}
             <div class="stage">
@@ -557,6 +556,11 @@
     gap: 18px;
     text-align: center;
     pointer-events: none;
+  }
+  /* Reduced motion shows every state at once: stack the counter under the statement, not over it. */
+  .intro.rm .counter {
+    position: static;
+    margin-top: 56px;
   }
   .counter .eyebrow {
     justify-content: center;

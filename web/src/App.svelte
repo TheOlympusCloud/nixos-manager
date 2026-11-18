@@ -136,7 +136,8 @@
 {/if}
 
 {#if app.needLogin && !app.info}
-  {#await loadIntro() then { default: Intro }}<Intro onEnter={() => (loginOpen = true)} />{/await}
+  <!-- If the intro cannot load (an upgrade changed its chunk, a flaky network), the login must still be reachable. -->
+  {#await loadIntro() then { default: Intro }}<Intro onEnter={() => (loginOpen = true)} />{:catch}<Login />{/await}
 {/if}
 {#if app.needLogin && (app.info || loginOpen)}<Login dismiss={app.info ? undefined : () => (loginOpen = false)} />{/if}
 {#if pkgSearch.open && !app.needLogin}<PackageSearch />{/if}

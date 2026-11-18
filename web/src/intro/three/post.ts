@@ -54,6 +54,9 @@ export function createPost(renderer: WebGLRenderer, scene: import('three').Scene
       grain.uniforms.uRes.value.set(w, h)
     },
     uniforms: { uTime: grain.uniforms.uTime as { value: number }, uFade: grain.uniforms.uFade as { value: number } },
-    dispose: () => composer.dispose(),
+    dispose: () => {
+      for (const pass of composer.passes) pass.dispose() // bloom mip targets and pass materials
+      composer.dispose()
+    },
   }
 }
