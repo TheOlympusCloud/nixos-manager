@@ -7,7 +7,10 @@ file:
 { lib, pkgs, ... }:
 let
   data = if builtins.pathExists file then lib.importJSON file else { };
-  package = name: lib.getAttrFromPath (lib.splitString "." name) pkgs;
+  # throw (not abort): a misspelled name fails this machine's build with a clear
+  # message, and the fleet view still shows the rest of the machine.
+  package =
+    name: lib.attrByPath (lib.splitString "." name) (throw "managed.json: package ${name} is not in nixpkgs") pkgs;
 in
 {
   # Definitions below are reported as coming from the JSON file.

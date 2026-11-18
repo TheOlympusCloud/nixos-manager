@@ -8,8 +8,17 @@ let
   lib = machine.pkgs.lib;
 
   root = "${toString flake.outPath}/";
-  rel = f: let s = toString f; in if lib.hasPrefix root s then lib.removePrefix root s else "nixos";
   try = v: default: let r = builtins.tryEval v; in if r.success then r.value else default;
+  # A machine imported as a folder (./hosts/<name>) is reported as the folder;
+  # its definitions are in that folder's default.nix. Only absolute paths are
+  # probed: pathExists fails uncatchably on names like "<unknown-file>".
+  rel =
+    f:
+    let
+      s0 = toString f;
+      s = if lib.hasPrefix "/" s0 && builtins.pathExists "${s0}/default.nix" then "${s0}/default.nix" else s0;
+    in
+    if lib.hasPrefix root s then lib.removePrefix root s else "nixos";
   text = d: if builtins.isString d then d else if builtins.isAttrs d then d.text or "" else "";
   # mkBefore/mkAfter leave an order wrapper around list definitions.
   unwrap = v: if builtins.isAttrs v && (v._type or "") == "order" then v.content else v;
@@ -38,7 +47,10 @@ let
         let
           enable = if builtins.isAttrs o then o.enable or null else null;
         in
-        if enable != null && lib.isOption enable && try (config.${group}.${n}.enable or false) false == true then
+        # Renamed or alias options (mkRenamedOptionModule) are invisible and mirror their target.
+        if enable != null && lib.isOption enable && (enable.visible or true) != false
+          && try (config.${group}.${n}.enable or false) false == true
+        then
           [
             {
               inherit group;
