@@ -1,11 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type Token } from '../lib/api'
-  import { app } from '../lib/state.svelte'
   import { confirmBox } from '../lib/ui.svelte'
   import { ago, copyText } from '../lib/util'
 
-  let el: HTMLDialogElement
   let tokens = $state<Token[] | null>(null)
   let name = $state('')
   let created = $state<{ id: string; name: string; token: string } | null>(null)
@@ -32,10 +30,7 @@
     }
   }
 
-  onMount(() => {
-    el.showModal()
-    load()
-  })
+  onMount(load)
 
   async function create(e: SubmitEvent) {
     e.preventDefault()
@@ -73,16 +68,13 @@
   }
 </script>
 
-<dialog bind:this={el} onclose={() => (app.tokensOpen = false)} aria-labelledby="tokens-title">
-  <div class="head">
-    <h2 id="tokens-title">API tokens</h2>
-    <button class="icon" aria-label="Close" onclick={() => el.close()}>×</button>
-  </div>
-  <p class="muted">Tokens let agents and scripts use the MCP endpoint. Each token has full access to the repository.</p>
+<section class="tokens" aria-labelledby="tokens-title">
+  <h2 id="tokens-title">API tokens</h2>
+  <p class="muted">Tokens let scripts and MCP clients use the MCP endpoint. Each token has full access to the repository.</p>
 
   <form class="row" onsubmit={create}>
     <label for="token-name" class="label">New token name</label>
-    <input id="token-name" bind:value={name} placeholder="e.g. laptop-agent" autocomplete="off" spellcheck="false" />
+    <input id="token-name" bind:value={name} placeholder="e.g. backup-script" autocomplete="off" spellcheck="false" />
     <button class="primary" type="submit" disabled={!name.trim() || busy}>Create</button>
   </form>
 
@@ -127,30 +119,11 @@
   <h3>Client configuration</h3>
   <pre>{config}</pre>
   <button onclick={() => copy(config, 'config')}>{copied === 'config' ? 'Copied' : 'Copy configuration'}</button>
-</dialog>
+</section>
 
 <style>
-  dialog {
-    width: min(640px, 94vw);
-    max-height: 90vh;
-    padding: 18px 20px;
-    color: var(--fg);
-    background: var(--bg-side);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
-  }
-  dialog::backdrop {
-    background: rgb(0 0 0 / 0.45);
-  }
-  .head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
   h2 {
-    margin: 0;
-    font-size: 16px;
+    font-size: var(--fs-lg);
   }
   h3 {
     margin: 18px 0 6px;
@@ -161,6 +134,7 @@
   }
   .row {
     display: flex;
+    max-width: 640px;
     align-items: center;
     gap: 8px;
   }

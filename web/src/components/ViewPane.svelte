@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { ApiError, api, type CommitDetail } from '../lib/api'
-  import { editorFor, openFile, openView, restoreVersion, type ViewTab } from '../lib/state.svelte'
+  import { codeLink, go } from '../lib/router.svelte'
+  import { editorFor, openView, restoreVersion, type ViewTab } from '../lib/state.svelte'
   import CodeView from './CodeView.svelte'
   import DiffView from './DiffView.svelte'
   import JobLog from './JobLog.svelte'
 
-  let { tab }: { tab: ViewTab } = $props()
+  let { tab, onopen = openView }: { tab: ViewTab; onopen?: (tab: ViewTab) => void } = $props()
 
   let error = $state('')
   let diff = $state<string | null>(null)
@@ -59,7 +60,7 @@
       </div>
       <div class="actions">
         <button onclick={load}>Refresh</button>
-        {#if tab.path}<button onclick={() => tab.path && openFile(tab.path)}>Open file</button>{/if}
+        {#if tab.path}<button onclick={() => tab.path && go(codeLink(tab.path))}>Open file</button>{/if}
       </div>
     {:else if tab.kind === 'commit'}
       {#if commit}
@@ -78,7 +79,7 @@
       </div>
       <div class="actions">
         {#if t.kind === 'version'}
-          <button onclick={() => openView({ ...t, kind: 'compare', id: `compare:${t.rev}:${t.path}`, title: `${t.title} ↔ now` })}>Compare with current</button>
+          <button onclick={() => onopen({ ...t, kind: 'compare', id: `compare:${t.rev}:${t.path}`, title: `${t.title} ↔ now` })}>Compare with current</button>
         {/if}
         <button class="danger" onclick={() => restoreVersion(t.path, t.rev, t.short)}>Restore this version</button>
       </div>

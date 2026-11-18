@@ -2,15 +2,16 @@ import { ApiError } from './api'
 
 // Toasts, the status-line message and the single modal dialog.
 
-export type Toast = { id: number; kind: 'error' | 'info' | 'ok'; title?: string; text: string }
+export type ToastAction = { label: string; run: () => void }
+export type Toast = { id: number; kind: 'error' | 'info' | 'ok'; title?: string; text: string; action?: ToastAction }
 export const toasts = $state<Toast[]>([])
 let nextToast = 1
 
-export function toast(text: string, kind: Toast['kind'] = 'info', title?: string) {
+export function toast(text: string, kind: Toast['kind'] = 'info', title?: string, action?: ToastAction) {
   const id = nextToast++
-  toasts.push({ id, kind, title, text })
+  toasts.push({ id, kind, title, text, action })
   if (toasts.length > 4) toasts.shift()
-  if (kind !== 'error') setTimeout(() => dismiss(id), 5000)
+  if (kind !== 'error') setTimeout(() => dismiss(id), action ? 8000 : 5000)
 }
 
 export function dismiss(id: number) {

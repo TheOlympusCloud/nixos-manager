@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { ApiError } from '../lib/api'
   import { app, login } from '../lib/state.svelte'
+  import Icon from './Icon.svelte'
 
   let password = $state('')
   let error = $state('')
@@ -29,7 +30,8 @@
 <!-- Browsers may close a modal on a repeated Escape despite preventDefault, so reopen it. -->
 <dialog bind:this={el} oncancel={(e) => e.preventDefault()} onclose={() => app.needLogin && el.isConnected && el.showModal()} aria-labelledby="login-title">
   <form class="card" onsubmit={submit}>
-    <h1 id="login-title">nixos-manager</h1>
+    <div class="brand"><span class="mark"><Icon name="mark" size={20} /></span><h1 id="login-title">nixos-manager</h1></div>
+    <p class="muted small">Your fleet's NixOS configuration, in one place.</p>
     <label for="login-password">Password</label>
     <!-- svelte-ignore a11y_autofocus -->
     <input id="login-password" type="password" autocomplete="current-password" bind:value={password} autofocus required />
@@ -53,20 +55,36 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    width: min(320px, 90vw);
-    padding: 24px;
+    width: min(340px, 90vw);
+    padding: 28px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: 9px;
   }
   h1 {
-    margin: 0 0 12px;
-    font-size: 18px;
-    font-weight: 600;
+    font-size: var(--fs-xl);
+  }
+  .card > p {
+    margin-bottom: 14px;
   }
   .error {
     margin: 0;
     color: var(--red);
   }
   button {
+    height: 34px;
     margin-top: 8px;
-    padding: 6px;
   }
 </style>

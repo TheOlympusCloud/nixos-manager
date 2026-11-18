@@ -1,33 +1,30 @@
 <script lang="ts">
   import { api, type Commit } from '../lib/api'
-  import { activePath, app, openView, restoreVersion } from '../lib/state.svelte'
+  import { app, restoreVersion, type ViewTab } from '../lib/state.svelte'
   import { report } from '../lib/ui.svelte'
   import { ago, basename } from '../lib/util'
   import Icon from './Icon.svelte'
 
-  let { visible }: { visible: boolean } = $props()
+  /** Repository history, plus the history of `path` when one is picked. Views open through `onopen`. */
+  let { path, onopen, current = '' }: { path: string; onopen: (tab: ViewTab) => void; current?: string } = $props()
 
   let repoLog = $state<Commit[] | null>(null)
   let fileLog = $state<Commit[] | null>(null)
-  const path = $derived(activePath())
-
   $effect(() => {
-    if (!visible) return
     void app.logVersion
     api.log().then((c) => (repoLog = c), report)
   })
 
   $effect(() => {
-    if (!visible) return
     void app.logVersion
     const p = path
     fileLog = null
     if (p) api.log({ path: p }).then((c) => p === path && (fileLog = c), report)
   })
 
-  const showCommit = (c: Commit) => openView({ kind: 'commit', id: 'commit:' + c.sha, title: `${c.short} ${c.subject}`, rev: c.sha })
+  const showCommit = (c: Commit) => onopen({ kind: 'commit', id: 'commit:' + c.sha, title: `${c.short} ${c.subject}`, rev: c.sha })
   const showVersion = (c: Commit, kind: 'version' | 'compare') =>
-    openView({ kind, id: `${kind}:${c.sha}:${path}`, title: `${basename(path)} @ ${c.short}${kind === 'compare' ? ' ↔ now' : ''}`, path, rev: c.sha, short: c.short })
+    onopen({ kind, id: `${kind}:${c.sha}:${path}`, title: `${basename(path)} @ ${c.short}${kind === 'compare' ? ' ↔ now' : ''}`, path, rev: c.sha, short: c.short })
 </script>
 
 {#snippet meta(c: Commit)}
@@ -51,7 +48,7 @@
             <li class="empty">Loading…</li>
           {:else}
             {#each fileLog as c (c.sha)}
-              <li class="item two-line">
+              <li class="item two-line" class:selected={current === `version:${c.sha}:${path}` || current === `compare:${c.sha}:${path}`}>
                 <button class="item-main" onclick={() => showVersion(c, 'version')} title="View {path} at {c.short}">
                   <span class="name">{c.subject}</span>
                   {@render meta(c)}
@@ -76,7 +73,7 @@
           <li class="empty">Loading…</li>
         {:else}
           {#each repoLog as c (c.sha)}
-            <li class="item two-line">
+            <li class="item two-line" class:selected={current === 'commit:' + c.sha}>
               <button class="item-main" onclick={() => showCommit(c)}>
                 <span class="name">{c.subject}</span>
                 {@render meta(c)}
@@ -100,10 +97,18 @@
     display: none;
   }
   summary h3::before {
-    content: '▸ ';
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin: 0 8px 2px 1px;
+    content: '';
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform var(--t-fast) var(--ease);
   }
   details[open] > summary h3::before {
-    content: '▾ ';
+    transform: rotate(45deg);
   }
   .fname {
     margin-left: 4px;

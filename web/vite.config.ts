@@ -5,8 +5,8 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [svelte()],
   base: '/',
-  // CodeMirror, the merge view and the LSP client make one ~600 kB chunk; fine for a LAN app.
-  build: { outDir: 'dist/app', chunkSizeWarningLimit: 1000 },
+  // The graph layout engine (ELK, ~1.5 MB) and CodeMirror load on demand in their own chunks; fine for a LAN app.
+  build: { outDir: 'dist/app', chunkSizeWarningLimit: 1600 },
   server: {
     proxy: {
       '/api': { target: 'http://127.0.0.1:8080', ws: true },

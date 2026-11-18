@@ -8,13 +8,19 @@ import { documentUri, lspClient } from './lsp.svelte'
 
 export const isNix = (path: string) => path.endsWith('.nix')
 
-const theme = EditorView.theme({
-  '&': { height: '100%', fontSize: '13.5px' },
-  '.cm-scroller': { fontFamily: 'var(--mono)', lineHeight: '1.55' },
-})
+// One Dark's syntax colours on the app's own surfaces.
+const theme = EditorView.theme(
+  {
+    '&': { height: '100%', fontSize: '13.5px', backgroundColor: 'var(--bg)' },
+    '.cm-scroller': { fontFamily: 'var(--mono)', lineHeight: '1.55' },
+    '.cm-gutters': { backgroundColor: 'var(--bg)', borderRight: '1px solid var(--border)', color: 'var(--fg-faint)' },
+    '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--bg-hover) 70%, transparent)' },
+  },
+  { dark: true },
+)
 
 /** Highlighting and theme shared by editors and read-only viewers. */
-export const baseExtensions = (path: string): Extension[] => [basicSetup, oneDark, theme, isNix(path) ? nix() : []]
+export const baseExtensions = (path: string): Extension[] => [basicSetup, oneDark, Prec.high(theme), isNix(path) ? nix() : []]
 
 export const readOnly: Extension = [EditorState.readOnly.of(true), EditorView.editable.of(false)]
 

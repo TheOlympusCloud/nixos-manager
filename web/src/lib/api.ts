@@ -20,7 +20,7 @@ export type Target = { kind: 'nixos' | 'home' | 'darwin'; name: string; attr: st
 export type JobState = 'queued' | 'running' | 'passed' | 'failed'
 export type Job = {
   id: string
-  kind: 'check' | 'lock' | 'update'
+  kind: 'check' | 'lock' | 'update' | 'model' | 'options' | 'packages'
   state: JobState
   targets?: string[] | null
   tree?: string
@@ -33,6 +33,59 @@ export type JobRequest =
   | { kind: 'lock' }
   | { kind: 'update'; inputs: string[] }
 export type Token = { id: string; name: string; created: string; last_used: string }
+
+// ---- fleet model (what Nix evaluates, machine by machine) ----
+
+export type FeatureGroup = 'services' | 'programs' | 'virtualisation' | 'hardware'
+export type Package = { name: string; version: string; files: string[] }
+export type Feature = { group: FeatureGroup; name: string; files: string[]; description: string }
+export type User = { name: string; description: string; groups: string[]; home: { packages: string[]; programs: string[] } | null }
+export type Host = {
+  name: string
+  hostName: string
+  system: string
+  release: string
+  stateVersion: string
+  timeZone: string | null
+  kernel: string | null
+  /** "hosts/<name>/managed.json" when the machine loads it, else null (visual editing off). */
+  managedFile: string | null
+  packages: Package[]
+  features: Feature[]
+  users: User[]
+  ports: { tcp: number[]; udp: number[]; firewall: boolean }
+  fileSystems: { mountPoint: string; fsType: string; device: string }[]
+  files: string[]
+  error?: string | null
+}
+export type Home = { name: string; packages: string[]; programs: string[]; error?: string | null }
+export type Input = { name: string; type: string; url: string; rev: string; lastModified: number }
+export type Model = { tree: string; hosts: Host[]; homes: Home[]; inputs: Input[]; error?: string }
+export type ModelReply = { state: 'ready'; model: Model } | { state: 'computing'; job: string }
+
+export type DiffStatus = 'added' | 'removed' | 'changed' | 'unchanged' | 'error'
+export type HostDiff = {
+  host: string
+  status: DiffStatus
+  error?: string
+  packagesAdded?: string[]
+  packagesRemoved?: string[]
+  featuresAdded?: string[]
+  featuresRemoved?: string[]
+  usersAdded?: string[]
+  usersRemoved?: string[]
+  portsAdded?: string[]
+  portsRemoved?: string[]
+}
+export type ModelDiffReply = { state: 'ready'; hosts?: HostDiff[]; error?: string } | { state: 'computing'; jobs: string[] }
+
+/** The machine's app-owned file (hosts/<host>/managed.json). */
+export type Managed = { host?: string; path: string; exists: boolean; hash: string; packages: string[]; settings: Record<string, unknown> }
+export type SettingEdit = { path: string[]; value: unknown } | { path: string[]; unset: true }
+
+export type PackageHit = { attr: string; pname: string; version: string; description: string }
+export type OptionInfo = { name: string; type: string; description: string; default: string | null; example: string | null; readOnly: boolean }
+export type SearchReply<T> = { state: 'ready'; results: T[] | null } | { state: 'indexing'; job: string }
 
 export class ApiError extends Error {
   status: number
@@ -126,6 +179,17 @@ export const api = {
   jobs: () => get<{ jobs: Job[] }>('/api/jobs').then((r) => r.jobs ?? []),
   job: (id: string) => get<Job>(`/api/jobs/${encodeURIComponent(id)}`),
   jobEventsUrl: (id: string) => `/api/jobs/${encodeURIComponent(id)}/events`,
+
+  // These answer 202 while a job computes the result; the body's `state` says which.
+  model: () => get<ModelReply>('/api/model', { at: 'working' }),
+  modelDiff: () => get<ModelDiffReply>('/api/model/diff'),
+  refreshModel: () => post<{ job: string }>('/api/model/refresh').then((r) => r.job),
+  managed: (host: string) => get<Managed>(`/api/hosts/${encodeURIComponent(host)}/managed`),
+  editPackages: (host: string, edit: { add?: string[]; remove?: string[] }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/packages`, edit),
+  editSetting: (host: string, edit: SettingEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/settings`, edit),
+  searchPackages: (q: string, limit = 50) => get<SearchReply<PackageHit>>('/api/search/packages', { q, limit }),
+  searchOptions: (host: string, q: string, opts: { limit?: number; exact?: boolean } = {}) =>
+    get<SearchReply<OptionInfo>>('/api/search/options', { host, q, limit: opts.limit, exact: opts.exact ? 1 : undefined }),
 
   tokens: () => get<{ tokens: Token[] }>('/api/tokens').then((r) => r.tokens ?? []),
   createToken: (name: string) => post<{ id: string; name: string; token: string }>('/api/tokens', { name }),

@@ -69,7 +69,7 @@
                 <span class="spacer"></span>
               {/if}
               <span class="name" class:deleted={node.deleted} class:changed={node.dir && node.changed}>{node.name}</span>
-              {#if node.badge}<span class="badge b-{node.badge === '?' ? 'u' : node.badge}" title={badgeTitle[node.badge]}>{node.badge}</span>{/if}
+              {#if node.badge}<span class="letter b-{node.badge === '?' ? 'u' : node.badge}" title={badgeTitle[node.badge]}>{node.badge}</span>{/if}
             </button>
             {#if !node.deleted}
               <span class="row-tools">

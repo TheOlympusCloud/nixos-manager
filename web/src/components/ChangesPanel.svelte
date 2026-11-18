@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ApiError, api, type StatusFile } from '../lib/api'
-  import { act, app, checkStaged, openView, refreshStatus } from '../lib/state.svelte'
+  import { act, app, checkStaged, refreshStatus } from '../lib/state.svelte'
   import { confirmBox, report, toast } from '../lib/ui.svelte'
   import { basename, dirname } from '../lib/util'
   import Icon from './Icon.svelte'
@@ -21,8 +21,9 @@
   const targetsHint = $derived(app.selectedTargets.length ? `flake check + ${app.selectedTargets.length} target(s)` : 'flake check only')
 
   function showDiff(f: StatusFile, isStaged: boolean) {
-    openView({ kind: 'diff', id: `diff:${isStaged}:${f.path}`, title: `${basename(f.path)} (${isStaged ? 'staged' : 'working'})`, staged: isStaged, path: f.path })
+    app.inspect = { kind: 'diff', staged: isStaged, path: f.path }
   }
+  const shown = (f: StatusFile, isStaged: boolean) => app.inspect?.kind === 'diff' && app.inspect.staged === isStaged && app.inspect.path === f.path
 
   async function discard(paths: string[]) {
     const what = paths.length === 1 ? paths[0] : `all ${paths.length} changed files`
@@ -66,8 +67,8 @@
 {#snippet fileRow(f: StatusFile, isStaged: boolean)}
   {@const letter = isStaged ? f.staged : f.unstaged}
   {@const p = f.path.replace(/\/$/, '')}
-  <li class="item">
-    <button class="item-main" title={f.from ? `${f.from} → ${f.path}` : f.path} onclick={() => showDiff(f, isStaged)}>
+  <li class="item" class:selected={shown(f, isStaged)}>
+    <button class="item-main" aria-current={shown(f, isStaged) || undefined} title={f.from ? `${f.from} → ${f.path}` : f.path} onclick={() => showDiff(f, isStaged)}>
       <span class="name">{basename(p)}</span>
       <span class="dir">{dirname(p)}</span>
     </button>
@@ -79,7 +80,7 @@
         <button class="icon" title="Stage" aria-label="Stage {f.path}" onclick={() => act(() => api.stage([f.path]))}><Icon name="plus" size={14} /></button>
       {/if}
     </span>
-    <span class="badge b-{letter === '?' ? 'u' : letter}">{letter}</span>
+    <span class="letter b-{letter === '?' ? 'u' : letter}">{letter}</span>
   </li>
 {/snippet}
 
@@ -107,12 +108,12 @@
         {#if !staged.length}
           <span class="muted">Nothing staged.</span>
         {:else if checked}
-          <span>✓ Staged changes are checked.</span>
+          <span class="ok-line"><Icon name="tick" size={13} />Staged changes are checked.</span>
         {:else if stagedJob && (stagedJob.state === 'queued' || stagedJob.state === 'running')}
           <span>Check {stagedJob.id} is {stagedJob.state}…</span>
         {:else if stagedJob?.state === 'failed'}
-          <span class="bad">✗ Check {stagedJob.id} failed.</span>
-          <button class="link" onclick={() => openView({ kind: 'job', id: 'job:' + stagedJob.id, title: `check ${stagedJob.id}`, jobId: stagedJob.id })}>Show log</button>
+          <span class="bad">Check {stagedJob.id} failed.</span>
+          <button class="link" onclick={() => (app.inspect = { kind: 'job', id: stagedJob.id })}>Show log</button>
         {:else}
           <span class="warn">Staged changes are not checked.</span>
         {/if}
@@ -161,7 +162,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 4px 12px 12px;
+    padding: 4px 12px 14px;
   }
   textarea {
     resize: vertical;
@@ -180,6 +181,11 @@
   .warn {
     color: var(--yellow);
   }
+  .ok-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
   .bad {
     color: var(--red);
   }
@@ -195,7 +201,7 @@
   }
   .wide {
     width: 100%;
-    padding: 5px;
+    height: 32px;
   }
   .hint,
   .error {

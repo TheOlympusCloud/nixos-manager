@@ -2,7 +2,8 @@ import { tick } from 'svelte'
 import type { Text } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import { ApiError, api, onUnauthorized, type Info, type Job, type JobRequest, type Status, type Target, type TreeEntry } from './api'
-import { reconnectLsp } from './lsp.svelte'
+import { scheduleModel } from './fleet.svelte'
+import { codeLink, go } from './router.svelte'
 import { confirmBox, note, promptBox, report, toast } from './ui.svelte'
 import { basename, isWithin, minimalChange } from './util'
 
@@ -16,7 +17,8 @@ export type ViewTab = Base & { n?: number } & (
     | { kind: 'job'; jobId: string }
   )
 export type Tab = FileTab | ViewTab
-export type Panel = 'files' | 'changes' | 'checks' | 'history'
+/** What the Changes view shows next to the file lists. */
+export type Inspect = { kind: 'diff'; staged: boolean; path?: string } | { kind: 'job'; id: string }
 
 export const app = $state({
   needLogin: false,
@@ -25,13 +27,11 @@ export const app = $state({
   entries: [] as TreeEntry[],
   tabs: [] as Tab[],
   active: '',
-  panel: 'files' as Panel,
-  sidebar: true,
+  inspect: null as Inspect | null,
   jobs: [] as Job[],
   targets: null as Target[] | null,
   selectedTargets: JSON.parse(localStorage.getItem('nixmgr.targets') ?? '[]') as string[],
   logVersion: 0,
-  tokensOpen: false,
 })
 
 onUnauthorized(() => (app.needLogin = true))
@@ -42,8 +42,9 @@ export async function refreshStatus() {
   try {
     app.status = await api.status()
   } catch (e) {
-    report(e)
+    return report(e)
   }
+  scheduleModel() // every status refresh follows something that may have changed the working copy
 }
 
 export async function refreshTree() {
@@ -83,7 +84,7 @@ export async function init() {
 export async function login(password: string) {
   await api.login(password)
   app.needLogin = false
-  reconnectLsp()
+  import('./lsp.svelte').then((m) => m.reconnectLsp())
   await init()
   await syncOpenTabs()
 }
@@ -320,6 +321,7 @@ export async function restoreVersion(path: string, rev: string, short: string) {
   if (!ok || !(await act(async () => api.restore(path, rev, await seen()), { tree: true }))) return
   if (tab) await reloadTab(tab)
   await openFile(path)
+  go(codeLink(path))
   note(`Restored ${path} from ${short}`)
 }
 
@@ -340,15 +342,26 @@ export async function refreshJobs() {
   // Compare with what any earlier call saw, so overlapping refreshes announce a finish only once.
   const finished = app.jobs.filter((j) => isActive(seenStates.get(j.id)) && !isActive(j.state))
   for (const j of app.jobs) seenStates.set(j.id, j.state)
-  for (const j of finished) toast(`Job ${j.id} (${j.kind}) ${j.state}`, j.state === 'passed' ? 'ok' : 'error')
+  // Model and search-index jobs report through their own views.
+  for (const j of finished.filter((j) => ['check', 'lock', 'update'].includes(j.kind)))
+    toast(`${jobTitle[j.kind] ?? j.kind} ${j.state}`, j.state === 'passed' ? 'ok' : 'error', undefined, { label: 'Show log', run: () => showJob(j.id) })
   if (finished.length) await Promise.all([refresh(), syncOpenTabs()])
   if (app.jobs.some((j) => isActive(j.state))) jobTimer = setTimeout(refreshJobs, 2000)
+}
+
+const jobTitle: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update' }
+
+/** Show a job's log in the Changes view. */
+export function showJob(id: string) {
+  app.inspect = { kind: 'job', id }
+  go('#/changes')
 }
 
 export async function startJob(req: JobRequest) {
   try {
     const id = await api.createJob(req)
-    openView({ kind: 'job', id: 'job:' + id, title: `${req.kind} ${id}`, jobId: id })
+    app.inspect = { kind: 'job', id }
+    toast(`${jobTitle[req.kind]} started`, 'info', undefined, { label: 'Show log', run: () => showJob(id) })
     await refreshJobs()
   } catch (e) {
     report(e, `Could not start ${req.kind}`)

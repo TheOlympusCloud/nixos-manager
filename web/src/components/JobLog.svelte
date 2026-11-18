@@ -5,7 +5,7 @@
   import { report } from '../lib/ui.svelte'
   import { stripAnsi } from '../lib/util'
 
-  let { jobId }: { jobId: string } = $props()
+  let { jobId, compact = false }: { jobId: string; compact?: boolean } = $props()
 
   let job = $state<Job | null>(null)
   let output = $state('')
@@ -60,17 +60,20 @@
     if (stick && pre) pre.scrollTop = pre.scrollHeight
   })
 
+  const kinds: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update', model: 'Evaluation', options: 'Option index', packages: 'Package index' }
   const running = $derived(jobState === 'queued' || jobState === 'running' || jobState === '')
 </script>
 
-<div class="view-bar">
-  <div class="title">
-    <strong>{job?.kind ?? 'job'} {jobId}</strong>
-    <span class="state s-{jobState || 'queued'}" role="status">{jobState || 'connecting'}{running ? '…' : ''}</span>
+{#if !compact}
+  <div class="view-bar">
+    <div class="title">
+      <strong>{kinds[job?.kind ?? ''] ?? 'Job'} {jobId}</strong>
+      <span class="state s-{jobState || 'queued'}" role="status">{jobState || 'connecting'}{running ? '…' : ''}</span>
+    </div>
+    {#if job?.targets?.length}<div class="muted small">targets: {job.targets.join(', ')}</div>{/if}
+    {#if job?.tree}<div class="muted small">tree <span class="mono">{job.tree.slice(0, 12)}</span></div>{/if}
   </div>
-  {#if job?.targets?.length}<div class="muted small">targets: {job.targets.join(', ')}</div>{/if}
-  {#if job?.tree}<div class="muted small">tree {job.tree.slice(0, 12)}</div>{/if}
-</div>
+{/if}
 <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scrollable log must be reachable by keyboard) -->
 <pre
   class="log"
@@ -101,9 +104,6 @@
   }
   .s-queued {
     color: var(--fg-muted);
-  }
-  .small {
-    font-size: 12px;
   }
   .log {
     flex: 1;

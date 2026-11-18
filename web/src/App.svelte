@@ -1,53 +1,36 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import ChangesPanel from './components/ChangesPanel.svelte'
-  import ChecksPanel from './components/ChecksPanel.svelte'
   import Dialog from './components/Dialog.svelte'
-  import EditorArea from './components/EditorArea.svelte'
-  import FileTree from './components/FileTree.svelte'
-  import HistoryPanel from './components/HistoryPanel.svelte'
-  import Icon, { type IconName } from './components/Icon.svelte'
+  import Icon from './components/Icon.svelte'
   import Login from './components/Login.svelte'
+  import NavRail from './components/NavRail.svelte'
+  import PackageSearch from './components/PackageSearch.svelte'
   import Toasts from './components/Toasts.svelte'
-  import TokensDialog from './components/TokensDialog.svelte'
   import TopBar from './components/TopBar.svelte'
-  import { lspState } from './lib/lsp.svelte'
-  import { activeTab, app, fileTabs, formatTab, init, refresh, saveTab, syncOpenTabs, type Panel } from './lib/state.svelte'
-  import { statusLine } from './lib/ui.svelte'
+  import { pkgSearch } from './lib/dialogs.svelte'
+  import { go, route, type View } from './lib/router.svelte'
+  import { activeTab, app, fileTabs, formatTab, init, refresh, saveTab, syncOpenTabs } from './lib/state.svelte'
+  import ChangesView from './views/ChangesView.svelte'
+  import FleetView from './views/FleetView.svelte'
+  import MachinePage from './views/MachinePage.svelte'
+  import MachinesView from './views/MachinesView.svelte'
+  import MatrixView from './views/MatrixView.svelte'
+  import OptionsView from './views/OptionsView.svelte'
+  import SettingsView from './views/SettingsView.svelte'
 
   onMount(init)
 
-  const panels: { id: Panel; label: string; icon: IconName }[] = [
-    { id: 'files', label: 'Files', icon: 'file' },
-    { id: 'changes', label: 'Changes', icon: 'branch' },
-    { id: 'checks', label: 'Checks', icon: 'check' },
-    { id: 'history', label: 'History', icon: 'history' },
-  ]
-  const changeCount = $derived(app.status?.files.length ?? 0)
-  const jobRunning = $derived(app.jobs.some((j) => j.state === 'running' || j.state === 'queued'))
+  // The code editor and the graph keep their state (unsaved edits, viewport) when you leave them.
+  const visited = $state({ fleet: false, code: false })
+  $effect(() => {
+    if (route.view === 'fleet') visited.fleet = true
+    if (route.view === 'code') visited.code = true
+  })
+  // CodeMirror and the history viewers load only when first needed.
+  const loadCode = () => import('./views/CodeWorkspace.svelte')
+  const loadHistory = () => import('./views/HistoryView.svelte')
 
-  function pick(id: Panel) {
-    // Clicking the open panel's button hides the sidebar, like most editors.
-    app.sidebar = !(app.sidebar && app.panel === id)
-    app.panel = id
-  }
-
-  let side = $state(Number(localStorage.getItem('nixmgr.side')) || 300)
-  function resize(e: PointerEvent) {
-    const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
-    const start = e.clientX - side
-    const move = (ev: PointerEvent) => (side = Math.max(200, Math.min(640, ev.clientX - start)))
-    el.addEventListener('pointermove', move)
-    el.addEventListener('pointerup', () => {
-      el.removeEventListener('pointermove', move)
-      localStorage.setItem('nixmgr.side', String(side))
-    }, { once: true })
-  }
-  function resizeKey(e: KeyboardEvent) {
-    const step = e.key === 'ArrowLeft' ? -20 : e.key === 'ArrowRight' ? 20 : 0
-    if (step) side = Math.max(200, Math.min(640, side + step))
-  }
+  let collapsed = $state(localStorage.getItem('nixmgr.rail') ? localStorage.getItem('nixmgr.rail') === 'collapsed' : innerWidth < 1200)
 
   // Files may change behind our back (API clients, git on the server); catch up when the window regains focus.
   let lastFocus = 0
@@ -58,16 +41,37 @@
     syncOpenTabs()
   }
 
+  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', o: 'options', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
+  let pendingG = 0
+
   function onKey(e: KeyboardEvent) {
     if (e.defaultPrevented) return // the editor already handled it
     const t = activeTab()
     const mod = e.ctrlKey || e.metaKey
-    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+    if (route.view === 'code' && mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
       e.preventDefault() // never the browser's "save page" dialog
       if (t?.kind === 'file') saveTab(t)
-    } else if (e.shiftKey && e.altKey && e.code === 'KeyF' && t?.kind === 'file' && t.path.endsWith('.nix')) {
+      return
+    }
+    if (route.view === 'code' && e.shiftKey && e.altKey && e.code === 'KeyF' && t?.kind === 'file' && t.path.endsWith('.nix')) {
       e.preventDefault()
       formatTab(t)
+      return
+    }
+    const target = e.target as HTMLElement
+    if (mod || e.altKey || app.needLogin || target.closest('input, textarea, select, [contenteditable], .cm-editor, dialog')) return
+    if (pendingG && Date.now() - pendingG < 1200 && goKeys[e.key]) {
+      pendingG = 0
+      e.preventDefault()
+      go('#/' + goKeys[e.key])
+    } else if (e.key === 'g') pendingG = Date.now()
+    else if (e.key === '/') {
+      // Focus the search box of the view on screen.
+      const box = [...document.querySelectorAll<HTMLElement>('[data-search]')].find((el) => el.offsetParent !== null)
+      if (box) {
+        e.preventDefault()
+        box.focus()
+      }
     }
   }
 
@@ -80,195 +84,81 @@
 
 {#if app.info}
   <div class="shell">
-    <TopBar />
+    <NavRail bind:collapsed />
     <div class="main">
-      <nav class="activity" aria-label="Side panels">
-        {#each panels as p (p.id)}
-          <button
-            class="act"
-            class:on={app.sidebar && app.panel === p.id}
-            aria-pressed={app.sidebar && app.panel === p.id}
-            aria-label={p.label}
-            title={p.label}
-            onclick={() => pick(p.id)}>
-            <Icon name={p.icon} size={20} />
-            {#if p.id === 'changes' && changeCount}<span class="count-dot">{changeCount}</span>{/if}
-            {#if p.id === 'checks' && jobRunning}<span class="run-dot" aria-label="A job is running"></span>{/if}
-          </button>
-        {/each}
-      </nav>
-      <aside class="sidebar" style:width="{side}px" hidden={!app.sidebar}>
-        <div class="pane-wrap" hidden={app.panel !== 'files'}><FileTree /></div>
-        <div class="pane-wrap" hidden={app.panel !== 'changes'}><ChangesPanel /></div>
-        <div class="pane-wrap" hidden={app.panel !== 'checks'}><ChecksPanel visible={app.sidebar && app.panel === 'checks'} /></div>
-        <div class="pane-wrap" hidden={app.panel !== 'history'}><HistoryPanel visible={app.sidebar && app.panel === 'history'} /></div>
-      </aside>
-      {#if app.sidebar}
-        <!-- A focusable separator is an ARIA widget (resizable with the arrow keys). -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-        <div
-          class="splitter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize side panel"
-          aria-valuenow={side}
-          aria-valuemin={200}
-          aria-valuemax={640}
-          tabindex="0"
-          onpointerdown={resize}
-          onkeydown={resizeKey}></div>
-      {/if}
-      <EditorArea />
+      <TopBar />
+      <main class="content">
+        {#if visited.fleet}<div class="keep" hidden={route.view !== 'fleet'}><FleetView active={route.view === 'fleet'} /></div>{/if}
+        {#if visited.code}
+          <div class="keep" hidden={route.view !== 'code'}>
+            {#await loadCode() then { default: CodeWorkspace }}<CodeWorkspace active={route.view === 'code'} />{/await}
+          </div>
+        {/if}
+        {#if route.view === 'machines'}
+          {#if route.parts[0]}
+            {#key route.parts[0]}<MachinePage host={route.parts[0]} tab={route.parts[1] ?? 'overview'} />{/key}
+          {:else}
+            <MachinesView />
+          {/if}
+        {:else if route.view === 'packages' || route.view === 'services'}
+          {#key route.view}<MatrixView kind={route.view} />{/key}
+        {:else if route.view === 'options'}
+          <OptionsView />
+        {:else if route.view === 'changes'}
+          <ChangesView />
+        {:else if route.view === 'history'}
+          {#await loadHistory() then { default: HistoryView }}<HistoryView path={route.parts.join('/')} />{/await}
+        {:else if route.view === 'settings'}
+          <SettingsView />
+        {/if}
+      </main>
     </div>
-    <footer class="statusbar">
-      <span><Icon name="branch" size={12} /> {app.status?.branch ?? app.info.branch}</span>
-      {#if app.status}
-        <span class:warn={!app.status.staged_checked && app.status.files.some((f) => f.staged)}>
-          {app.status.files.length} change{app.status.files.length === 1 ? '' : 's'}
-        </span>
-      {/if}
-      <span class="msg" role="status">{statusLine.text}</span>
-      <span title="Nix language server (nixd)">nixd: {lspState.status === 'off' ? 'idle' : lspState.status}</span>
-    </footer>
   </div>
 {:else if !app.needLogin}
-  <div class="loading">
+  <div class="boot" role="status">
+    <span class="boot-mark"><Icon name="mark" size={22} /></span>
     <p>Loading nixos-manager…</p>
     <button onclick={init}>Retry</button>
   </div>
 {/if}
 
 {#if app.needLogin}<Login />{/if}
-{#if app.tokensOpen && !app.needLogin}<TokensDialog />{/if}
+{#if pkgSearch.open && !app.needLogin}<PackageSearch />{/if}
 <Dialog />
 <Toasts />
 
 <style>
   .shell {
     display: flex;
-    flex-direction: column;
     height: 100vh;
   }
   .main {
     display: flex;
     flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .content {
+    position: relative;
+    flex: 1;
     min-height: 0;
   }
-  .activity {
-    display: flex;
-    flex: none;
-    flex-direction: column;
-    width: 46px;
-    background: var(--bg-deep);
-    border-right: 1px solid var(--border);
-  }
-  .act {
-    position: relative;
-    display: grid;
-    place-items: center;
-    height: 46px;
-    color: var(--fg-muted);
-    background: none;
-    border: 0;
-    border-left: 2px solid transparent;
-    border-radius: 0;
-  }
-  .act:hover {
-    color: var(--fg);
-  }
-  .act.on {
-    color: var(--fg-strong);
-    border-left-color: var(--accent);
-  }
-  .count-dot {
+  .keep {
     position: absolute;
-    right: 5px;
-    bottom: 7px;
-    min-width: 16px;
-    padding: 0 4px;
-    color: #fff;
-    font-size: 10px;
-    line-height: 16px;
-    background: var(--accent-strong);
-    border-radius: 8px;
+    inset: 0;
   }
-  .run-dot {
-    position: absolute;
-    right: 9px;
-    bottom: 10px;
-    width: 8px;
-    height: 8px;
-    background: var(--blue);
-    border-radius: 50%;
-    animation: pulse 1.2s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    50% {
-      opacity: 0.3;
-    }
-  }
-  .sidebar {
-    flex: none;
-    min-width: 0;
-    background: var(--bg-side);
-  }
-  .sidebar[hidden],
-  .pane-wrap[hidden] {
+  .keep[hidden] {
     display: none;
   }
-  .pane-wrap {
-    height: 100%;
-  }
-  .splitter {
-    flex: none;
-    width: 4px;
-    margin-left: -2px;
-    margin-right: -2px;
-    z-index: 2;
-    cursor: col-resize;
-    background: var(--border);
-    background-clip: content-box;
-    padding: 0 1.5px;
-  }
-  .splitter:hover,
-  .splitter:focus-visible {
-    background: var(--accent);
-    padding: 0;
-  }
-  .statusbar {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 16px;
-    height: 24px;
-    padding: 0 10px;
-    color: var(--fg-muted);
-    font-size: 12px;
-    background: var(--bg-deep);
-    border-top: 1px solid var(--border);
-  }
-  .statusbar span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .statusbar .msg {
-    flex: 1;
-    color: var(--fg);
-  }
-  .warn {
-    color: var(--yellow);
-  }
-  .loading {
+  .boot {
     display: grid;
     place-content: center;
     justify-items: center;
+    gap: var(--s3);
     height: 100vh;
     color: var(--fg-muted);
   }
-  @media (prefers-reduced-motion: reduce) {
-    .run-dot {
-      animation: none;
-    }
+  .boot-mark {
+    color: var(--accent);
   }
 </style>

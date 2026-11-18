@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type Job } from '../lib/api'
-  import { app, checkStaged, openView, refreshJobs, startJob } from '../lib/state.svelte'
+  import { app, checkStaged, refreshJobs, startJob } from '../lib/state.svelte'
   import { promptBox } from '../lib/ui.svelte'
   import { ago } from '../lib/util'
   import Icon from './Icon.svelte'
@@ -50,7 +50,10 @@
     await startJob({ kind: 'update', inputs: list })
   }
 
-  const showJob = (j: Job) => openView({ kind: 'job', id: 'job:' + j.id, title: `${j.kind} ${j.id}`, jobId: j.id })
+  const showJob = (j: Job) => (app.inspect = { kind: 'job', id: j.id })
+  // Evaluations and search indexes report in their own views.
+  const jobs = $derived(app.jobs.filter((j) => ['check', 'lock', 'update'].includes(j.kind)))
+  const kinds: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update' }
   const short = (s?: string) => (s ? s.slice(0, 8) : '')
   const status = $derived(app.status)
 </script>
@@ -68,7 +71,7 @@
       {#if status && !status.files.some((f) => f.staged)}
         <span class="muted">Nothing staged. Checks run on the staged changes.</span>
       {:else if status?.staged_checked}
-        ✓ Staged tree <code>{short(status.staged_tree)}</code> passed a check.
+        Staged tree <code>{short(status.staged_tree)}</code> passed a check.
       {:else if status}
         Staged tree <code>{short(status.staged_tree)}</code> is <strong>not checked</strong>.
       {/if}
@@ -114,11 +117,11 @@
 
     <div class="section-head"><h3>Jobs</h3></div>
     <ul class="list">
-      {#each app.jobs as j (j.id)}
-        <li class="item">
+      {#each jobs as j (j.id)}
+        <li class="item" class:selected={app.inspect?.kind === 'job' && app.inspect.id === j.id}>
           <button class="item-main job" onclick={() => showJob(j)}>
             <span class="state s-{j.state}">{j.state}</span>
-            <span class="name">{j.kind} {j.id}</span>
+            <span class="name">{kinds[j.kind]} {j.id}</span>
             <span class="dir">{j.tree ? short(j.tree) : ''} {ago(j.started)}</span>
           </button>
         </li>
@@ -185,11 +188,7 @@
     margin: 0;
   }
   .actions .primary {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    gap: 6px;
-    padding: 5px;
+    height: 32px;
   }
   .row {
     display: flex;

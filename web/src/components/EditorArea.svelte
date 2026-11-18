@@ -40,12 +40,12 @@
     </div>
   {:else}
     <div class="welcome">
-      <h1>nixos-manager</h1>
-      <p>Open a file from the Files panel to start editing.</p>
+      <h1>Code</h1>
+      <p>Hand-written Nix for everything the visual editors do not cover. Open a file from the tree.</p>
       <ul>
-        <li><kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> format with nixfmt</li>
-        <li><kbd>F12</kbd> go to definition · <kbd>F2</kbd> rename symbol · <kbd>Ctrl</kbd>+<kbd>Space</kbd> completion</li>
-        <li>Stage changes, run checks, then commit from the Changes panel.</li>
+        <li><kbd>Ctrl</kbd> <kbd>S</kbd> save · <kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>F</kbd> format with nixfmt</li>
+        <li><kbd>F12</kbd> go to definition · <kbd>F2</kbd> rename symbol · <kbd>Ctrl</kbd> <kbd>Space</kbd> completion</li>
+        <li>Then review, check and commit in <a href="#/changes">Changes</a>.</li>
       </ul>
     </div>
   {/if}
@@ -143,12 +143,5 @@
   .welcome ul {
     padding-left: 18px;
     line-height: 2;
-  }
-  kbd {
-    padding: 1px 5px;
-    font: 11px var(--mono);
-    background: var(--bg-raised);
-    border: 1px solid var(--line);
-    border-radius: 3px;
   }
 </style>
