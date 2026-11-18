@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -38,6 +39,9 @@ func TestMain(m *testing.M) {
 // fakeNixd answers initialize, then asks for its configuration the way nixd
 // does and reports what it got back as a notification.
 func fakeNixd() {
+	if f := os.Getenv("FAKE_NIXD_PIDFILE"); f != "" {
+		os.WriteFile(f, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	}
 	br := bufio.NewReader(os.Stdin)
 	send := func(v any) {
 		b, _ := json.Marshal(v)
@@ -333,6 +337,67 @@ func TestLSPBridgeAnswersConfiguration(t *testing.T) {
 		case strings.Contains(s, `"id":1`):
 			t.Fatalf("initialize did not advertise workspace/configuration: %s", s)
 		}
+	}
+}
+
+func TestLSPProcessEndsWithTheSocket(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	t.Setenv("FAKE_NIXD", "1")
+	t.Setenv("FAKE_NIXD_PIDFILE", pidFile)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	u, _ := http.NewRequest("GET", e.srv.URL, nil)
+	hdr := http.Header{"Cookie": {cookieHeader(e.client.Jar.Cookies(u.URL))}}
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(e.srv.URL, "http")+"/api/lsp", &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`))
+	for { // drain until the fake has nothing more to say, like an idle nixd
+		_, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(msg), "test/config") {
+			break
+		}
+	}
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(string(b))
+	c.Close(websocket.StatusNormalClosure, "")
+	// Reaped, not just killed: signal 0 also succeeds for a zombie.
+	for i := 0; ; i++ {
+		if syscall.Kill(pid, 0) != nil {
+			break
+		}
+		if i == 100 {
+			t.Fatal("nixd still running after the socket closed")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestLSPAcceptsForwardedHost(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	t.Setenv("FAKE_NIXD", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	u, _ := http.NewRequest("GET", e.srv.URL, nil)
+	hdr := http.Header{"Cookie": {cookieHeader(e.client.Jar.Cookies(u.URL))}, "Origin": {"https://box.tailnet.ts.net"}, "X-Forwarded-Host": {"box.tailnet.ts.net"}}
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(e.srv.URL, "http")+"/api/lsp", &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatalf("proxied origin refused: %v", err)
+	}
+	c.CloseNow()
+	hdr.Del("X-Forwarded-Host")
+	if _, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(e.srv.URL, "http")+"/api/lsp", &websocket.DialOptions{HTTPHeader: hdr}); err == nil {
+		t.Fatal("foreign origin accepted")
 	}
 }
 

@@ -22,7 +22,11 @@ import (
 // answers nixd's workspace/configuration requests itself, so completion and
 // option docs come from this repository's flake whatever the editor sends.
 func (s *Server) lsp(w http.ResponseWriter, r *http.Request) {
-	c, err := websocket.Accept(w, r, nil) // same-origin only
+	opts := &websocket.AcceptOptions{} // same-origin only
+	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+		opts.OriginPatterns = []string{fh} // behind a reverse proxy such as tailscale serve
+	}
+	c, err := websocket.Accept(w, r, opts)
 	if err != nil {
 		return
 	}
@@ -46,7 +50,7 @@ func (s *Server) lsp(w http.ResponseWriter, r *http.Request) {
 		c.Close(websocket.StatusInternalError, "cannot start nixd")
 		return
 	}
-	defer cmd.Wait()
+	defer func() { cancel(); cmd.Wait() }() // kill nixd before reaping it
 
 	var mu sync.Mutex
 	send := func(msg []byte) error {
