@@ -193,6 +193,18 @@ func (s *Server) Handler() http.Handler {
 			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, time.Now())}, nil)
 		}
 	})
+	api.HandleFunc("GET /api/fleet/values", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		res, j, err := s.Svc.Jobs.OptionValues(r.Context(), q["name"], q["host"])
+		switch {
+		case err != nil:
+			respond(w, nil, err)
+		case j != nil:
+			respondCode(w, http.StatusAccepted, map[string]string{"state": "computing", "job": j.ID})
+		default:
+			respond(w, map[string]any{"state": "ready", "values": res}, nil)
+		}
+	})
 	api.HandleFunc("GET /api/model", s.model)
 	api.HandleFunc("POST /api/model/refresh", post(func(r *http.Request, _ struct{}) (any, error) {
 		j, err := s.Svc.Jobs.RefreshModel(r.Context())

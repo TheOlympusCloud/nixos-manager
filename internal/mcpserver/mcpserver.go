@@ -230,6 +230,13 @@ func New(svc *core.Service, version string) *mcp.Server {
 		}
 		return map[string][]core.Insight{"insights": core.Insights(m, time.Now())}, nil
 	})
+	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
+		Names []string `json:"names"`
+		Hosts []string `json:"hosts,omitempty"`
+	}) (map[string][]core.OptionValues, error) {
+		res, err := ready(ctx, func() ([]core.OptionValues, *core.Job, error) { return svc.Jobs.OptionValues(ctx, in.Names, in.Hosts) })
+		return map[string][]core.OptionValues{"values": res}, err
+	})
 	tool(s, "host_details", "Everything the fleet model knows about one machine: packages with the files that add them, enabled features, users and home-manager, ports, file systems, files, and whether it has a managed.json.", func(ctx context.Context, in struct {
 		Host string `json:"host"`
 	}) (core.Host, error) {

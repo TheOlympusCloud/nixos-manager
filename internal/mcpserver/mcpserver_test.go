@@ -84,7 +84,7 @@ func TestToolsList(t *testing.T) {
 		"status", "diff", "stage", "unstage", "discard", "commit", "log", "show_commit", "read_file_at", "restore_file",
 		"list_branches", "create_branch", "switch_branch", "push", "pull", "list_targets", "run_check", "flake_lock", "flake_update",
 		"fleet_overview", "host_details", "model_diff", "add_packages", "remove_packages", "set_option", "unset_option",
-		"search_packages", "search_options", "fleet_insights"} {
+		"search_packages", "search_options", "fleet_insights", "compare_option"} {
 		if !have[want] {
 			t.Errorf("missing tool %s", want)
 		}
@@ -138,6 +138,11 @@ func TestFleetTools(t *testing.T) {
 	call(t, cs, "fleet_insights", nil, &health)
 	if len(health.Insights) == 0 || health.Insights[0].Severity != "error" {
 		t.Fatalf("fleet insights %+v", health)
+	}
+	var cmp struct{ Values []core.OptionValues }
+	call(t, cs, "compare_option", map[string]any{"names": []string{"services.openssh.settings.PermitRootLogin"}}, &cmp)
+	if len(cmp.Values) != 1 || len(cmp.Values[0].Hosts) != 4 {
+		t.Fatalf("compare option %+v", cmp)
 	}
 	var pk struct{ Results []core.PackageResult }
 	call(t, cs, "search_packages", map[string]any{"query": "btop"}, &pk)

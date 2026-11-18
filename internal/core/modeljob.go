@@ -254,10 +254,14 @@ func (js *Jobs) discover(ctx context.Context, src string) (map[string][]string, 
 // evalJSON runs a nix expression against the flake in src (and machine host)
 // and decodes its JSON result into out.
 func (js *Jobs) evalJSON(ctx context.Context, src, host, expr string, out any) error {
+	return js.evalJSONEnv(ctx, src, []string{"NIXMGR_HOST=" + host}, expr, out)
+}
+
+func (js *Jobs) evalJSONEnv(ctx context.Context, src string, env []string, expr string, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--json", "--impure", "--expr", expr)...)
-	cmd.Env = append(os.Environ(), "NIXMGR_FLAKE=path:"+src, "NIXMGR_HOST="+host)
+	cmd.Env = append(append(os.Environ(), "NIXMGR_FLAKE=path:"+src), env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

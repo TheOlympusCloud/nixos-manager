@@ -634,6 +634,22 @@ func TestInsightsOverHTTP(t *testing.T) {
 	}
 }
 
+func TestOptionValuesOverHTTP(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	var res struct {
+		State  string
+		Values []core.OptionValues
+	}
+	e.ready(t, "/api/fleet/values?name=nix.gc.automatic&name=zramSwap.enable&host=pi&host=homeserver", &res)
+	if len(res.Values) != 2 || len(res.Values[0].Hosts) != 2 || res.Values[0].Name != "nix.gc.automatic" {
+		t.Fatalf("values %+v", res)
+	}
+	if code := e.do(t, "GET", "/api/fleet/values?name=services.<name>.enable", nil, nil); code != 400 {
+		t.Fatalf("placeholder name: %d", code)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {

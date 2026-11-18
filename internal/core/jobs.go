@@ -29,15 +29,16 @@ type Jobs struct {
 	Nix    string // nix binary
 	Nixfmt string // nixfmt binary
 
-	mu         sync.Mutex
-	jobs       []*Job // oldest first
-	nextID     int
-	passed     map[string]bool
-	queue      chan *Job
-	models     map[string]*Model // by git tree
-	modelOrder []string
-	indexes    map[string]any   // search indexes by key
-	indexErrs  map[string]error // why the last build of an index failed
+	mu          sync.Mutex
+	jobs        []*Job // oldest first
+	nextID      int
+	passed      map[string]bool
+	queue       chan *Job
+	models      map[string]*Model // by git tree
+	modelOrder  []string
+	indexes     map[string]any   // search indexes by key
+	indexErrs   map[string]error // why the last build of an index failed
+	valuesOrder []string         // option value results, oldest first
 }
 
 func newJobs(repo *Repo) *Jobs {
@@ -54,7 +55,9 @@ type JobRequest struct {
 	Kind    string   `json:"kind"`
 	Targets []string `json:"targets,omitempty"`
 	Inputs  []string `json:"inputs,omitempty"`
-	Host    string   `json:"host,omitempty"` // options index jobs
+	Host    string   `json:"host,omitempty"`  // options index jobs
+	Names   []string `json:"names,omitempty"` // option value jobs
+	Hosts   []string `json:"hosts,omitempty"`
 }
 
 type Job struct {
@@ -262,6 +265,8 @@ func (js *Jobs) run(job *Job) error {
 		return js.runModel(ctx, job)
 	case "packages", "options":
 		return js.runIndex(ctx, job)
+	case "values":
+		return js.runValues(ctx, job)
 	}
 	dir := js.Repo.Dir
 	var steps [][]string
