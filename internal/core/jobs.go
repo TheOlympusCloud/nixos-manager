@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -62,7 +63,8 @@ type Job struct {
 
 	mu       sync.Mutex
 	tree     string
-	key      string // search index jobs
+	key      string      // what a model or index job computes
+	skip     atomic.Bool // set while queued when the result would be outdated
 	state    string
 	started  time.Time
 	finished time.Time
@@ -227,6 +229,11 @@ func (js *Jobs) Passed(tree string) bool {
 
 func (js *Jobs) worker() {
 	for job := range js.queue {
+		if job.skip.Load() {
+			fmt.Fprintln(job, "Skipped: the files changed again before this evaluation started.")
+			job.finish(false)
+			continue
+		}
 		job.mu.Lock()
 		job.state, job.started = "running", time.Now()
 		job.mu.Unlock()

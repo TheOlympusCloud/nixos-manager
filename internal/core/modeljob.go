@@ -92,7 +92,18 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 			return nil, j, nil
 		}
 	}
-	j, err := js.enqueue(JobRequest{Kind: "model"}, tree, "")
+	key := "model:" + at
+	if key == "model:" {
+		key = "model:working"
+	}
+	if key == "model:working" { // the working copy moved on: older evaluations still waiting are pointless
+		for _, j := range js.jobs {
+			if j.key == key && j.Info(false).State == "queued" {
+				j.skip.Store(true)
+			}
+		}
+	}
+	j, err := js.enqueue(JobRequest{Kind: "model"}, tree, key)
 	return nil, j, err
 }
 

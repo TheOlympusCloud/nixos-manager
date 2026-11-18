@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fleetService serves the fixture fleet through scripts/dev/fake-nix.
@@ -118,5 +119,33 @@ func TestModelOfABrokenFlake(t *testing.T) {
 	}
 	if again, j, _ := s.Jobs.Model(context.Background(), "working"); again != m || j != nil {
 		t.Fatal("a broken flake is evaluated again on every request")
+	}
+}
+
+// Quick edits must not pile up full fleet evaluations: a newer request skips
+// older ones still waiting in the queue.
+func TestNewerModelSkipsQueuedOlderOnes(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, "testdata/fleet")
+	t.Setenv("NIXMGR_FAKE_DELAY", "0.2")
+	_, running, _ := s.Jobs.Model(ctx, "working")
+	for running.Info(false).State == "queued" {
+		time.Sleep(5 * time.Millisecond)
+	}
+	write(t, s.Repo, "a.nix", "1\n")
+	_, older, _ := s.Jobs.Model(ctx, "working")
+	write(t, s.Repo, "a.nix", "2\n")
+	_, newer, _ := s.Jobs.Model(ctx, "working")
+	if older == newer {
+		t.Fatal("different trees share a job")
+	}
+	if info := wait(t, older); info.State != "failed" || !strings.Contains(info.Output, "changed again") {
+		t.Fatalf("the outdated evaluation ran: %+v", info)
+	}
+	if info := wait(t, newer); info.State != "passed" {
+		t.Fatalf("latest evaluation: %+v", info)
+	}
+	if m, j, _ := s.Jobs.Model(ctx, "working"); m == nil || j != nil {
+		t.Fatal("latest model not cached")
 	}
 }
