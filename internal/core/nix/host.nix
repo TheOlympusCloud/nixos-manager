@@ -87,6 +87,8 @@ let
   }) (lib.filterAttrs (_: u: u.isNormalUser or false) (try config.users.users { }));
 
   managed = try (config.nixosManager.managedFile or null) null;
+  # attribute -> package name for managed.json packages (one bad entry does not hide the others)
+  managedPackages = lib.mapAttrs (_: n: try n "") (try (config.nixosManager.packageNames or { }) { });
   files = lib.filter (f: f != "nixos") (
     lib.unique (
       lib.concatMap (p: p.files) packages
@@ -119,6 +121,7 @@ in
   timeZone = try config.time.timeZone null;
   kernel = try config.boot.kernelPackages.kernel.version null;
   managedFile = if managed == null then null else rel managed;
+  inherit managedPackages;
   checks = {
     ssh = try config.services.openssh.enable false;
     sshPasswordAuthentication = try config.services.openssh.settings.PasswordAuthentication null;

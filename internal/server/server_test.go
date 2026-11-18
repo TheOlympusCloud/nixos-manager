@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -659,6 +660,56 @@ func TestCreateMachineOverHTTP(t *testing.T) {
 	}
 	if code := e.do(t, "POST", "/api/machines", map[string]any{"name": "nas", "system": "x86_64-linux", "role": "server"}, nil); code != 409 {
 		t.Fatalf("duplicate: %d", code)
+	}
+}
+
+// A working copy that does not evaluate cannot be compared: no "removed" machines.
+func TestDiffOfABrokenWorkingCopy(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	if err := e.svc.Stage(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Commit(ctx, "machines", true); err != nil { // HEAD has every machine
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Write("BROKEN", "x\n", ""); err != nil {
+		t.Fatal(err)
+	}
+	var diff struct {
+		Error string
+		Hosts []core.HostDiff
+	}
+	e.ready(t, "/api/model/diff", &diff)
+	if diff.Error == "" || len(diff.Hosts) != 0 || strings.HasPrefix(diff.Error, "the flake does not evaluate") {
+		t.Fatalf("diff of a broken working copy %+v", diff)
+	}
+}
+
+func TestStaticAssetsAreCachedAndCompressed(t *testing.T) {
+	e := newEnv(t)
+	req, _ := http.NewRequest("GET", e.srv.URL+"/assets/app.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := (&http.Transport{DisableCompression: true}).RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("Content-Encoding") != "gzip" || !strings.Contains(resp.Header.Get("Cache-Control"), "immutable") || !strings.Contains(resp.Header.Get("Content-Type"), "javascript") {
+		t.Fatalf("headers %v", resp.Header)
+	}
+	zr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(zr); string(b) != "js" {
+		t.Fatalf("body %q", b)
+	}
+	idx, _ := http.Get(e.srv.URL + "/")
+	idx.Body.Close()
+	if !strings.Contains(idx.Header.Get("Cache-Control"), "no-cache") {
+		t.Fatalf("index must not be cached: %v", idx.Header)
 	}
 }
 

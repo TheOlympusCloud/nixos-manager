@@ -237,3 +237,17 @@ func TestPushNeedsACheckedHead(t *testing.T) {
 	isErr(t, err, ErrNotChecked)
 	must[string](t)(s.Push(ctx, true))
 }
+
+// Without a remote there is nothing to push, checked or not: say that first.
+func TestPushWithoutRemoteSaysSoBeforeTheCheckGate(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t)
+	write(t, s.Repo, "a.nix", "1\n")
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "unchecked", true))
+	_, err := s.Push(ctx, false)
+	isErr(t, err, ErrInvalid)
+	if !strings.Contains(err.Error(), "remote") {
+		t.Fatalf("message %q", err)
+	}
+}

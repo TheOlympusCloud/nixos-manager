@@ -44,6 +44,9 @@ func (s *Service) Commit(ctx context.Context, message string, force bool) (strin
 func (s *Service) Push(ctx context.Context, force bool) (string, error) {
 	s.Repo.mu.Lock()
 	defer s.Repo.mu.Unlock()
+	if _, err := s.Repo.currentBranch(ctx); err != nil { // no remote: nothing to push, checked or not
+		return "", err
+	}
 	if !force {
 		if n, err := s.Repo.git(ctx, "rev-list", "--count", "@{upstream}..HEAD"); err == nil && strings.TrimSpace(n) == "0" {
 			return s.Repo.push(ctx) // nothing new to send
@@ -53,7 +56,7 @@ func (s *Service) Push(ctx context.Context, force bool) (string, error) {
 			return "", errorf(ErrInvalid, "there is nothing to push yet")
 		}
 		if !s.Jobs.Passed(strings.TrimSpace(tree)) {
-			return "", errorf(ErrNotChecked, "the commit to push was never checked as a whole (for example after a pull that rebased your commits): run the checks with no staged or unstaged changes, then push, or push without checks")
+			return "", errorf(ErrNotChecked, "the commit to push has not passed a check (it was committed without one, or a pull rebased it onto new remote commits): run the checks with nothing staged or changed, then push, or push without checks")
 		}
 	}
 	return s.Repo.push(ctx)

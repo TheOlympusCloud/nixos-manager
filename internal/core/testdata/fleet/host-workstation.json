@@ -349,5 +349,11 @@
   "autoGC": true,
   "autoOptimise": true,
   "zram": true
+ },
+ "managedPackages": {
+  "vscode": "vscode",
+  "obsidian": "obsidian",
+  "spotify": "spotify",
+  "discord": "discord"
  }
 }

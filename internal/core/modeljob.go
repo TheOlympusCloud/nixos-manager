@@ -218,6 +218,9 @@ func normalizeHost(h Host) Host {
 	h.Packages, h.Features, h.Users = orEmpty(h.Packages), orEmpty(h.Features), orEmpty(h.Users)
 	h.FileSystems, h.Files = orEmpty(h.FileSystems), orEmpty(h.Files)
 	h.Ports.TCP, h.Ports.UDP = orEmpty(h.Ports.TCP), orEmpty(h.Ports.UDP)
+	if h.ManagedPackages == nil {
+		h.ManagedPackages = map[string]string{}
+	}
 	slices.SortFunc(h.Packages, func(a, b Package) int { return strings.Compare(a.Name, b.Name) })
 	slices.SortFunc(h.Features, func(a, b Feature) int {
 		return strings.Compare(a.Group+"."+a.Name, b.Group+"."+b.Name)
@@ -246,7 +249,7 @@ func (js *Jobs) snapshot(ctx context.Context, tree string) (string, func(), erro
 func (js *Jobs) discover(ctx context.Context, src string) (map[string][]string, error) {
 	var names map[string][]string
 	if err := js.evalJSON(ctx, src, "", nixExpr("discover.nix"), &names); err != nil {
-		return nil, fmt.Errorf("the flake does not evaluate: %w", err)
+		return nil, err // the UI already says the flake does not evaluate
 	}
 	return names, nil
 }

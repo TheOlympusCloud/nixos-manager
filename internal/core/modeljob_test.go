@@ -71,6 +71,9 @@ func TestModelOfAFleet(t *testing.T) {
 	if m.Hosts[2].ManagedFile != nil {
 		t.Fatal("pi does not load a managed file")
 	}
+	if ws.ManagedPackages["vscode"] != "vscode" || m.Hosts[2].ManagedPackages == nil {
+		t.Fatalf("managed package names %+v / %+v", ws.ManagedPackages, m.Hosts[2].ManagedPackages)
+	}
 	if len(m.Homes) != 1 || m.Homes[0].Name != "pablo@laptop" {
 		t.Fatalf("homes %+v", m.Homes)
 	}

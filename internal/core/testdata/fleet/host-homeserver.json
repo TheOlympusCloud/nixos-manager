@@ -266,5 +266,9 @@
   "autoGC": true,
   "autoOptimise": true,
   "zram": false
+ },
+ "managedPackages": {
+  "restic": "restic",
+  "rclone": "rclone"
  }
 }

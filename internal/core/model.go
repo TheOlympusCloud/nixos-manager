@@ -19,22 +19,25 @@ type Model struct {
 }
 
 type Host struct {
-	Name         string       `json:"name"`
-	HostName     string       `json:"hostName"`
-	System       string       `json:"system"`
-	Release      string       `json:"release"`
-	StateVersion string       `json:"stateVersion"`
-	TimeZone     *string      `json:"timeZone"`
-	Kernel       *string      `json:"kernel"`
-	ManagedFile  *string      `json:"managedFile"`
-	Packages     []Package    `json:"packages"`
-	Features     []Feature    `json:"features"`
-	Users        []User       `json:"users"`
-	Ports        Ports        `json:"ports"`
-	FileSystems  []FileSystem `json:"fileSystems"`
-	Files        []string     `json:"files"`
-	Checks       Checks       `json:"checks"`
-	Error        string       `json:"error,omitempty"`
+	Name         string  `json:"name"`
+	HostName     string  `json:"hostName"`
+	System       string  `json:"system"`
+	Release      string  `json:"release"`
+	StateVersion string  `json:"stateVersion"`
+	TimeZone     *string `json:"timeZone"`
+	Kernel       *string `json:"kernel"`
+	ManagedFile  *string `json:"managedFile"`
+	// ManagedPackages maps each attribute in managed.json to its package name
+	// (nodejs_22 -> nodejs), so a package seen in the model can be removed by attribute.
+	ManagedPackages map[string]string `json:"managedPackages"`
+	Packages        []Package         `json:"packages"`
+	Features        []Feature         `json:"features"`
+	Users           []User            `json:"users"`
+	Ports           Ports             `json:"ports"`
+	FileSystems     []FileSystem      `json:"fileSystems"`
+	Files           []string          `json:"files"`
+	Checks          Checks            `json:"checks"`
+	Error           string            `json:"error,omitempty"`
 }
 
 // Checks are the security and maintenance facts the fleet insights look at.

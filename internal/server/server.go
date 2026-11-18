@@ -3,6 +3,8 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +12,10 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -32,6 +36,7 @@ type Server struct {
 	Nixd []string     // language server command
 
 	lspSlots chan struct{}
+	gz       sync.Map // static path -> gzipped bytes
 }
 
 // Handler wires every route. Everything except the login call, the static UI
@@ -421,8 +426,8 @@ func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"state": "ready", "hosts": core.DiffModels(head, work), "inputs": core.DiffInputs(head.Inputs, work.Inputs)}
-	if work.Error != "" {
-		out["error"] = work.Error
+	if work.Error != "" { // nothing to compare with: do not report every machine as removed
+		out["hosts"], out["inputs"], out["error"] = []core.HostDiff{}, []core.InputChange{}, work.Error
 	}
 	if head.Error != "" { // every machine would look new; say why
 		out["headError"] = head.Error
@@ -485,8 +490,42 @@ func (s *Server) static() http.Handler {
 			w.Write(index)
 			return
 		}
+		if strings.HasPrefix(p, "assets/") { // Vite names them by content hash
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		if gz := s.gzipped(p); gz != nil && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Vary", "Accept-Encoding")
+			if ct := mime.TypeByExtension(path.Ext(p)); ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			w.Write(gz)
+			return
+		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+var compressible = map[string]bool{".js": true, ".css": true, ".svg": true, ".json": true, ".html": true, ".txt": true}
+
+// gzipped returns a static file compressed once and kept in memory, or nil.
+func (s *Server) gzipped(p string) []byte {
+	if !compressible[path.Ext(p)] {
+		return nil
+	}
+	if v, ok := s.gz.Load(p); ok {
+		return v.([]byte)
+	}
+	raw, err := fs.ReadFile(s.UI, p)
+	if err != nil || len(raw) < 512 && !strings.HasPrefix(p, "assets/") {
+		return nil
+	}
+	var b bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&b, gzip.BestCompression)
+	zw.Write(raw)
+	zw.Close()
+	s.gz.Store(p, b.Bytes())
+	return b.Bytes()
 }
 
 func exists(fsys fs.FS, p string) bool {

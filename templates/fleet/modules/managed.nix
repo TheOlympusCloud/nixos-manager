@@ -22,6 +22,21 @@ in
     internal = true;
     description = "The managed.json that nixos-manager edits for this machine.";
   };
+  options.nixosManager.packageNames = lib.mkOption {
+    type = lib.types.attrsOf lib.types.str;
+    default = lib.listToAttrs (
+      map (name: {
+        inherit name;
+        value =
+          let
+            p = package name;
+          in
+          p.pname or (builtins.parseDrvName p.name).name;
+      }) (data.packages or [ ])
+    );
+    internal = true;
+    description = "The package name of each managed.json attribute, so nixos-manager can match them.";
+  };
 
   config = lib.mkMerge [
     # A value set by clicking is the machine's final value: it wins over hand-written
