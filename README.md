@@ -1,21 +1,35 @@
 # nixos-manager
 
-A self-hosted web editor for one git repository of Nix flake configurations
-(NixOS hosts, home-manager users, any other flake outputs), with an MCP server
-so automation can use the same features.
+A self-hosted console for all the NixOS machines configured by one git flake
+repository. It evaluates every machine with Nix and shows the fleet visually:
+what each machine runs, where it comes from, and what a change will do to it.
+An MCP server gives automation the same features.
 
-- Editor with Nix highlighting, `nixd` completion, diagnostics and option docs,
-  and `nixfmt` formatting.
-- File tree: create, rename, move and delete files and folders.
-- Changes: stage, unstage, discard, commit; branches; push and pull.
-- History: repository and per-file log, diffs, restore a file from any commit.
-- Checks: `nix flake check` plus a dry build of the chosen configurations, run on
-  exactly the staged changes, with live output. A commit needs a passing check
-  of the staged changes, and a push needs a passing check of the commit being
-  pushed. In the web UI you can override both explicitly; MCP clients cannot.
+- **Fleet graph**: machines, the services and programs they enable, the shared
+  modules that configure them, their packages, users and flake inputs, as an
+  interactive graph.
+- **Machine pages**: packages (with the file that adds each one), services and
+  programs, users and home-manager, ports and file systems.
+- **Change things by clicking**: add or remove packages from a search of the
+  nixpkgs the flake locks, and turn services on or set options through forms
+  built from the NixOS option documentation. These edits go into the machine's
+  `hosts/<name>/managed.json`, which `modules/managed.nix` applies; hand-written
+  Nix is never rewritten.
+- **Fleet matrices**: which package and which service runs on which machine.
+- **Changes in NixOS terms**: before committing, see per machine which
+  packages, services, users and ports the working copy adds or removes.
+- **Checks**: `nix flake check` plus a dry build of the chosen configurations,
+  run on exactly the staged changes, with live output. A commit needs a passing
+  check of the staged changes, and a push needs a passing check of the commit
+  being pushed. In the web UI you can override both explicitly; MCP clients
+  cannot.
+- **Git**: stage, commit, branches, push and pull, repository and per-file
+  history with diffs and restore. Every commit uses the configured person's
+  name and email.
+- **Code**: a Nix editor with `nixd` completion, diagnostics and option docs,
+  and `nixfmt`, for the hand-written files.
 - `nix flake lock` and `nix flake update` for adding or updating inputs.
 - Login for the UI; named, revocable API tokens for MCP clients.
-- Every commit uses the configured person's name and email.
 
 The repository is a normal git repository whose remote is Forgejo. Each machine
 runs [comin](https://github.com/nlewo/comin), pulls from Forgejo and switches
@@ -92,7 +106,9 @@ Create a token on the **Tokens** page and point the client at `/mcp`:
 }
 ```
 
-Tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
+Fleet tools: `fleet_overview`, `host_details`, `model_diff`, `search_packages`,
+`search_options`, `add_packages`, `remove_packages`, `set_option`,
+`unset_option`. File and git tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `delete_path`, `format_nix`, `status`, `diff`, `stage`, `unstage`, `discard`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
 `list_branches`, `create_branch`, `switch_branch`, `push`, `pull`,
@@ -115,6 +131,18 @@ clients cannot override. Writes and restores need the `base_hash` from
 
 Sessions last 7 days and are kept in memory, so a restart logs you out.
 
+## Visual editing on an existing repository
+
+The starter flake loads each machine's `managed.json`. In a repository you
+bring yourself, add this line to a machine's `modules` list to turn visual
+editing on for it (the machine page shows it too):
+
+```nix
+(import ./modules/managed.nix ./hosts/<name>/managed.json)
+```
+
+and copy `modules/managed.nix` from `templates/fleet/modules/`.
+
 ## Development
 
 ```sh
@@ -126,6 +154,12 @@ go build ./cmd/nixos-manager
 `scripts/e2e.sh` runs the real server against a fresh flake and a bare git
 remote: login, lock, check, commit gate, commit, push, edit, history and
 restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
+
+`scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
+the app's evaluations with a fixture fleet of four machines
+(`internal/core/testdata/fleet/`). Run the server with
+`NIXMGR_NIX=$PWD/scripts/dev/fake-nix` (and `NIXMGR_FAKE_DELAY=1` to see the
+progress states) to work on the UI.
 
 `npm run dev` in `web/` serves the UI with hot reload and proxies `/api` to a
 backend on `127.0.0.1:8080`.
