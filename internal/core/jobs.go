@@ -299,7 +299,6 @@ type Target struct {
 	Attr string `json:"attr"`
 }
 
-
 var plainAttr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_'-]*$`)
 
 func attrName(n string) string {

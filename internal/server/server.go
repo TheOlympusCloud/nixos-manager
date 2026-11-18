@@ -129,6 +129,30 @@ func (s *Server) Handler() http.Handler {
 		return map[string]string{"output": out}, err
 	}))
 
+	api.HandleFunc("GET /api/hosts/{host}/managed", get(func(r *http.Request) (any, error) {
+		return s.Svc.ManagedView(r.PathValue("host"))
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/packages", post(func(r *http.Request, in struct{ Add, Remove []string }) (any, error) {
+		host := r.PathValue("host")
+		v, err := s.Svc.ManagedView(host)
+		if err == nil && len(in.Add) > 0 {
+			v, err = s.Svc.AddPackages(host, in.Add)
+		}
+		if err == nil && len(in.Remove) > 0 {
+			v, err = s.Svc.RemovePackages(host, in.Remove)
+		}
+		return v, err
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/settings", post(func(r *http.Request, in struct {
+		Path  []string
+		Value any
+		Unset bool
+	}) (any, error) {
+		if in.Unset {
+			return s.Svc.UnsetOption(r.PathValue("host"), in.Path)
+		}
+		return s.Svc.SetOption(r.PathValue("host"), in.Path, in.Value)
+	}))
 	api.HandleFunc("GET /api/model", s.model)
 	api.HandleFunc("GET /api/model/diff", s.modelDiff)
 	api.HandleFunc("GET /api/targets", get(func(r *http.Request) (any, error) {

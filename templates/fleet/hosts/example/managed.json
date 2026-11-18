@@ -1,0 +1,13 @@
+{
+  "packages": [
+    "git",
+    "htop"
+  ],
+  "settings": {
+    "services": {
+      "openssh": {
+        "enable": true
+      }
+    }
+  }
+}

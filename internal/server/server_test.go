@@ -489,6 +489,41 @@ func TestModelAndDiffOverHTTP(t *testing.T) {
 	}
 }
 
+func TestManagedEditsOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	var v core.ManagedView
+	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"add": []string{"git", "htop"}}, &v); code != 200 || len(v.Packages) != 2 {
+		t.Fatalf("add packages: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"remove": []string{"htop"}}, &v); code != 200 || len(v.Packages) != 1 {
+		t.Fatalf("remove packages: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/settings", map[string]any{"path": []string{"services", "openssh", "enable"}, "value": true}, &v); code != 200 {
+		t.Fatalf("set option: %d", code)
+	}
+	var after core.ManagedView
+	if code := e.do(t, "POST", "/api/hosts/web/settings", map[string]any{"path": []string{"services", "openssh", "enable"}, "unset": true}, &after); code != 200 || len(after.Settings) != 0 {
+		t.Fatalf("unset option: %d %+v", code, after)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/settings", map[string]any{"path": []string{"time", "timeZone"}}, nil); code != 400 {
+		t.Fatalf("set without a value: %d", code)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"add": []string{"rm -rf"}}, nil); code != 400 {
+		t.Fatalf("bad package name: %d", code)
+	}
+	var got core.ManagedView
+	e.do(t, "GET", "/api/hosts/web/managed", nil, &got)
+	if got.Path != "hosts/web/managed.json" || !got.Exists || got.Packages[0] != "git" {
+		t.Fatalf("managed view %+v", got)
+	}
+	var st core.Status
+	e.do(t, "GET", "/api/status", nil, &st)
+	if len(st.Files) != 1 || st.Files[0].Path != "hosts/web/managed.json" {
+		t.Fatalf("an edit by clicking is not a normal change: %+v", st.Files)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {

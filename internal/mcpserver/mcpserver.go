@@ -172,6 +172,31 @@ func New(svc *core.Service, version string) *mcp.Server {
 		return map[string]string{"output": out}, err
 	})
 
+	type hostPackages struct {
+		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Packages []string `json:"packages" jsonschema:"nixpkgs attribute names, e.g. htop or python3Packages.requests"`
+	}
+	type hostPath struct {
+		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Path []string `json:"path" jsonschema:"option path as separate parts, e.g. [\"services\", \"openssh\", \"enable\"]"`
+	}
+	tool(s, "add_packages", "Install nixpkgs packages on a machine, through its managed.json (hosts/<host>/managed.json).", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
+		return svc.AddPackages(in.Host, in.Packages)
+	})
+	tool(s, "remove_packages", "Remove packages from a machine's managed.json. Packages added in hand-written Nix files must be edited there.", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
+		return svc.RemovePackages(in.Host, in.Packages)
+	})
+	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types.", func(ctx context.Context, in struct {
+		Host  string   `json:"host"`
+		Path  []string `json:"path"`
+		Value any      `json:"value" jsonschema:"the JSON value: boolean, number, string, list or object"`
+	}) (core.ManagedView, error) {
+		return svc.SetOption(in.Host, in.Path, in.Value)
+	})
+	tool(s, "unset_option", "Remove an option setting from a machine's managed.json.", func(ctx context.Context, in hostPath) (core.ManagedView, error) {
+		return svc.UnsetOption(in.Host, in.Path)
+	})
+
 	tool(s, "list_targets", "List the NixOS, home-manager and nix-darwin configurations in the staged flake, with the attribute to pass to run_check.", func(ctx context.Context, _ struct{}) (map[string][]core.Target, error) {
 		t, err := svc.Jobs.Targets(ctx)
 		return map[string][]core.Target{"targets": t}, err

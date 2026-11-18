@@ -25,6 +25,8 @@
           specialArgs = { inherit inputs; };
           modules = [
             ./hosts/${name}
+            # Packages and options changed by clicking in nixos-manager.
+            (import ./modules/managed.nix ./hosts/${name}/managed.json)
             ./modules/common.nix
             inputs.comin.nixosModules.comin
             inputs.home-manager.nixosModules.home-manager

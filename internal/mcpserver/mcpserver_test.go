@@ -89,6 +89,23 @@ func TestToolsList(t *testing.T) {
 	}
 }
 
+func TestManagedTools(t *testing.T) {
+	cs, svc := session(t)
+	var v core.ManagedView
+	call(t, cs, "add_packages", map[string]any{"host": "web", "packages": []string{"htop", "git"}}, &v)
+	call(t, cs, "set_option", map[string]any{"host": "web", "path": []string{"services", "openssh", "enable"}, "value": true}, &v)
+	call(t, cs, "remove_packages", map[string]any{"host": "web", "packages": []string{"htop"}}, &v)
+	call(t, cs, "unset_option", map[string]any{"host": "web", "path": []string{"services", "openssh", "enable"}}, &v)
+	call(t, cs, "set_option", map[string]any{"host": "web", "path": []string{"time", "timeZone"}, "value": "Europe/Madrid"}, &v)
+	got, err := svc.ManagedView("web")
+	if err != nil || len(got.Packages) != 1 || got.Packages[0] != "git" || got.Settings["time"] == nil {
+		t.Fatalf("managed file after MCP edits %+v %v", got, err)
+	}
+	if res := call(t, cs, "add_packages", map[string]any{"host": "web", "packages": []string{"$(evil)"}}, nil); !res.IsError {
+		t.Fatal("invalid package accepted over MCP")
+	}
+}
+
 func TestEditCheckCommitFlow(t *testing.T) {
 	cs, svc := session(t)
 	var w struct{ Hash string }
