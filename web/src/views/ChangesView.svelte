@@ -15,6 +15,7 @@
   // ---- what changes on each machine ----
   let diffs = $state<HostDiff[] | null>(null)
   let diffError = $state('')
+  let headError = $state('')
   let computing = $state(false)
   let alive = true
   let seq = 0
@@ -32,6 +33,7 @@
       }
       diffs = r.hosts ?? []
       diffError = r.error ?? ''
+      headError = r.headError ?? ''
       computing = false
     } catch (e) {
       if (mine === seq) diffError = e instanceof Error ? e.message : String(e)
@@ -89,6 +91,12 @@
         On the machines
         {#if computing}<span class="badge busy"><span class="dot busy"></span>Evaluating both versions…</span>{/if}
       </h2>
+      {#if headError}
+        <div class="card head-error" role="alert">
+          <p><strong>The last commit does not evaluate</strong>, so every machine is compared with nothing and shows as new.</p>
+          <pre class="errpre">{headError}</pre>
+        </div>
+      {/if}
       {#if diffError && !diffs?.length}
         <p class="error-text">{diffError}</p>
       {:else if diffs === null}
@@ -224,6 +232,16 @@
     padding-top: 2px;
     color: var(--fg-muted);
     font-size: var(--fs-sm);
+  }
+  .head-error {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  }
+  .head-error p {
+    margin: 0;
   }
   .errpre {
     margin: 0;

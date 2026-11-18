@@ -383,6 +383,9 @@ func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
 	if work.Error != "" {
 		out["error"] = work.Error
 	}
+	if head.Error != "" { // every machine would look new; say why
+		out["headError"] = head.Error
+	}
 	respond(w, out, nil)
 }
 

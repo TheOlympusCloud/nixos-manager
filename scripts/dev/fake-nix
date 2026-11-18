@@ -5,7 +5,13 @@
 #   NIXMGR_FAKE_DELAY     seconds to wait per machine, to see progress in the UI
 dir=${NIXMGR_FAKE_FIXTURES:-$(dirname "$0")/../../internal/core/testdata/fleet}
 case "$*" in
-  *"nixmgr:discover"*) cat "$dir/discover.json" ;;
+  *"nixmgr:discover"*)
+    # A file named BROKEN in the evaluated tree plays a flake with a syntax error.
+    if [ -f "${NIXMGR_FLAKE#path:}/BROKEN" ]; then
+      echo "error: syntax error, unexpected '}' at /nix/store/x-source/flake.nix:3:1" >&2
+      exit 1
+    fi
+    cat "$dir/discover.json" ;;
   *"nixmgr:host"*)
     sleep "${NIXMGR_FAKE_DELAY:-0}"
     if [ -f "$dir/host-$NIXMGR_HOST.json" ]; then

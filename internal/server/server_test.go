@@ -566,6 +566,33 @@ func TestSearchOverHTTP(t *testing.T) {
 	}
 }
 
+// A last commit that does not evaluate must not make every machine look new.
+func TestDiffReportsABrokenHead(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	if _, err := e.svc.Write("BROKEN", "x\n", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Stage(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Commit(ctx, "chore: broken", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Delete("BROKEN"); err != nil {
+		t.Fatal(err)
+	}
+	var diff struct {
+		HeadError string
+		Hosts     []core.HostDiff
+	}
+	e.ready(t, "/api/model/diff", &diff)
+	if !strings.Contains(diff.HeadError, "syntax error") {
+		t.Fatalf("diff against a broken commit: %+v", diff)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {
