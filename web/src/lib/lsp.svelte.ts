@@ -29,17 +29,41 @@ export function socketTransport(sock: SocketLike): Transport {
   }
 }
 
+const KEEP = new Set(['p', 'br', 'hr', 'pre', 'code', 'em', 'strong', 'b', 'i', 'del', 'sub', 'sup', 'a', 'ul', 'ol', 'li',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'div'])
+const DROP = new Set(['script', 'style', 'template', 'svg', 'math', 'iframe', 'object', 'embed', 'noscript', 'textarea', 'title', 'select', 'img', 'video', 'audio', 'form', 'input', 'button', 'link', 'meta', 'base'])
+
 /**
- * Hover docs are Markdown rendered to HTML; option descriptions come from flake inputs,
- * so strip anything that could run script before it reaches the page.
+ * Hover docs are Markdown rendered to HTML, and option descriptions come from flake inputs.
+ * Rebuild them from an allowlist: plain formatting tags, text, class names and http(s) links only.
  */
 export function sanitizeHTML(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  doc.querySelectorAll('script, style, iframe, object, embed, link, meta, form, base').forEach((el) => el.remove())
-  for (const el of doc.body.querySelectorAll('*'))
-    for (const a of [...el.attributes])
-      if (a.name.startsWith('on') || /^\s*(javascript|data|vbscript):/i.test(a.value)) el.removeAttribute(a.name)
-  return doc.body.innerHTML
+  const out = document.createElement('div')
+  const copy = (from: Node, to: Node) => {
+    for (const n of from.childNodes) {
+      if (n.nodeType === Node.TEXT_NODE) {
+        to.appendChild(document.createTextNode(n.textContent ?? ''))
+        continue
+      }
+      if (n.nodeType !== Node.ELEMENT_NODE) continue
+      const el = n as Element
+      const tag = el.localName
+      if (DROP.has(tag) || el.namespaceURI !== 'http://www.w3.org/1999/xhtml') continue
+      if (!KEEP.has(tag)) {
+        copy(el, to) // unknown wrapper: keep its text
+        continue
+      }
+      const clean = document.createElement(tag)
+      const cls = el.getAttribute('class')
+      if (cls) clean.setAttribute('class', cls)
+      const href = el.getAttribute('href')?.trim() ?? ''
+      if (tag === 'a' && /^https?:\/\//i.test(href)) clean.setAttribute('href', href)
+      copy(el, clean)
+      to.appendChild(clean)
+    }
+  }
+  copy(new DOMParser().parseFromString(html, 'text/html').body, out)
+  return out.innerHTML
 }
 
 export const lspState = $state({ status: 'off' as 'off' | 'connecting' | 'ready' | 'down' })
