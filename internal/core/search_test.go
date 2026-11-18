@@ -103,3 +103,20 @@ func TestSearchIndexFailureIsReportedOnce(t *testing.T) {
 		t.Fatalf("refresh after a failure: %v %v", job, err)
 	}
 }
+
+// Options declared by the repo's own modules appear once committed, without a manual refresh.
+func TestOptionsIndexFollowsCommits(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, "testdata/fleet")
+	_, job, _ := s.Jobs.SearchOptions(ctx, "workstation", "openssh", 10)
+	wait(t, job)
+	if _, again, _ := s.Jobs.SearchOptions(ctx, "workstation", "openssh", 10); again != nil {
+		t.Fatal("index rebuilt without a change")
+	}
+	write(t, s.Repo, "modules/mine.nix", "{ lib, ... }: { options.my.thing = lib.mkEnableOption \"thing\"; }\n")
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "feat: my module", true))
+	if _, rebuild, _ := s.Jobs.SearchOptions(ctx, "workstation", "openssh", 10); rebuild == nil {
+		t.Fatal("a commit did not refresh the option index")
+	}
+}

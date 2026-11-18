@@ -162,12 +162,16 @@ func (js *Jobs) lockFile() []byte {
 	return b
 }
 
-func indexKey(kind, host string, lock []byte) string {
+// indexKey names an index. Options also depend on the repo's own modules, so
+// their key follows the last commit as well as flake.lock.
+func (js *Jobs) indexKey(ctx context.Context, kind, host string) string {
+	lock := js.lockFile()
 	if kind == "packages" {
 		return "packages " + nixpkgsRef(lock)
 	}
 	h := sha256.Sum256(lock)
-	return "options " + host + " " + hex.EncodeToString(h[:8])
+	head, _ := js.Repo.headTree(ctx)
+	return "options " + host + " " + hex.EncodeToString(h[:8]) + " " + head
 }
 
 // index returns a ready index, or the job building it, or the error that
@@ -176,7 +180,7 @@ func (js *Jobs) index(ctx context.Context, kind, host string) (any, *Job, error)
 	if kind == "options" && !hostName.MatchString(host) {
 		return nil, nil, errorf(ErrInvalid, "invalid machine name %q", host)
 	}
-	key := indexKey(kind, host, js.lockFile())
+	key := js.indexKey(ctx, kind, host)
 	js.mu.Lock()
 	defer js.mu.Unlock()
 	if idx, ok := js.indexes[key]; ok {
@@ -203,6 +207,11 @@ func (js *Jobs) startIndex(ctx context.Context, kind, host, key string) (any, *J
 		js.mu.Lock()
 		if err != nil {
 			return nil, nil, err
+		}
+		for _, j := range js.jobs { // another request may have started it while unlocked
+			if j.key == key && !j.finishedState() {
+				return nil, j, nil
+			}
 		}
 	}
 	j, err := js.enqueue(JobRequest{Kind: kind, Host: host}, tree, key)
@@ -250,7 +259,7 @@ func (js *Jobs) RefreshIndex(ctx context.Context, kind, host string) (*Job, erro
 	if kind == "options" && !hostName.MatchString(host) {
 		return nil, errorf(ErrInvalid, "invalid machine name %q", host)
 	}
-	key := indexKey(kind, host, js.lockFile())
+	key := js.indexKey(ctx, kind, host)
 	js.mu.Lock()
 	defer js.mu.Unlock()
 	delete(js.indexes, key)

@@ -19,7 +19,7 @@ const (
 	jobTimeout  = 30 * time.Minute
 	maxOutput   = 8 << 20 // per job; nix -L can be chatty
 	keepJobs    = 50
-	queueLength = 32
+	queueLength = 256 // skipped model jobs keep their slot until the worker drains them
 )
 
 // Jobs runs Nix commands one at a time, in submission order, and keeps their
