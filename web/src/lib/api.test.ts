@@ -81,3 +81,11 @@ describe('withQuery', () => {
     expect(withQuery('/api/diff', { staged: false, path: '' })).toBe('/api/diff?staged=false')
   })
 })
+
+describe('withQuery arrays', () => {
+  it('repeats array parameters and skips empty values', () => {
+    expect(withQuery('/api/fleet/values', { name: ['a.b', 'c."d.e"'], host: [], x: '' })).toBe(
+      '/api/fleet/values?name=a.b&name=c.%22d.e%22',
+    )
+  })
+})

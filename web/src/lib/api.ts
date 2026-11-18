@@ -56,7 +56,19 @@ export type Host = {
   ports: { tcp: number[]; udp: number[]; firewall: boolean }
   fileSystems: { mountPoint: string; fsType: string; device: string }[]
   files: string[]
+  /** Security and maintenance facts the fleet insights look at. */
+  checks?: Checks
   error?: string | null
+}
+export type Checks = {
+  ssh: boolean
+  /** null: the NixOS default, which allows passwords. */
+  sshPasswordAuthentication: boolean | null
+  sshPermitRootLogin: string | null
+  fail2ban: boolean
+  autoGC: boolean
+  autoOptimise: boolean
+  zram: boolean
 }
 export type Home = { name: string; packages: string[]; programs: string[]; error?: string | null }
 export type Input = { name: string; type: string; url: string; rev: string; lastModified: number }
@@ -76,8 +88,45 @@ export type HostDiff = {
   usersRemoved?: string[]
   portsAdded?: string[]
   portsRemoved?: string[]
+  /** Packages kept but at another version, e.g. after a nixpkgs update. */
+  versionsChanged?: VersionChange[]
 }
-export type ModelDiffReply = { state: 'ready'; hosts?: HostDiff[]; error?: string; headError?: string } | { state: 'computing'; jobs: string[] }
+export type VersionChange = { name: string; from: string; to: string }
+/** A flake input added, removed or moved to another revision; compareUrl for GitHub inputs. */
+export type InputChange = {
+  name: string
+  status: 'added' | 'removed' | 'updated'
+  fromRev?: string
+  toRev?: string
+  fromDate?: number
+  toDate?: number
+  compareUrl?: string
+}
+export type ModelDiffReply =
+  | { state: 'ready'; hosts?: HostDiff[]; inputs?: InputChange[]; error?: string; headError?: string }
+  | { state: 'computing'; jobs: string[] }
+
+/** A health or consistency finding about the fleet. */
+export type Insight = {
+  id: string
+  severity: 'error' | 'warning' | 'info'
+  title: string
+  detail: string
+  hosts: string[]
+  /** settings: managed.json values that resolve it on each affected machine; updateInput: a flake input to update. */
+  fix?: { label: string; settings?: { path: string[]; value: unknown }[]; updateInput?: string }
+}
+export type InsightsReply = { state: 'ready'; insights: Insight[] } | { state: 'computing'; job: string }
+
+/** An option's effective value on one machine. files: repo files that define it ("nixos" = NixOS or an input). */
+export type HostValue = { host: string; exists: boolean; value: unknown; files: string[]; type: string; error?: string }
+export type OptionValues = { name: string; path: string[]; hosts: HostValue[] }
+export type ValuesReply = { state: 'ready'; values: OptionValues[] } | { state: 'computing'; job: string }
+
+export type MachineRole = 'minimal' | 'server' | 'desktop'
+export type MachineSpec = { name: string; system: 'x86_64-linux' | 'aarch64-linux'; role: MachineRole; hardware?: string }
+/** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. */
+export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string }
 
 /** The machine's app-owned file (hosts/<host>/managed.json). */
 export type Managed = { host?: string; path: string; exists: boolean; hash: string; packages: string[]; settings: Record<string, unknown> }
@@ -133,14 +182,20 @@ export async function request<T>(method: string, path: string, body?: unknown): 
   return (await res.json()) as T
 }
 
-export function withQuery(path: string, params: Record<string, string | number | boolean | undefined>): string {
+type QueryValue = string | number | boolean | undefined | string[]
+
+/** Arrays become repeated parameters (name=a&name=b); empty values are left out. */
+export function withQuery(path: string, params: Record<string, QueryValue>): string {
   const q = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') q.set(k, String(v))
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) for (const item of v) q.append(k, item)
+    else if (v !== undefined && v !== '') q.set(k, String(v))
+  }
   const s = q.toString()
   return s ? `${path}?${s}` : path
 }
 
-const get = <T>(path: string, params: Record<string, string | number | boolean | undefined> = {}) =>
+const get = <T>(path: string, params: Record<string, QueryValue> = {}) =>
   request<T>('GET', withQuery(path, params))
 const post = <T = void>(path: string, body: unknown = {}) => request<T>('POST', path, body)
 
@@ -183,7 +238,13 @@ export const api = {
 
   // These answer 202 while a job computes the result; the body's `state` says which.
   model: () => get<ModelReply>('/api/model', { at: 'working' }),
-  modelDiff: () => get<ModelDiffReply>('/api/model/diff'),
+  /** The last commit against the working copy, or with rev: that commit against its parent. */
+  modelDiff: (rev?: string) => get<ModelDiffReply>('/api/model/diff', rev ? { rev } : {}),
+  insights: () => get<InsightsReply>('/api/insights'),
+  /** Effective values of options (full names, quoted segments allowed) on all machines, or the given ones. */
+  optionValues: (names: string[], hosts: string[] = []) =>
+    get<ValuesReply>('/api/fleet/values', { name: names, host: hosts }),
+  createMachine: (spec: MachineSpec) => post<MachineCreated>('/api/machines', spec),
   refreshModel: () => post<{ job: string }>('/api/model/refresh').then((r) => r.job),
   managed: (host: string) => get<Managed>(`/api/hosts/${encodeURIComponent(host)}/managed`),
   editPackages: (host: string, edit: { add?: string[]; remove?: string[] }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/packages`, edit),
