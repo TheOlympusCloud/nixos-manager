@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,8 @@ func TestDeploymentOverview(t *testing.T) {
 	at(time.Minute, "pi", ct, "", "done", "")
 	at(time.Minute, "stale", c3, "", "done", "")
 	at(time.Minute, "ghost", sha('e'), "", "done", "")
+	at(2*time.Minute, "pc", c2, "", "done", "")
+	at(time.Minute, "pc", c3, "build", "built", "") // built, but comin has not switched to it yet
 
 	ov := must[DeployOverview](t)(d.Overview(ctx, []string{"homeserver", "newbox", "pi"}, now))
 	if !ov.Reporting || ov.Branch != "main" || len(ov.Commits) != 3 || ov.Commits[0].SHA != c3 {
@@ -126,11 +129,11 @@ func TestDeploymentOverview(t *testing.T) {
 	for _, m := range ov.Machines {
 		got[m.Host] = m
 	}
-	if len(got) != 9 {
+	if len(got) != 10 {
 		t.Fatalf("machines: %v", ov.Machines)
 	}
 	want := map[string]string{"homeserver": "current", "workstation": "behind", "oldbox": "silent", "laptop": "failed",
-		"nas": "current", "pi": "current", "stale": "current", "ghost": "unknown", "newbox": "never"}
+		"nas": "current", "pi": "current", "stale": "current", "ghost": "unknown", "newbox": "never", "pc": "behind"}
 	for h, st := range want {
 		if got[h].State != st {
 			t.Errorf("%s: state %q, want %q (%+v)", h, got[h].State, st, got[h])
@@ -150,6 +153,14 @@ func TestDeploymentOverview(t *testing.T) {
 	}
 	if n := got["newbox"]; n.Commit != "" || len(n.Reports) != 0 || !n.LastSeen.IsZero() {
 		t.Errorf("newbox: %+v", n)
+	}
+	if p := got["pc"]; p.Commit != c2 || p.Behind != 1 {
+		t.Errorf("a build that is not deployed yet is not what pc runs: %+v", p)
+	}
+	at(0, "pc", c3, "deploy", "done", "")
+	ov = must[DeployOverview](t)(d.Overview(ctx, []string{"pc"}, now))
+	if i := slices.IndexFunc(ov.Machines, func(m MachineDeployment) bool { return m.Host == "pc" }); i < 0 || ov.Machines[i].State != "current" || ov.Machines[i].Commit != c3 {
+		t.Errorf("pc after deploying c3: %+v", ov.Machines)
 	}
 
 	var nilD *Deployments

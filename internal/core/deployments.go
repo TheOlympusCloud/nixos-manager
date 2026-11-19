@@ -290,7 +290,9 @@ func (d *Deployments) Overview(ctx context.Context, hosts []string, now time.Tim
 				m.Failure = &m.Reports[0]
 			}
 		}
-		if i := slices.IndexFunc(m.Reports, func(r DeployReport) bool { return !r.failed() }); i >= 0 {
+		// What it runs: the last deployment, or a build that left its system unchanged ("already built").
+		// "built" is not running yet: comin switches (or waits for confirmation) after it, then reports.
+		if i := slices.IndexFunc(m.Reports, func(r DeployReport) bool { return !r.failed() && r.Status != "built" }); i >= 0 {
 			m.Commit, m.DeployedAt = m.Reports[i].Commit, m.Reports[i].At
 		}
 		known := false // the commit is in this working copy
