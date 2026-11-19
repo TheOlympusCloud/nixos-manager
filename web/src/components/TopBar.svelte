@@ -116,6 +116,23 @@
     mergeBranch(b, current)
   }
 
+  // Pushes made elsewhere (the Forgejo webhook fetches them) show up here without a reload.
+  $effect(() => {
+    const id = setInterval(poll, 15000)
+    return () => clearInterval(id)
+  })
+  async function poll() {
+    const before = app.status
+    if (document.visibilityState !== 'visible' || busy || !before || app.needLogin) return
+    const now = await api.status().catch(() => null)
+    if (!now || app.status !== before) return // an action refreshed it meanwhile
+    if (now.staged_tree !== before.staged_tree || now.branch !== before.branch) {
+      await Promise.all([refresh(), syncOpenTabs()]) // the files moved: a fast-forward, or a client of the API
+      app.logVersion++
+    } else if (now.behind !== before.behind || now.ahead !== before.ahead || now.upstream !== before.upstream) app.status = now
+  }
+  const incoming = $derived(status?.upstream && status.behind > 0 ? status.behind : 0)
+
   function onWindowClick(e: MouseEvent) {
     const el = menu === 'branch' ? branchEl : menu === 'user' ? userEl : null
     if (el && !el.contains(e.target as Node)) menu = ''
@@ -177,8 +194,13 @@
     {/if}
   </div>
 
+  {#if incoming}
+    <button class="incoming" onclick={() => pullOrPush('pull')} disabled={!!busy} aria-label="{incoming} new on Forgejo: pull" title="Forgejo has {incoming} commit{incoming === 1 ? '' : 's'} this console does not have yet. Pull brings {incoming === 1 ? 'it' : 'them'} in.">
+      <Icon name="arrow-down" size={13} /><span class="num">{incoming}</span><span class="lbl">new on Forgejo</span>
+    </button>
+  {/if}
   {#if status?.upstream}
-    <span class="sync num" title="Tracking {status.upstream}: {status.ahead} ahead, {status.behind} behind">
+    <span class="sync num" class:quiet={incoming && !status.ahead} title="Tracking {status.upstream}: {status.ahead} ahead, {status.behind} behind">
       <span><Icon name="up" size={13} />{status.ahead}</span>
       <span><Icon name="arrow-down" size={13} />{status.behind}</span>
     </span>
@@ -186,7 +208,7 @@
     <span class="muted small" title="This branch has no remote branch yet; Push creates it">Not pushed yet</span>
   {/if}
 
-  <button class="ghost" class:off={!!remoteMissing} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('pull')} disabled={!!busy} title={remoteMissing || 'Pull from the remote'}>
+  <button class="ghost" class:off={!!remoteMissing} class:twin={!!incoming} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('pull')} disabled={!!busy} title={remoteMissing || 'Pull from the remote'}>
     <Icon name="pull" size={15} /><span class="lbl">{busy === 'pull' ? 'Pulling…' : 'Pull'}</span>
   </button>
   <button class="ghost" class:off={!!remoteMissing} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('push')} disabled={!!busy} title={remoteMissing || 'Push to the remote; the machines deploy what is pushed'}>
@@ -297,10 +319,27 @@
     color: var(--fg-muted);
     font-size: var(--fs-sm);
   }
+  .sync.quiet {
+    display: none; /* "N new on Forgejo" already says it */
+  }
   .sync span {
     display: inline-flex;
     align-items: center;
     gap: 2px;
+  }
+  .incoming {
+    height: 26px;
+    padding: 0 10px 0 8px;
+    gap: 5px;
+    color: var(--accent);
+    font-size: var(--fs-sm);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: 13px;
+  }
+  .incoming:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .user {
     padding: 0 6px 0 4px;
@@ -457,6 +496,9 @@
     .topbar {
       gap: 4px;
       padding: 0 var(--s2);
+    }
+    .twin {
+      display: none; /* the "new on Forgejo" button pulls too */
     }
   }
 </style>

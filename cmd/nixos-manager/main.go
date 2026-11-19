@@ -37,7 +37,7 @@ Environment:
   NIXMGR_PASSWORD_HASH or _FILE             bcrypt hash of the login password (required)
   NIXMGR_DATA      state folder (default /var/lib/nixos-manager)
   NIXMGR_REPO      working copy (default $NIXMGR_DATA/repo)
-  NIXMGR_REMOTE    git remote to clone from and push to (optional)
+  NIXMGR_REMOTE    git remote to clone from and push to (optional; also settable in Settings)
   NIXMGR_LISTEN    address to listen on (default 127.0.0.1:8080)
   NIXMGR_NIX, NIXMGR_NIXFMT, NIXMGR_NIXD   tool commands (default nix, nixfmt, nixd)
 `
@@ -99,7 +99,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	repo, err := core.OpenRepo(env("NIXMGR_REPO", filepath.Join(data, "repo")), os.Getenv("NIXMGR_REMOTE"), name, email)
+	repo, err := core.OpenRepoSSH(env("NIXMGR_REPO", filepath.Join(data, "repo")), os.Getenv("NIXMGR_REMOTE"), name, email, filepath.Join(data, "ssh"))
 	if err != nil {
 		return fmt.Errorf("opening the repository: %w", err)
 	}
@@ -115,6 +115,8 @@ func run() error {
 		Svc: svc, Auth: a, UI: web.UI,
 		MCP:  mcpserver.Handler(mcpserver.New(svc, version)),
 		Nixd: strings.Fields(env("NIXMGR_NIXD", "nixd")),
+
+		Forgejo: &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE")},
 	}
 	// No write timeout: job streams, the editor socket and MCP calls are long-lived.
 	hs := &http.Server{Addr: env("NIXMGR_LISTEN", "127.0.0.1:8080"), Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}

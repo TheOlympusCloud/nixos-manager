@@ -10,7 +10,7 @@ export const draft = $state({ message: '' })
 export const repo = $state({ busy: '' as '' | 'pull' | 'push' | 'revert' | 'merge' | 'switch' | 'branch' })
 
 /** Why Pull and Push cannot work, or '' when they can. */
-export const noRemote = () => (app.info && !app.info.remote ? 'No remote is configured: set NIXMGR_REMOTE and restart the server (see Settings).' : '')
+export const noRemote = () => (app.info && !app.info.remote ? 'No remote is configured: connect the Forgejo repository in Settings.' : '')
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 

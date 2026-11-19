@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"net/url"
 	"os"
@@ -53,6 +54,7 @@ type Repo struct {
 	Dir         string
 	AuthorName  string
 	AuthorEmail string
+	SSHDir      string // the app's deploy key and known_hosts (forgejo.go); "" uses ssh's defaults
 
 	mu   sync.Mutex
 	root *os.Root
@@ -62,6 +64,13 @@ type Repo struct {
 // remote, or initialised empty when there is no remote yet. In an existing repo
 // a non-empty remote becomes (or replaces) origin.
 func OpenRepo(dir, remote, name, email string) (*Repo, error) {
+	return OpenRepoSSH(dir, remote, name, email, "")
+}
+
+// OpenRepoSSH is OpenRepo with git's SSH using the deploy key in sshDir when it
+// exists. A clone that fails (the key is not on Forgejo yet, or it is down)
+// starts an empty working copy with origin set, so Settings can connect it.
+func OpenRepoSSH(dir, remote, name, email, sshDir string) (*Repo, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -69,13 +78,26 @@ func OpenRepo(dir, remote, name, email string) (*Repo, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	r := &Repo{Dir: dir, AuthorName: name, AuthorEmail: email}
+	if sshDir != "" { // git runs ssh from the working copy, so a relative path would break
+		if sshDir, err = filepath.Abs(sshDir); err != nil {
+			return nil, err
+		}
+	}
+	r := &Repo{Dir: dir, AuthorName: name, AuthorEmail: email, SSHDir: sshDir}
 	ctx := context.Background()
 	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, fs.ErrNotExist) {
+		cloned := false
 		if remote != "" {
-			_, err = r.git(ctx, "clone", "-q", "--", remote, dir)
-		} else {
+			if _, err = r.git(ctx, "clone", "-q", "--", remote, dir); err != nil {
+				slog.Warn("cannot clone the remote; starting an empty working copy (connect it in Settings)", "remote", redact(remote), "err", strings.ReplaceAll(err.Error(), remote, redact(remote)))
+			}
+			cloned = err == nil
+		}
+		if !cloned {
 			_, err = r.git(ctx, "init", "-q", "-b", "main", dir)
+		}
+		if err == nil && !cloned && remote != "" {
+			_, err = r.git(ctx, "remote", "add", "origin", remote)
 		}
 		if err != nil {
 			return nil, err
@@ -123,9 +145,10 @@ func (r *Repo) gitRun(ctx context.Context, env []string, stdin []byte, args ...s
 	cmd.Dir = r.Dir
 	// Literal pathspecs: a path like "*.nix" names that file, never every .nix file.
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_LITERAL_PATHSPECS=1"), env...)
-	if os.Getenv("GIT_SSH_COMMAND") == "" {
-		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new")
+	if os.Getenv("GIT_SSH_COMMAND") == "" { // the user's own command wins
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+sshCommand(r.SSHDir))
 	}
+	cmd.WaitDelay = 5 * time.Second // a timed-out ssh child must not keep the pipes open forever
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -720,7 +743,10 @@ func (r *Repo) Restore(ctx context.Context, p, rev, baseHash string) error {
 // Remote is origin's URL with any password hidden, or "" when there is none.
 func (r *Repo) Remote(ctx context.Context) string {
 	out, _ := r.git(ctx, "remote", "get-url", "origin")
-	remote := strings.TrimSpace(out)
+	return redact(strings.TrimSpace(out))
+}
+
+func redact(remote string) string {
 	if u, err := url.Parse(remote); err == nil {
 		return u.Redacted()
 	}
@@ -914,6 +940,9 @@ func (r *Repo) Pull(ctx context.Context) (string, error) {
 	up := "origin/" + branch
 	if _, err := r.git(ctx, "rev-parse", "--verify", "-q", "refs/remotes/"+up); err != nil {
 		return "", errorf(ErrInvalid, "%s does not exist on the remote yet; push it first", branch)
+	}
+	if r.hasHead(ctx) && !r.related(ctx, up) {
+		return "", errorf(ErrConflict, "cannot pull: %s.", unrelated)
 	}
 	if !r.hasHead(ctx) {
 		_, err := r.git(ctx, "reset", "-q", up) // unborn local branch: adopt the remote one

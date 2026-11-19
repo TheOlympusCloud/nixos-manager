@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type Commit } from '../lib/api'
+  import { commitUrl, onRemote } from '../lib/forgejo'
   import { app, restoreVersion, type ViewTab } from '../lib/state.svelte'
   import { report } from '../lib/ui.svelte'
   import { ago, basename } from '../lib/util'
@@ -76,12 +77,17 @@
         {#if repoLog === null}
           <li class="empty">Loading…</li>
         {:else}
-          {#each repoLog as c (c.sha)}
+          {#each repoLog as c, i (c.sha)}
             <li class="item two-line" class:selected={current === 'commit:' + c.sha}>
               <button class="item-main" onclick={() => showCommit(c)}>
                 <span class="name">{c.subject}</span>
                 {@render meta(c)}
               </button>
+              {#if app.info?.web && onRemote(i, app.status?.upstream, app.status?.ahead)}
+                <span class="item-tools">
+                  <a class="ext" href={commitUrl(app.info.web, c.sha)} target="_blank" rel="noopener noreferrer" aria-label="Open {c.short} in Forgejo" title="Open {c.short} in Forgejo"><Icon name="external" size={13} /></a>
+                </span>
+              {/if}
             </li>
           {:else}
             <li class="empty">No commits yet. Commit from Changes and they appear here.</li>
@@ -133,5 +139,21 @@
   }
   .row-tools button:hover:not(:disabled) {
     color: var(--fg-strong);
+  }
+  .item.selected .item-tools {
+    opacity: 1;
+  }
+  .ext {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    color: var(--fg-muted);
+    border-radius: var(--r);
+  }
+  .ext:hover,
+  .ext:focus-visible {
+    color: var(--fg-strong);
+    background: var(--bg-active);
   }
 </style>

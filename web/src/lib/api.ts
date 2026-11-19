@@ -1,6 +1,7 @@
 // Typed client for the nixos-manager HTTP API.
 
-export type Info = { root: string; branch: string; author: string; remote: string }
+/** web: the repository's page on Forgejo, or '' when the remote has none. */
+export type Info = { root: string; branch: string; author: string; remote: string; web: string }
 export type TreeEntry = { path: string; dir: boolean }
 export type FileData = { path: string; content: string; hash: string }
 export type Letter = '' | 'M' | 'A' | 'D' | 'R' | '?'

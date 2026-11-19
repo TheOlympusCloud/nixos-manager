@@ -35,6 +35,8 @@ type Server struct {
 	MCP  http.Handler // MCP endpoint, guarded here by bearer tokens
 	Nixd []string     // language server command
 
+	Forgejo *core.Forgejo // Settings → Forgejo and the push webhook; nil turns them off
+
 	lspSlots chan struct{}
 	gz       sync.Map // static path -> gzipped bytes
 }
@@ -270,12 +272,14 @@ func (s *Server) Handler() http.Handler {
 		}
 	}))
 	api.HandleFunc("GET /api/lsp", s.lsp)
+	s.forgejoRoutes(api)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API route")
 	})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("POST /api/hooks/forgejo", s.forgejoHook) // signed by Forgejo, no session
 	mux.Handle("/api/", s.requireSession(api))
 	if s.MCP != nil {
 		mux.Handle("/mcp", s.requireToken(s.MCP))
@@ -367,6 +371,7 @@ func (s *Server) info(r *http.Request) (any, error) {
 		"branch": st.Branch,
 		"author": fmt.Sprintf("%s <%s>", s.Svc.AuthorName, s.Svc.AuthorEmail),
 		"remote": s.Svc.Remote(r.Context()),
+		"web":    s.Svc.WebURL(r.Context()),
 	}, err
 }
 

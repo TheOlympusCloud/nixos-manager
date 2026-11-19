@@ -277,9 +277,48 @@ create `flake.lock`, then stage, check and commit. Connect Forgejo in
 
 ### Forgejo access
 
-- SSH (recommended): create a deploy key with write access on the Forgejo
-  repository and mount the private key and a `known_hosts` file at `/root/.ssh`
-  (see the commented line in `compose.yaml`).
+Connect the repository in **Settings → Forgejo**; the steps are numbered there.
+
+1. **Repository.** Paste its SSH URL (`ssh://git@forgejo.lan:2222/you/nixos-config.git`
+   or `git@forgejo.lan:you/nixos-config.git`). It is stored as `origin` in the
+   working copy's git config. `NIXMGR_REMOTE`, when set, still sets `origin` at
+   every start and wins over the value saved in Settings. A URL with a password
+   or token in it is refused.
+2. **Deploy key.** The app creates an ed25519 key pair the first time Settings
+   needs one: `$NIXMGR_DATA/ssh/id_ed25519` (mode 0600, never sent to the
+   browser) and its `.pub`. Copy the public key into Forgejo: repository →
+   **Settings → Deploy keys → Add deploy key**, and tick **Enable write access**.
+   Git then connects with only this key, and records Forgejo's host key in
+   `$NIXMGR_DATA/ssh/known_hosts` on first contact.
+3. **Test connection** runs `git ls-remote` and says what is wrong in plain
+   words: host unreachable, key refused, repository not found, read-only key,
+   or a changed host key (with the `ssh-keygen -R` line that forgets the old one).
+   If the Forgejo repository already has commits and this working copy has none
+   (only the uncommitted starter flake), Settings offers to use the repository
+   instead; the starter files are kept in git as `refs/nixmgr/starter-backup`.
+   Local commits are never replaced: with two unrelated histories, Pull and the
+   switch are refused. If the Forgejo repository is empty, **Push** fills it.
+4. **Push webhook** (optional, recommended). Forgejo repository → **Settings →
+   Webhooks → Add webhook → Forgejo**: the target URL and the secret shown in
+   Settings, method POST, content type `application/json`, trigger on push
+   events. On a push to the branch the console is on, nixos-manager fetches;
+   when the working copy is clean and has no commits of its own it fast-forwards,
+   otherwise the top bar shows "N new on Forgejo" and **Pull** brings them in.
+   Calls are checked against the secret (HMAC-SHA256), and bodies over 1 MB are
+   refused. The secret lives in `$NIXMGR_DATA/webhook-secret`.
+
+If a clone at start fails (the key is not on Forgejo yet), the server still
+starts with the starter flake and `origin` set, so you can finish the steps above.
+
+Commits in History and files in Code link to Forgejo. The web address is derived
+from the remote (`ssh://git@host:2222/o/r.git` → `https://host/o/r`); set
+another host, port or http under **Web address** if Forgejo's web UI is elsewhere.
+
+Other setups keep working:
+
+- A key you mount at `~/.ssh` (`/root/.ssh` in the container, see
+  `compose.yaml`) is used as before, until you choose **Create a deploy key** in
+  Settings. A `GIT_SSH_COMMAND` in the environment always wins.
 - HTTPS: put `https://<user>:<token>@forgejo.lan` in a git credentials file,
   mount it, and add `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=credential.helper`,
   `GIT_CONFIG_VALUE_0=store --file=/run/secrets/nixmgr/git-credentials` to the
