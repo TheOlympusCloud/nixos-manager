@@ -497,5 +497,683 @@
    ],
    "type": "list of (optionally newline-terminated) single-line string"
   }
+ },
+ "services.jellyfin.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/homeserver/managed.json"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.jellyfin.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/homeserver/managed.json"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.immich.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.immich.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.syncthing.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.syncthing.openDefaultPorts": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.samba.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.samba.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.home-assistant.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.home-assistant.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.adguardhome.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.adguardhome.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.avahi.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.avahi.nssmdns4": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.avahi.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.docker.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/workstation/managed.json"
+   ],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.podman.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/server.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.podman.dockerCompat": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/server.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.libvirtd.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "programs.virt-manager.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.cockpit.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.cockpit.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.prometheus.exporters.node.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.prometheus.exporters.node.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.smartd.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.postgresql.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.ollama.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.open-webui.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.open-webui.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.flatpak.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "hardware.bluetooth.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "hardware.bluetooth.powerOnBoot": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "services.fwupd.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
  }
 }
