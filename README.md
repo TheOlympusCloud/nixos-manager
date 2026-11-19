@@ -10,9 +10,16 @@ An MCP server gives automation the same features.
   interactive graph.
 - **Health**: evaluation errors, a disabled firewall, SSH with passwords or
   root logins, no fail2ban or garbage collection, outdated flake inputs,
-  unsupported NixOS releases, and packages on every machine but one. Most
-  findings have a **Fix** button that applies the setting to every affected
-  machine.
+  unsupported NixOS releases, packages on every machine but one, failed or
+  lagging deployments, and machines a push does not reach (comin off, or
+  pulling another repository). Most findings have a **Fix** button that
+  applies the setting to every affected machine.
+- **Forgejo**: connect the fleet repository from Settings with a deploy key
+  the app creates; a push webhook keeps the console in step with pushes made
+  elsewhere, and commits and files link to their Forgejo pages.
+- **Deployments**: every machine's comin reports what it deployed, so after a
+  push you watch the rollout reach each machine, and see failures with
+  comin's error.
 - **Machine pages**: packages (with the file that adds each one), services and
   programs, users and SSH keys, ports and file systems, and **Essentials**:
   time zone, locale, keyboard, garbage collection, store optimisation, zram,
