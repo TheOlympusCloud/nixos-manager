@@ -8,27 +8,47 @@ An MCP server gives automation the same features.
 - **Fleet graph**: machines, the services and programs they enable, the shared
   modules that configure them, their packages, users and flake inputs, as an
   interactive graph.
+- **Health**: evaluation errors, a disabled firewall, SSH with passwords or
+  root logins, no fail2ban or garbage collection, outdated flake inputs,
+  unsupported NixOS releases, and packages on every machine but one. Most
+  findings have a **Fix** button that applies the setting to every affected
+  machine.
 - **Machine pages**: packages (with the file that adds each one), services and
-  programs, users and home-manager, ports and file systems.
+  programs, users and SSH keys, ports and file systems, and **Essentials**:
+  time zone, locale, keyboard, garbage collection, store optimisation, zram,
+  firewall, SSH, fail2ban and Tailscale, each with its real value and where it
+  is set.
 - **Change things by clicking**: add or remove packages from a search of the
-  nixpkgs the flake locks, and turn services on or set options through forms
-  built from the NixOS option documentation. These edits go into the machine's
-  `hosts/<name>/managed.json`, which `modules/managed.nix` applies; hand-written
-  Nix is never rewritten.
+  nixpkgs the flake locks, add popular services (Jellyfin, Immich, Syncthing,
+  Home Assistant, Docker…) from a catalog, add users and SSH keys, and set any
+  option through forms built from the NixOS option documentation. These edits
+  go into the machine's `hosts/<name>/managed.json`, which `modules/managed.nix`
+  applies with priority over hand-written values (but not over `mkForce`);
+  hand-written Nix is never rewritten.
+- **Real values**: an option's effective value on each machine and the file
+  that sets it, compared across the fleet, with "copy to" other machines.
+- **New machines**: a wizard creates `hosts/<name>/` with a role preset
+  (server, desktop or minimal) and the hardware configuration; the starter
+  flake picks up every folder in `hosts/`.
 - **Fleet matrices**: which package and which service runs on which machine.
+- **Flake inputs**: each input's revision and age; update one or all and see
+  what moved (with compare links) and which package versions change on which
+  machine.
 - **Changes in NixOS terms**: before committing, see per machine which
-  packages, services, users and ports the working copy adds or removes.
+  packages, versions, services, users, ports and settings the working copy
+  changes, and which inputs moved. History shows the same for every commit.
 - **Checks**: `nix flake check` plus a dry build of the chosen configurations,
   run on exactly the staged changes, with live output. A commit needs a passing
   check of the staged changes, and a push needs a passing check of the commit
   being pushed. In the web UI you can override both explicitly; MCP clients
   cannot.
-- **Git**: stage, commit, branches, push and pull, repository and per-file
-  history with diffs and restore. Every commit uses the configured person's
-  name and email.
+- **Git**: stage, commit, branches, push and pull, revert a commit, merge a
+  `testing-<host>` branch, repository and per-file history with diffs and
+  restore. Every commit uses the configured person's name and email.
 - **Code**: a Nix editor with `nixd` completion, diagnostics and option docs,
   and `nixfmt`, for the hand-written files.
-- `nix flake lock` and `nix flake update` for adding or updating inputs.
+- **Command palette** (Ctrl/Cmd+K): jump to any machine, package, service,
+  option, file or action.
 - Login for the UI; named, revocable API tokens for MCP clients.
 
 The repository is a normal git repository whose remote is Forgejo. Each machine
@@ -106,12 +126,14 @@ Create a token on the **Tokens** page and point the client at `/mcp`:
 }
 ```
 
-Fleet tools: `fleet_overview`, `host_details`, `model_diff`, `search_packages`,
-`search_options`, `add_packages`, `remove_packages`, `set_option`,
-`unset_option`. File and git tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
+Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
+`compare_option`, `search_packages`, `search_options`, `add_packages`,
+`remove_packages`, `set_option`, `unset_option`, `create_machine`. File and git
+tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `delete_path`, `format_nix`, `status`, `diff`, `stage`, `unstage`, `discard`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
-`list_branches`, `create_branch`, `switch_branch`, `push`, `pull`,
+`list_branches`, `create_branch`, `switch_branch`, `revert_commit`,
+`merge_branch`, `push`, `pull`,
 `list_targets`, `run_check`, `flake_lock`, `flake_update`. They call the same
 code as the web UI, including the check rules for commit and push, which MCP
 clients cannot override. Writes and restores need the `base_hash` from
