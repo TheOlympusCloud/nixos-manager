@@ -265,7 +265,8 @@
   "fail2ban": true,
   "autoGC": true,
   "autoOptimise": true,
-  "zram": false
+  "zram": false,
+  "sshUserKeys": 1
  },
  "managedPackages": {
   "restic": "restic",

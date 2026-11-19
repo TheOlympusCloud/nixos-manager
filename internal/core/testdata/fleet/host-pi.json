@@ -200,6 +200,7 @@
   "fail2ban": false,
   "autoGC": false,
   "autoOptimise": false,
-  "zram": true
+  "zram": true,
+  "sshUserKeys": 0
  }
 }

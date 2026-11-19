@@ -49,6 +49,7 @@ type Checks struct {
 	AutoGC                    bool    `json:"autoGC"`
 	AutoOptimise              bool    `json:"autoOptimise"`
 	Zram                      bool    `json:"zram"`
+	SSHUserKeys               *int    `json:"sshUserKeys"` // authorized keys of normal users; null: unknown
 }
 
 type Package struct {

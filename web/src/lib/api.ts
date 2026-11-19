@@ -66,6 +66,8 @@ export type Checks = {
   ssh: boolean
   /** null: the NixOS default, which allows passwords. */
   sshPasswordAuthentication: boolean | null
+  /** Authorized SSH keys of normal users; null: unknown. */
+  sshUserKeys: number | null
   sshPermitRootLogin: string | null
   fail2ban: boolean
   autoGC: boolean

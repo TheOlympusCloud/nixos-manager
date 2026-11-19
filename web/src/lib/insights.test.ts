@@ -17,7 +17,10 @@ const ssh: Insight = {
     ],
   },
 }
-const hosts = [host('pi', { managedFile: null }), host('ws'), host('broken', { error: 'boom' })]
+const keys = (sshUserKeys: number | null) => ({
+  checks: { ssh: true, sshPasswordAuthentication: true, sshUserKeys, sshPermitRootLogin: null, fail2ban: false, autoGC: false, autoOptimise: false, zram: false },
+})
+const hosts = [host('pi', { managedFile: null }), host('ws', keys(1)), host('broken', { error: 'boom' })]
 
 describe('insights', () => {
   it('plans a fix only on machines that are Editable here', () => {
@@ -29,6 +32,16 @@ describe('insights', () => {
       ['ws', 'dates', 'weekly'],
     ])
     expect(fixPlan({ ...ssh, fix: { label: 'x', updateInput: 'nixpkgs' } }, hosts).steps).toEqual([])
+  })
+
+  it('leaves out machines where keys-only SSH would lock everyone out', () => {
+    const fleet = [host('ws', keys(1)), host('nokey', keys(0)), host('unknown', keys(null)), host('old')]
+    const p = fixPlan({ ...ssh, hosts: ['ws', 'nokey', 'unknown', 'old'] }, fleet)
+    expect(p.editable).toEqual(['ws'])
+    expect(p.noKey).toEqual(['nokey', 'unknown', 'old'])
+    expect(new Set(p.steps.map((s) => s.host))).toEqual(new Set(['ws']))
+    const gc = { ...ssh, hosts: ['nokey'], fix: { label: 'gc', settings: [{ path: ['nix', 'gc', 'automatic'], value: true }] } }
+    expect(fixPlan(gc, fleet)).toMatchObject({ editable: ['nokey'], noKey: [] })
   })
 
   it('writes the fix as Nix for Code only machines', () => {

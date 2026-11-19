@@ -45,11 +45,14 @@
       {:else}
         {#if plan.steps.length}
           <button class:primary={i.severity !== 'info'} onclick={() => applyFix(i)}>
-            <Icon name="tick" size={14} />{i.fix.label}{plan.codeOnly.length ? ` on ${plan.editable.join(', ')}` : ''}
+            <Icon name="tick" size={14} />{i.fix.label}{plan.codeOnly.length || plan.noKey.length ? ` on ${plan.editable.join(', ')}` : ''}
           </button>
         {:else if plan.codeOnly.length}
           <p class="fix-note unavailable"><Icon name="code" size={13} />{i.fix.label}: change it in code, {plan.codeOnly.join(', ')} {plan.codeOnly.length === 1 ? 'is' : 'are'} Code only</p>
         {/if}
+        {#each plan.noKey as h (h)}
+          <p class="fix-note unavailable"><Icon name="key" size={13} />Not on {h}: no user there has an SSH key, so this would lock everyone out. <a href={machineLink(h, 'users')}>Add a key in Users</a> first.</p>
+        {/each}
       {/if}
     </div>
   {:else if i.fix?.updateInput}

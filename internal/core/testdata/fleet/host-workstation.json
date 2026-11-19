@@ -348,7 +348,8 @@
   "fail2ban": false,
   "autoGC": true,
   "autoOptimise": true,
-  "zram": true
+  "zram": true,
+  "sshUserKeys": 1
  },
  "managedPackages": {
   "vscode": "vscode",

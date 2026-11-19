@@ -27,6 +27,8 @@ export type FixPlan = {
   editable: string[]
   /** Affected machines that only change in code. */
   codeOnly: string[]
+  /** Editable machines left out: the fix allows SSH keys only, and no user there has one. */
+  noKey: string[]
   /** One step per machine and setting, in order. */
   steps: { host: string; path: string[]; value: unknown }[]
 }
@@ -34,11 +36,17 @@ export type FixPlan = {
 /** Who a settings fix can reach. Machines that are not in the model (or do not evaluate) are left out. */
 export function fixPlan(i: Insight, hosts: Host[]): FixPlan {
   const known = i.hosts.map((n) => hosts.find((h) => h.name === n)).filter((h): h is Host => !!h && !h.error)
-  const editable = known.filter((h) => h.managedFile).map((h) => h.name)
   const codeOnly = known.filter((h) => !h.managedFile).map((h) => h.name)
+  const writable = known.filter((h) => h.managedFile)
+  const noKey = restrictsSSH(i) ? writable.filter((h) => !((h.checks?.sshUserKeys ?? 0) > 0)).map((h) => h.name) : []
+  const editable = writable.map((h) => h.name).filter((n) => !noKey.includes(n))
   const steps = editable.flatMap((host) => (i.fix?.settings ?? []).map((s) => ({ host, path: s.path, value: s.value })))
-  return { editable, codeOnly, steps }
+  return { editable, codeOnly, noKey, steps }
 }
+
+const SSH_LOGINS = ['services.openssh.settings.PasswordAuthentication', 'services.openssh.settings.PermitRootLogin']
+/** The fix turns SSH password or root logins off, which locks out a machine where no user has a key. */
+const restrictsSSH = (i: Insight) => (i.fix?.settings ?? []).some((s) => SSH_LOGINS.includes(s.path.join('.')) && s.value !== true && s.value !== 'yes')
 
 /** `services.openssh.settings.PasswordAuthentication = false;` for doing it by hand. */
 export function nixLines(i: Insight): string {
