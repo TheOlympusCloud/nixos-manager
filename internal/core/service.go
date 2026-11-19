@@ -9,7 +9,8 @@ import (
 // get the same rules: the commit gate, path checks and the commit identity.
 type Service struct {
 	*Repo
-	Jobs *Jobs
+	Jobs    *Jobs
+	Deploys *Deployments // what the machines report after comin deploys; nil turns reports off
 }
 
 func NewService(repo *Repo) *Service {

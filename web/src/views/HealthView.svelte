@@ -83,6 +83,8 @@
     </div>
   {:else if i.id === 'eval-error' && i.hosts.length === 1}
     <div class="fix"><a class="btn" href={machineLink(i.hosts[0])}>Open {i.hosts[0]}</a></div>
+  {:else if i.link === '#/deployments'}
+    <div class="fix"><a class="btn" href={i.link}>Open Deployments</a></div>
   {/if}
 {/snippet}
 

@@ -234,12 +234,17 @@ func New(svc *core.Service, version string) *mcp.Server {
 		}
 		return out, nil
 	})
-	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine), each with a suggested fix. noSshKey lists machines where no user has an SSH key: do not apply an SSH fix there before adding one, or nobody can log in.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
+	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine, failed, lagging or silent deployments), each with a suggested fix. noSshKey lists machines where no user has an SSH key: do not apply an SSH fix there before adding one, or nobody can log in.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
 		m, err := working(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return map[string][]core.Insight{"insights": core.Insights(m, time.Now())}, nil
+		ov, _ := svc.Deploys.Overview(ctx, core.HostNames(m), time.Now()) // deployment findings are extra
+		return map[string][]core.Insight{"insights": core.Insights(m, ov.Machines, time.Now())}, nil
+	})
+	tool(s, "deployments", "What each machine runs, as comin reports it after deploying: the last commit it deployed (or built and found unchanged) and when, a failure with comin's error, and how many commits it is behind the branch comin follows for it (main, or testing-<host> when that branch is on top of main). States: current, behind, failed, silent (behind and no report for 7 days), unknown (its commit is not in this working copy: pull first), never (has not reported: the token or the url in modules/common.nix is missing). commits are the newest on main. A push is a deploy: call this after pushing to watch the machines catch up.", func(ctx context.Context, _ struct{}) (core.DeployOverview, error) {
+		m, _, _ := svc.Jobs.Model(ctx, "working") // the machine names, when an evaluation is at hand
+		return svc.Deploys.Overview(ctx, core.HostNames(m), time.Now())
 	})
 	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
 		Names []string `json:"names"`

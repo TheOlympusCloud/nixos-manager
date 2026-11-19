@@ -15,6 +15,7 @@
   import { go, route, type View } from './lib/router.svelte'
   import { activeTab, app, fileTabs, formatTab, init, refresh, saveTab, syncOpenTabs } from './lib/state.svelte'
   import ChangesView from './views/ChangesView.svelte'
+  import DeploymentsView from './views/DeploymentsView.svelte'
   import HealthView from './views/HealthView.svelte'
   import InputsView from './views/InputsView.svelte'
   import MachinePage from './views/MachinePage.svelte'
@@ -66,7 +67,7 @@
     syncOpenTabs()
   }
 
-  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', o: 'options', a: 'health', i: 'inputs', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
+  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', o: 'options', a: 'health', d: 'deployments', i: 'inputs', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
   let pendingG = 0
 
   function onKey(e: KeyboardEvent) {
@@ -140,6 +141,8 @@
           <OptionsView />
         {:else if route.view === 'health'}
           <HealthView />
+        {:else if route.view === 'deployments'}
+          <DeploymentsView />
         {:else if route.view === 'inputs'}
           <InputsView />
         {:else if route.view === 'changes'}

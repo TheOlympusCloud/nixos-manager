@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deploys, watchDeployments } from '../lib/deployments.svelte'
   import { health } from '../lib/health.svelte'
   import { serious } from '../lib/insights'
   import { link, route, type View } from '../lib/router.svelte'
@@ -15,6 +16,7 @@
     { view: 'services', label: 'Services', icon: 'services', key: 's' },
     { view: 'options', label: 'Options', icon: 'sliders', key: 'o' },
     { view: 'health', label: 'Health', icon: 'activity', key: 'a' },
+    { view: 'deployments', label: 'Deployments', icon: 'deploy', key: 'd' },
     { view: 'inputs', label: 'Inputs', icon: 'input', key: 'i' },
     { view: 'changes', label: 'Changes', icon: 'diff', key: 'c' },
     { view: 'history', label: 'History', icon: 'history', key: 'h' },
@@ -23,6 +25,9 @@
   const changes = $derived(app.status?.files.length ?? 0)
   const findings = $derived(serious(health.insights))
   const errors = $derived(findings.some((i) => i.severity === 'error'))
+  // Machines report deployments at any time: check gently everywhere, for this badge and the graph's.
+  $effect(() => watchDeployments())
+  const failedDeploys = $derived(deploys.overview?.machines.filter((m) => m.state === 'failed').length ?? 0)
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const running = $derived(app.jobs.some((j) => ['check', 'lock', 'update'].includes(j.kind) && (j.state === 'running' || j.state === 'queued')))
 
@@ -37,6 +42,7 @@
     <Icon name={icon} size={18} />
     <span class="label">{label}</span>
     {#if view === 'changes' && changes}<span class="count num" aria-label="{changes} changed files">{changes}</span>{/if}
+    {#if view === 'deployments' && failedDeploys}<span class="count num sev err" aria-label="{failedDeploys} failed deployments">{failedDeploys}</span>{/if}
     {#if view === 'health' && findings.length}<span class="count num sev" class:err={errors} aria-label="{findings.length} errors and warnings">{findings.length}</span>{/if}
     {#if view === 'changes' && running}<span class="dot busy" aria-label="A check is running"></span>{/if}
   </a>

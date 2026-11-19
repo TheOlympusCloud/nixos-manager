@@ -19,6 +19,7 @@ type Insight struct {
 	// NoSSHKey: affected machines where no user has an SSH key, so a keys-only fix
 	// would lock everyone out; add a key before applying the fix there.
 	NoSSHKey []string `json:"noSshKey,omitempty"`
+	Link     string   `json:"link,omitempty"` // a console route with more about it, e.g. #/deployments
 }
 
 // InsightFix either sets options in each affected machine's managed.json or updates a flake input.
@@ -35,8 +36,9 @@ type Setting struct {
 
 var severityRank = map[string]int{"error": 0, "warning": 1, "info": 2}
 
-// Insights checks the evaluated fleet; now dates the flake inputs.
-func Insights(m *Model, now time.Time) []Insight {
+// Insights checks the evaluated fleet and what its machines deployed; now dates
+// the flake inputs and the deployments.
+func Insights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	out := []Insight{}
 	add := func(in Insight) { // only when some machine is affected
 		if len(in.Hosts) > 0 {
@@ -133,6 +135,7 @@ func Insights(m *Model, now time.Time) []Insight {
 		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
 	out = append(out, missingPackages(healthy)...)
 	out = append(out, releaseInsights(healthy, now)...)
+	out = append(out, deployInsights(m, deploys, now)...)
 	slices.SortStableFunc(out, func(a, b Insight) int {
 		if d := severityRank[a.Severity] - severityRank[b.Severity]; d != 0 {
 			return d
@@ -241,4 +244,63 @@ func list(xs []string) string {
 		return strings.Join(xs, " and ")
 	}
 	return strings.Join(xs[:len(xs)-1], ", ") + " and " + xs[len(xs)-1]
+}
+
+// deployInsights flags fleet machines whose last deployment failed, that lag
+// behind their branch, or that stopped reporting while others report.
+func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
+	var out []Insight
+	var behind, silent []string
+	reporting := false
+	for _, d := range deploys {
+		reporting = reporting || len(d.Reports) > 0
+		if !slices.ContainsFunc(m.Hosts, func(h Host) bool { return h.Name == d.Host }) {
+			continue // reported by a machine that is not in this fleet (any more)
+		}
+		switch {
+		case d.State == "failed" && d.Failure != nil:
+			f := d.Failure
+			what := "deploy"
+			if f.Phase == "build" {
+				what = "build"
+			}
+			runs := "It has not deployed anything successfully yet."
+			if d.Commit != "" {
+				runs = fmt.Sprintf("It still runs %.7s.", d.Commit)
+			}
+			msg, _, more := strings.Cut(strings.TrimSpace(f.Error), "\n") // the rest is on Deployments
+			if len(msg) > 240 {
+				msg, more = strings.ToValidUTF8(msg[:240], ""), true
+			}
+			if more {
+				msg += "…"
+			}
+			if msg == "" {
+				msg = "comin gave no error message."
+			}
+			out = append(out, Insight{ID: "deploy-failed:" + d.Host, Severity: "error", Hosts: []string{d.Host}, Link: "#/deployments",
+				Title:  fmt.Sprintf("%s failed to %s %.7s", d.Host, what, f.Commit),
+				Detail: fmt.Sprintf("%s %s Deployments shows the error; journalctl -u comin on the machine has the whole log.", msg, runs)})
+		case d.State == "behind" && now.Sub(d.BehindSince) > behindAfter:
+			behind = append(behind, d.Host)
+		case d.State == "never" || d.State == "silent":
+			silent = append(silent, d.Host)
+		}
+	}
+	are := func(hs []string) string { return map[bool]string{true: "has", false: "have"}[len(hs) == 1] }
+	if len(behind) > 0 {
+		it, runs, them := "They", "run", "them"
+		if len(behind) == 1 {
+			it, runs, them = "It", "runs", "it"
+		}
+		out = append(out, Insight{ID: "deploy-behind", Severity: "warning", Hosts: behind, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s not caught up for over an hour", list(behind), are(behind)),
+			Detail: fmt.Sprintf("%s still %s an older commit of the branch comin follows. comin may fail to evaluate or build the new one (older comin versions do not report that), or cannot reach Forgejo: run journalctl -u comin on %s.", it, runs, them)})
+	}
+	if reporting && len(silent) > 0 {
+		out = append(out, Insight{ID: "deploy-silent", Severity: "info", Hosts: silent, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s not reported a deployment in 7 days", list(silent), are(silent)),
+			Detail: "Other machines report what they deploy. Put the report token on these (Deployments shows how), or check that they are on and comin runs."})
+	}
+	return out
 }

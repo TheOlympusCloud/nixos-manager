@@ -1001,3 +1001,25 @@ func (r *Repo) Seed(fsys fs.FS) (bool, error) {
 	})
 	return err == nil, err
 }
+
+// CommitsBetween counts the commits that to has and from lacks (from..to) and
+// says when the oldest of them was committed. from and to are SHAs or full refs
+// chosen by the caller, never user input.
+func (r *Repo) CommitsBetween(ctx context.Context, from, to string) (int, time.Time, error) {
+	out, err := r.git(ctx, "log", "--format=%ct", "--end-of-options", to, "^"+from, "--")
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	lines := strings.Fields(out)
+	var oldest int64
+	for _, l := range lines {
+		var sec int64
+		if _, err := fmt.Sscan(l, &sec); err == nil && (oldest == 0 || sec < oldest) {
+			oldest = sec
+		}
+	}
+	if len(lines) == 0 {
+		return 0, time.Time{}, nil
+	}
+	return len(lines), time.Unix(oldest, 0).UTC(), nil
+}

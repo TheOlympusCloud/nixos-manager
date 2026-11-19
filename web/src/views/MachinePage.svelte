@@ -8,6 +8,8 @@
   import PackagesTab from '../components/machine/PackagesTab.svelte'
   import ServicesTab from '../components/machine/ServicesTab.svelte'
   import TurnOnEditing from '../components/machine/TurnOnEditing.svelte'
+  import DeployBadge from '../components/deployments/DeployBadge.svelte'
+  import { deployOf } from '../lib/deployments.svelte'
   import UsersTab from '../components/machine/UsersTab.svelte'
   import { errorFile, evaluateAgain, fleet, hostByName, loadManaged } from '../lib/fleet.svelte'
   import { arch } from '../lib/format'
@@ -17,6 +19,7 @@
   let { host: name, tab }: { host: string; tab: string } = $props()
 
   const host = $derived(hostByName(name))
+  const deployed = $derived(deployOf(name))
   const pending = $derived(fleet.pending.includes(name) && fleet.computing)
   onMount(() => {
     loadManaged(name)
@@ -94,6 +97,7 @@
               <span class="badge" title="{host.name} does not load a managed.json, so it is changed in its Nix files">Code only</span>
               {#if !showTurnOn}<button class="link small" onclick={() => (showTurnOn = true)}>Turn on editing</button>{/if}
             {/if}
+            {#if deployed && deployed.state !== 'never'}<DeployBadge m={deployed} />{/if}
             <span class="spacer"></span>
             {#if !host.error}<a class="btn" href={link('options', [host.name])}><Icon name="sliders" size={14} />Options</a>{/if}
           </div>

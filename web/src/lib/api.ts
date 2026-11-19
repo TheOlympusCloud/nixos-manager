@@ -120,6 +120,8 @@ export type Insight = {
   hosts: string[]
   /** settings: managed.json values that resolve it on each affected machine; updateInput: a flake input to update. */
   fix?: { label: string; settings?: { path: string[]; value: unknown }[]; updateInput?: string }
+  /** A console route with more about it, e.g. #/deployments. */
+  link?: string
 }
 export type InsightsReply = { state: 'ready'; insights: Insight[] } | { state: 'computing'; job: string }
 
@@ -266,4 +268,33 @@ export const api = {
   tokens: () => get<{ tokens: Token[] }>('/api/tokens').then((r) => r.tokens ?? []),
   createToken: (name: string) => post<{ id: string; name: string; token: string }>('/api/tokens', { name }),
   revokeToken: (id: string) => request<void>('DELETE', `/api/tokens/${encodeURIComponent(id)}`, {}),
+
+  deployments: () => get<DeployOverview>('/api/deployments'),
+  deployToken: () => get<{ token: string }>('/api/deployments/token').then((r) => r.token),
+  regenerateDeployToken: () => post<{ token: string }>('/api/deployments/token').then((r) => r.token),
 }
+
+// ---- deployments (what comin reports from each machine) ----
+
+/** One report: comin deployed (phase deploy: done, failed) or built (phase build: built, already built, failed) a commit. */
+export type DeployReport = { at: string; commit: string; ref?: string; phase: 'deploy' | 'build'; status: string; error?: string; generation?: string }
+/** never: no report; unknown: its commit is not in the working copy or not on the branch; silent: behind with no report for 7 days. */
+export type DeployState = 'current' | 'behind' | 'failed' | 'silent' | 'unknown' | 'never'
+export type MachineDeployment = {
+  host: string
+  state: DeployState
+  /** main, or testing-<host> when comin follows that. */
+  branch: string
+  target?: string
+  /** The last commit it deployed (or built and found unchanged). */
+  commit?: string
+  subject?: string
+  deployedAt?: string
+  lastSeen?: string
+  behind: number
+  behindSince?: string
+  /** The last report, when it is a failure. */
+  failure?: DeployReport
+  reports: DeployReport[]
+}
+export type DeployOverview = { reporting: boolean; branch: string; commits: Commit[]; machines: MachineDeployment[] }

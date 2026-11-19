@@ -5,6 +5,7 @@
   import { groupLabel, groupOrder } from '../../lib/matrix'
   import { codeLink, machineLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
+  import DeploymentCard from '../deployments/DeploymentCard.svelte'
 
   let { host }: { host: Host } = $props()
 
@@ -44,6 +45,8 @@
   </section>
 
   <div>
+    <DeploymentCard host={host.name} />
+
     <section class="section">
       <h2>Users and access</h2>
       <dl class="kv">

@@ -204,7 +204,9 @@ func (s *Server) Handler() http.Handler {
 		case m == nil:
 			respondCode(w, http.StatusAccepted, map[string]string{"state": "computing", "job": j.ID})
 		default:
-			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, time.Now())}, nil)
+			// Deployment findings are extra: Health still answers when git cannot tell them.
+			ov, _ := s.Svc.Deploys.Overview(r.Context(), core.HostNames(m), time.Now())
+			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, ov.Machines, time.Now())}, nil)
 		}
 	})
 	api.HandleFunc("GET /api/fleet/values", func(w http.ResponseWriter, r *http.Request) {
@@ -273,12 +275,15 @@ func (s *Server) Handler() http.Handler {
 	}))
 	api.HandleFunc("GET /api/lsp", s.lsp)
 	s.forgejoRoutes(api)
+	s.deploymentRoutes(api)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API route")
 	})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", s.login)
+	// Machines report what comin deployed with the fleet report token, without a session.
+	mux.HandleFunc("POST /api/deployments/report", s.deployReport)
 	mux.HandleFunc("POST /api/hooks/forgejo", s.forgejoHook) // signed by Forgejo, no session
 	mux.Handle("/api/", s.requireSession(api))
 	if s.MCP != nil {

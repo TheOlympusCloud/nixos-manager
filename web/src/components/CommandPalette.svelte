@@ -33,6 +33,7 @@
     ['services', 'Services', 'services', 'programs features matrix'],
     ['options', 'Options', 'sliders', 'settings nixos configure'],
     ['health', 'Health', 'activity', 'insights findings fix security problems'],
+    ['deployments', 'Deployments', 'deploy', 'comin rollout deployed commit machines behind failed report token'],
     ['inputs', 'Inputs', 'input', 'flake lock nixpkgs update'],
     ['changes', 'Changes', 'diff', 'commit stage diff working copy'],
     ['history', 'History', 'history', 'log commits revert'],

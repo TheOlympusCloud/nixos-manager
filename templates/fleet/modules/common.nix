@@ -1,6 +1,8 @@
 # Settings shared by every machine.
 { ... }:
 {
+  imports = [ ./report-deployments.nix ];
+
   nix.settings.experimental-features = [
     "nix-command"
     "flakes"
@@ -19,6 +21,11 @@
       }
     ];
   };
+
+  # After each deployment, comin tells nixos-manager what this machine now runs.
+  # Set the address the machines reach nixos-manager at (LAN or Tailscale), and put
+  # the report token on each machine: the Deployments view shows both.
+  fleet.deployReport.url = null; # e.g. "http://nixos-manager.home.lan:8080"
 
   home-manager = {
     useGlobalPkgs = true;

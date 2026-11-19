@@ -42,7 +42,7 @@ func TestInsights(t *testing.T) {
 			{Name: "comin", LastModified: now.Unix() - 3*day},
 		},
 	}
-	got := Insights(m, now)
+	got := Insights(m, nil, now)
 	byID := map[string]Insight{}
 	for _, in := range got {
 		byID[in.ID] = in
@@ -82,7 +82,7 @@ func TestInsights(t *testing.T) {
 		t.Errorf("pi's key count is unknown, so the fix must warn about it: %v", in.NoSSHKey)
 	}
 	m.Hosts[1].Checks.SSHUserKeys = ip(2)
-	if in := insightByID(Insights(m, now), "ssh-password"); in.NoSSHKey != nil {
+	if in := insightByID(Insights(m, nil, now), "ssh-password"); in.NoSSHKey != nil {
 		t.Errorf("pi has keys now: %v", in.NoSSHKey)
 	}
 	if in := byID["no-auto-gc"]; len(in.Hosts) != 1 || in.Hosts[0] != "pi" || len(in.Fix.Settings) != 3 {
@@ -97,7 +97,7 @@ func TestInsights(t *testing.T) {
 	if _, ok := byID["missing-package:nano"]; ok {
 		t.Error("NixOS default packages are not a consistency issue")
 	}
-	if len(Insights(&Model{}, now)) != 0 {
+	if len(Insights(&Model{}, nil, now)) != 0 {
 		t.Error("an empty fleet has nothing to report")
 	}
 }
@@ -122,7 +122,7 @@ func TestReleaseInsights(t *testing.T) {
 	}
 	byID := func(m *Model, at time.Time) map[string]Insight {
 		out := map[string]Insight{}
-		for _, in := range Insights(m, at) {
+		for _, in := range Insights(m, nil, at) {
 			out[in.ID] = in
 		}
 		return out
@@ -144,5 +144,41 @@ func TestReleaseInsights(t *testing.T) {
 	}
 	if got := byID(fleet("26.05", "26.05", ""), now); len(got) != 0 {
 		t.Errorf("one supported release (and an unknown one) is healthy: %v", got)
+	}
+}
+
+func TestDeployInsights(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	m := &Model{Hosts: []Host{{Name: "web"}, {Name: "pi"}, {Name: "nas"}, {Name: "new"}, {Name: "off"}, {Name: "fresh"}}}
+	rep := []DeployReport{{At: now}}
+	deploys := []MachineDeployment{
+		{Host: "web", State: "current", Reports: rep},
+		{Host: "pi", State: "failed", Commit: strings.Repeat("a", 40), Reports: rep,
+			Failure: &DeployReport{Commit: strings.Repeat("b", 40), Phase: "build", Status: "failed", Error: "error: attribute 'foo' missing"}},
+		{Host: "nas", State: "behind", Behind: 2, BehindSince: now.Add(-2 * time.Hour), Reports: rep},
+		{Host: "fresh", State: "behind", Behind: 1, BehindSince: now.Add(-10 * time.Minute), Reports: rep},
+		{Host: "new", State: "never", Reports: []DeployReport{}},
+		{Host: "off", State: "silent", Reports: rep},
+		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep}, // not in the fleet
+	}
+	got := Insights(m, deploys, now)
+	f := insightByID(got, "deploy-failed:pi")
+	if f.Severity != "error" || f.Link != "#/deployments" || f.Title != "pi failed to build bbbbbbb" ||
+		!strings.Contains(f.Detail, "attribute 'foo' missing") || !strings.Contains(f.Detail, "still runs aaaaaaa") {
+		t.Errorf("deploy-failed: %+v", f)
+	}
+	if b := insightByID(got, "deploy-behind"); b.Severity != "warning" || strings.Join(b.Hosts, ",") != "nas" {
+		t.Errorf("deploy-behind: %+v", b)
+	}
+	if s := insightByID(got, "deploy-silent"); s.Severity != "info" || strings.Join(s.Hosts, ",") != "new,off" {
+		t.Errorf("deploy-silent: %+v", s)
+	}
+	if g := insightByID(got, "deploy-failed:gone"); g.ID != "" {
+		t.Errorf("a machine outside the fleet got a finding: %+v", g)
+	}
+	// Nobody reports yet: machines that never reported are not news.
+	quiet := []MachineDeployment{{Host: "new", State: "never", Reports: []DeployReport{}}}
+	if s := insightByID(Insights(m, quiet, now), "deploy-silent"); s.ID != "" {
+		t.Errorf("deploy-silent without reporting: %+v", s)
 	}
 }

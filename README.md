@@ -360,6 +360,53 @@ only, for trying a change before merging it into `main`.
 
 Never store secrets in the repository; use sops-nix or agenix.
 
+## Deployments
+
+A push is a deploy: every machine's comin pulls the branch and switches to it.
+With reporting on, each machine tells nixos-manager what comin did, and the
+**Deployments** view shows the latest commits of `main` with the machines that
+run each one, so after a push you watch them catch up. Per machine it shows the
+commit, when it was deployed, and comin's error when a build or switch failed;
+the machine page has the same in its **Deployment** card, and the fleet graph
+marks each machine deployed, behind or failed. **Health** flags a failed
+deployment, a machine behind for over an hour, and one that stopped reporting.
+
+To turn it on (the **Deployments** view walks you through it):
+
+1. In `modules/common.nix`, set the address the machines reach nixos-manager
+   at, then commit and push:
+
+   ```nix
+   fleet.deployReport.url = "http://nixos-manager.home.lan:8080";
+   ```
+
+   Over plain HTTP the token crosses the LAN readable; a Tailscale address or
+   an `https://` one keeps it private.
+
+2. Put the fleet report token on each machine. The view shows the token and the
+   command for each machine; the token travels on stdin:
+
+   ```sh
+   echo 'nxd_…' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'
+   ```
+
+   With sops-nix or agenix, point `fleet.deployReport.tokenFile` at the secret
+   instead. Never commit the token. **Regenerate** replaces it; machines with
+   the old one stop reporting until they get the new one.
+
+3. The first report arrives with the next deployment after both are in place.
+
+`modules/report-deployments.nix` hooks comin's `postDeploymentCommand` and, on
+comin versions that have it, `postBuildCommand`, which also reports failed
+builds and commits that leave a machine unchanged. Without it, a machine whose
+configuration a commit does not change looks behind until a commit does change
+it. The hook posts with `curl` to `/api/deployments/report`, does nothing
+without the token file, and never fails a deployment. nixos-manager keeps the
+last 20 reports per machine in `$NIXMGR_DATA/deployments.json`; the token is in
+`$NIXMGR_DATA/deploy-token`. A repository made from an older starter fleet has
+no hook yet: copy both `report-deployment*` files from `templates/fleet/modules/`
+into its `modules/` and import `report-deployments.nix` from `common.nix`.
+
 ## MCP
 
 Create a token on the **Tokens** page and point the client at `/mcp`:

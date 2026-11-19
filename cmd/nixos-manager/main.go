@@ -110,6 +110,9 @@ func run() error {
 	}
 	svc := core.NewService(repo)
 	svc.Jobs.Nix, svc.Jobs.Nixfmt = env("NIXMGR_NIX", "nix"), env("NIXMGR_NIXFMT", "nixfmt")
+	if svc.Deploys, err = core.OpenDeployments(data, repo); err != nil {
+		return err
+	}
 
 	s := &server.Server{
 		Svc: svc, Auth: a, UI: web.UI,

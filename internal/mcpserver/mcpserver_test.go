@@ -85,7 +85,7 @@ func TestToolsList(t *testing.T) {
 		"list_branches", "create_branch", "switch_branch", "push", "pull", "list_targets", "run_check", "flake_lock", "flake_update",
 		"fleet_overview", "host_details", "model_diff", "add_packages", "remove_packages", "set_option", "unset_option",
 		"search_packages", "search_options", "fleet_insights", "compare_option", "create_machine",
-		"revert_commit", "merge_branch"} {
+		"revert_commit", "merge_branch", "deployments"} {
 		if !have[want] {
 			t.Errorf("missing tool %s", want)
 		}
