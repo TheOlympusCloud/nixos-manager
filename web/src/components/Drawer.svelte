@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte'
+  import { cubicOut } from 'svelte/easing'
   import { fade, fly } from 'svelte/transition'
   import Icon from './Icon.svelte'
 
@@ -42,8 +43,8 @@
 <svelte:window {onkeydown} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Escape closes it from the keyboard) -->
-<div class="scrim" aria-hidden="true" onclick={onclose} transition:fade={{ duration: 150 }}></div>
-<div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" bind:this={el} style:width="min({width}px, calc(100vw - 80px))" transition:fly={{ x: 40, duration: 200 }}>
+<div class="scrim" aria-hidden="true" onclick={onclose} transition:fade={{ duration: 200 }}></div>
+<div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" bind:this={el} style:width="min({width}px, calc(100vw - 80px))" transition:fly={{ x: 48, duration: 320, easing: cubicOut }}>
   <header>
     <h2 id="drawer-title">{title}</h2>
     <button class="icon close" aria-label="Close" title="Close (Esc)" onclick={onclose}><Icon name="x" /></button>
@@ -56,7 +57,8 @@
     position: fixed;
     inset: 0;
     z-index: 29;
-    background: rgb(4 6 9 / 0.38);
+    background: rgb(4 6 9 / 0.42);
+    backdrop-filter: blur(3px);
   }
   .drawer {
     position: fixed;
@@ -69,7 +71,7 @@
     background: var(--bg-side);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--edge), var(--shadow-3);
   }
   header {
     display: flex;

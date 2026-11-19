@@ -218,7 +218,7 @@
     background: var(--bg-side);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--edge), var(--shadow-3);
   }
   .ps::backdrop {
     background: rgb(4 6 9 / 0.6);

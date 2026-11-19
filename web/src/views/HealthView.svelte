@@ -201,9 +201,10 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
   }
   .finding {
     display: grid;
@@ -211,6 +212,10 @@
     gap: 4px 14px;
     align-items: start;
     padding: 14px 16px;
+    transition: background var(--t) var(--ease);
+  }
+  .finding:hover {
+    background: color-mix(in srgb, var(--c, var(--accent)) 4%, transparent);
   }
   .finding + .finding {
     border-top: 1px solid var(--border);
@@ -319,10 +324,20 @@
     border-radius: 2px;
   }
   .progress span {
+    position: relative;
     display: block;
     height: 100%;
+    overflow: hidden;
     background: var(--accent);
-    transition: width var(--t) var(--ease);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+    transition: width 360ms var(--ease);
+  }
+  .progress span::after {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.5), transparent);
+    animation: sheen 1.4s var(--ease) infinite;
+    content: '';
   }
   .by-hand {
     margin-top: 2px;
@@ -369,9 +384,10 @@
     max-width: 640px;
     margin-top: var(--s5);
     padding: var(--s4) var(--s5);
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
   }
   .all-clear h2 {
     margin-bottom: 4px;

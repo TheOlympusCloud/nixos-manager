@@ -1,8 +1,8 @@
 /* Fleet graph: Svelte Flow theme and node styles. */
 
 .fleet-flow {
-  --xy-background-color: var(--bg-deep);
-  --xy-background-pattern-dots-color-default: #222a34;
+  --xy-background-color: transparent; /* the WebGL backdrop shows through */
+  --xy-background-pattern-dots-color-default: rgb(140 170 210 / 0.13);
   --xy-node-border-radius-default: 10px;
   --xy-edge-stroke-default: #3a4654;
   --xy-edge-stroke-width-default: 1.4;
@@ -49,10 +49,16 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   overflow: hidden;
+  box-shadow: var(--shadow-1);
 }
 .fleet-flow .svelte-flow__controls {
   border-radius: var(--r);
   overflow: hidden;
+}
+.fleet-flow .svelte-flow__controls-button {
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 .fleet-flow .svelte-flow__controls-button {
   width: 28px;
@@ -68,7 +74,12 @@
 .fleet-flow .svelte-flow__edge-path {
   transition:
     opacity var(--t) var(--ease),
+    stroke var(--t) var(--ease),
     stroke-width var(--t) var(--ease);
+}
+/* Edges appear after the nodes they join have landed. */
+.fleet-flow .svelte-flow__edge {
+  animation: fade-in 500ms var(--ease) 260ms backwards;
 }
 .fleet-flow .svelte-flow__edge.grouped .svelte-flow__edge-path {
   stroke: color-mix(in srgb, var(--c) 55%, transparent);
@@ -78,6 +89,15 @@
 }
 .fleet-flow .svelte-flow__edge.hl .svelte-flow__edge-path {
   stroke-width: 2.2;
+  /* What you point at flows along its edges, from the machine outward. */
+  stroke-dasharray: 7 5;
+  animation: edge-flow 900ms linear infinite;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--c, #6d7d8f) 70%, transparent));
+}
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
 }
 .fleet-flow .svelte-flow__edge.hl:not(.grouped) .svelte-flow__edge-path {
   stroke: #6d7d8f;
@@ -91,15 +111,54 @@
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--bg-raised);
+  background: var(--surface);
   border: 1px solid var(--line);
   transition:
     opacity var(--t) var(--ease),
-    border-color var(--t-fast) var(--ease),
-    box-shadow var(--t-fast) var(--ease);
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t) var(--ease);
 }
 .node:hover {
-  border-color: var(--line-strong);
+  border-color: color-mix(in srgb, var(--c, var(--accent)) 55%, var(--line-strong));
+}
+/* Nodes land one after another when the graph is drawn. */
+.fleet-flow .svelte-flow__node > .node {
+  animation: pop-in 460ms var(--ease) backwards;
+  animation-delay: calc(var(--k, 12) * 28ms);
+}
+.fleet-flow .svelte-flow__node:nth-child(1) > .node {
+  --k: 0;
+}
+.fleet-flow .svelte-flow__node:nth-child(2) > .node {
+  --k: 1;
+}
+.fleet-flow .svelte-flow__node:nth-child(3) > .node {
+  --k: 2;
+}
+.fleet-flow .svelte-flow__node:nth-child(4) > .node {
+  --k: 3;
+}
+.fleet-flow .svelte-flow__node:nth-child(5) > .node {
+  --k: 4;
+}
+.fleet-flow .svelte-flow__node:nth-child(6) > .node {
+  --k: 5;
+}
+.fleet-flow .svelte-flow__node:nth-child(7) > .node {
+  --k: 6;
+}
+.fleet-flow .svelte-flow__node:nth-child(8) > .node {
+  --k: 7;
+}
+.fleet-flow .svelte-flow__node:nth-child(9) > .node {
+  --k: 8;
+}
+.fleet-flow .svelte-flow__node:nth-child(10) > .node {
+  --k: 9;
+}
+.fleet-flow .svelte-flow__node:nth-child(11) > .node {
+  --k: 10;
 }
 .node.dim {
   opacity: 0.22;
@@ -108,16 +167,43 @@
   border-color: var(--accent);
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent),
+    0 0 34px -6px color-mix(in srgb, var(--accent) 50%, transparent),
     var(--shadow-1);
 }
 .node.machine {
   border-radius: 10px;
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--edge), var(--shadow-1);
   cursor: pointer;
+}
+.node.machine:hover:not(.sel) {
+  box-shadow:
+    var(--edge),
+    0 14px 36px -14px rgb(0 0 0 / 0.8),
+    0 0 28px -10px color-mix(in srgb, var(--accent) 55%, transparent);
+  transform: translateY(-2px);
+}
+.node.machine.err:hover:not(.sel) {
+  --c: var(--red);
+  box-shadow:
+    var(--edge),
+    0 14px 36px -14px rgb(0 0 0 / 0.8),
+    0 0 28px -10px color-mix(in srgb, var(--red) 55%, transparent);
+}
+.node.pill:hover:not(.sel),
+.node.group:hover:not(.sel) {
+  box-shadow: 0 0 20px -6px color-mix(in srgb, var(--c, var(--accent)) 70%, transparent);
+}
+.node.pill .ico,
+.node.group .ico {
+  transition: transform var(--t) var(--ease-spring);
+}
+.node.pill:hover .ico,
+.node.group:hover .ico {
+  transform: scale(1.12);
 }
 .node.machine.err {
   border-color: color-mix(in srgb, var(--red) 45%, var(--line));
-  background: color-mix(in srgb, var(--red) 5%, var(--bg-raised));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--red) 9%, var(--bg-raised)), color-mix(in srgb, var(--red) 4%, var(--bg-raised)));
 }
 .node.machine.sel.err {
   border-color: var(--red);
@@ -265,4 +351,18 @@
   color: var(--fg-muted);
   background: var(--bg-hover);
   border-color: var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fleet-flow .svelte-flow__node > .node,
+  .fleet-flow .svelte-flow__edge {
+    animation: none !important;
+  }
+  .fleet-flow .svelte-flow__edge.hl .svelte-flow__edge-path {
+    stroke-dasharray: none;
+    animation: none !important;
+  }
+  .node.machine:hover:not(.sel) {
+    transform: none;
+  }
 }

@@ -5,6 +5,7 @@
   import NewMachine from '../components/NewMachine.svelte'
   import { fleet } from '../lib/fleet.svelte'
   import { age, plural } from '../lib/format'
+  import { spotlight } from '../lib/motion'
   import { machineLink, replace, route } from '../lib/router.svelte'
   import { app, startJob } from '../lib/state.svelte'
 
@@ -38,9 +39,9 @@
     <ModelGate>
       {@const m = fleet.model!}
 
-      <div class="grid">
+      <div class="grid stagger">
         {#each hosts as h (h.name)}
-          <a class="card machine" class:err={!!h.error} href={machineLink(h.name)} aria-label="Open {h.name}">
+          <a class="card lift machine" class:err={!!h.error} href={machineLink(h.name)} aria-label="Open {h.name}" use:spotlight>
             <MachineCard host={h} />
           </a>
         {:else}
@@ -52,7 +53,7 @@
         <section class="section">
           <h2>Home configurations</h2>
           <p class="muted small intro">Standalone home-manager configurations (<span class="mono">homeConfigurations</span>), for machines that are not NixOS or not managed here.</p>
-          <div class="homes">
+          <div class="homes stagger">
             {#each m.homes as home (home.name)}
               <div class="card home" class:err={!!home.error}>
                 <div class="home-top"><Icon name="user" size={15} /><strong>{home.name}</strong></div>
@@ -113,16 +114,10 @@
     height: 148px;
     color: inherit;
     text-decoration: none;
-    transition:
-      border-color var(--t-fast) var(--ease),
-      background var(--t-fast) var(--ease),
-      transform var(--t-fast) var(--ease);
-  }
-  .machine:hover {
-    background: var(--bg-hover);
-    border-color: var(--line-strong);
   }
   .machine.err {
+    --lift-c: var(--red);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--red) 7%, var(--bg-raised)), var(--bg-raised) 70%);
     border-color: color-mix(in srgb, var(--red) 35%, var(--border));
   }
   .intro {

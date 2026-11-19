@@ -12,6 +12,7 @@
   import { groupLabel, groupOrder } from '../../lib/matrix'
   import HealthSummary from '../HealthSummary.svelte'
   import Icon, { type IconName } from '../Icon.svelte'
+  import Backdrop from './Backdrop.svelte'
   import GroupNode from './GroupNode.svelte'
   import Inspector from './Inspector.svelte'
   import MachineNode from './MachineNode.svelte'
@@ -286,6 +287,7 @@
   </div>
 
   <div class="canvas" class:ready={laidOut}>
+    <Backdrop view={() => flow.getViewport()} {active} />
     <SvelteFlow
       class="fleet-flow dark"
       bind:nodes
@@ -334,6 +336,8 @@
     align-items: center;
     gap: var(--s2);
     min-height: 52px;
+    position: relative;
+    z-index: 2; /* its search results open over the canvas */
     padding: 10px var(--s4);
     background: var(--bg);
     border-bottom: 1px solid var(--border);
@@ -465,6 +469,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    background: radial-gradient(120% 90% at 50% 110%, color-mix(in srgb, var(--accent-strong) 16%, var(--bg-deep)), var(--bg-deep) 62%);
   }
   .canvas :global(.svelte-flow) {
     opacity: 0;
@@ -476,7 +481,6 @@
   .placeholder {
     position: absolute;
     inset: 0;
-    background: var(--bg-deep);
   }
   .ghost-card {
     position: absolute;

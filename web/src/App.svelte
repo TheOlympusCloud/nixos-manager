@@ -160,7 +160,7 @@
   {/if}
 {:else if !app.needLogin}
   <div class="boot" role="status">
-    <span class="boot-mark"><Icon name="mark" size={22} /></span>
+    <span class="boot-mark"><Icon name="mark" size={26} /></span>
     <p>Loading nixos-manager…</p>
     <button onclick={init}>Retry</button>
   </div>
@@ -186,11 +186,34 @@
     flex: 1;
     flex-direction: column;
     min-width: 0;
+    isolation: isolate; /* the glow's layer; a drawer's scrim inside .content still covers the top bar */
   }
   .content {
     position: relative;
     flex: 1;
     min-height: 0;
+    overflow: clip;
+  }
+  /* Ambient light behind every page: two soft glows that drift very slowly. */
+  .content::before {
+    position: absolute;
+    inset: -30%;
+    z-index: -1;
+    background:
+      radial-gradient(38% 34% at 24% 22%, color-mix(in srgb, var(--accent-strong) 13%, transparent), transparent 100%),
+      radial-gradient(34% 30% at 82% 78%, color-mix(in srgb, var(--purple) 7%, transparent), transparent 100%);
+    animation: drift 46s ease-in-out infinite alternate;
+    content: '';
+    pointer-events: none;
+  }
+  @keyframes drift {
+    to {
+      transform: translate3d(6%, 5%, 0) rotate(4deg);
+    }
+  }
+  /* Every view fades in as you arrive, kept ones included (they restart when shown again). */
+  .content > :global(*) {
+    animation: fade-in 240ms var(--ease) backwards;
   }
   .keep {
     position: absolute;
@@ -207,7 +230,47 @@
     height: 100vh;
     color: var(--fg-muted);
   }
+  .boot > * {
+    animation: rise var(--t-slow) var(--ease) backwards;
+  }
+  .boot > p {
+    animation-delay: 80ms;
+  }
+  .boot > button {
+    animation-delay: 1.6s; /* only worth showing when loading drags on */
+  }
   .boot-mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
     color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: 16px;
+    box-shadow: 0 0 44px -6px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .boot-mark :global(svg) {
+    animation: turn 9s linear infinite;
+  }
+  .boot-mark::after {
+    position: absolute;
+    inset: -1px;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    border-radius: inherit;
+    animation: halo 2.2s var(--ease) infinite;
+    content: '';
+  }
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes halo {
+    to {
+      opacity: 0;
+      transform: scale(1.45);
+    }
   }
 </style>

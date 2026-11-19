@@ -245,7 +245,7 @@
     background: var(--bg-side);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--edge), var(--shadow-3);
   }
   .nm::backdrop {
     background: rgb(4 6 9 / 0.6);
@@ -383,9 +383,10 @@
     align-content: start;
     gap: 6px;
     padding: 12px 14px;
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
     cursor: pointer;
     transition:
       border-color var(--t-fast) var(--ease),

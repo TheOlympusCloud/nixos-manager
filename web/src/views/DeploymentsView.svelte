@@ -143,9 +143,10 @@
     display: grid;
     gap: 2px;
     padding: 12px 14px;
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
   }
   .t-label {
     display: flex;

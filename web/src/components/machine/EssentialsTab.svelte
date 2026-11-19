@@ -195,9 +195,10 @@
     margin-bottom: var(--s4);
     padding: 10px 14px;
     color: var(--fg);
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
   }
   .banner :global(svg) {
     color: var(--accent);

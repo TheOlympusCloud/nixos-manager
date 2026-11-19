@@ -39,6 +39,16 @@
   )
   let showTurnOn = $state(false)
 
+  // The underline slides to the tab you open.
+  let tabsEl = $state<HTMLElement>()
+  let ink = $state<{ x: number; w: number } | null>(null)
+  $effect(() => {
+    void tab
+    void tabs
+    const cur = tabsEl?.querySelector<HTMLElement>('a[aria-current="page"]')
+    ink = cur ? { x: cur.offsetLeft, w: cur.offsetWidth } : null
+  })
+
   // A machine made by the wizard that the evaluation does not list (yet).
   const made = $derived(fleet.created[name])
   let copied = $state(false)
@@ -128,7 +138,8 @@
         {:else}
           {#if !host.managedFile && showTurnOn}<TurnOnEditing host={host.name} onclose={() => (showTurnOn = false)} />{/if}
 
-          <nav class="tabs" aria-label="Machine sections">
+          <nav class="tabs" aria-label="Machine sections" bind:this={tabsEl}>
+            {#if ink}<span class="ink" style:transform="translateX({ink.x}px)" style:width="{ink.w}px" aria-hidden="true"></span>{/if}
             {#each tabs as t (t.id)}
               <a href={machineLink(host.name, t.id)} aria-current={tab === t.id ? 'page' : undefined}>
                 {t.label}{#if t.n !== undefined}<span class="n num">{t.n}</span>{/if}
@@ -136,6 +147,7 @@
             {/each}
           </nav>
 
+          {#key tab}
           <div class="tab-body">
             {#if tab === 'essentials'}
               <EssentialsTab {host} />
@@ -151,6 +163,7 @@
               <OverviewTab {host} />
             {/if}
           </div>
+          {/key}
         {/if}
       {/if}
     </ModelGate>
@@ -268,8 +281,22 @@
     margin: 0 calc(-1 * var(--s5));
     padding: 0 var(--s5);
     overflow-x: auto;
-    background: var(--bg);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
     border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+  }
+  .ink {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px 2px 0 0;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 80%, transparent);
+    transition:
+      transform 320ms var(--ease),
+      width 320ms var(--ease);
+    pointer-events: none;
   }
   .tabs a {
     display: inline-flex;
@@ -283,13 +310,13 @@
     text-decoration: none;
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
+    transition: color var(--t) var(--ease);
   }
   .tabs a:hover {
     color: var(--fg-strong);
   }
   .tabs a[aria-current='page'] {
     color: var(--fg-strong);
-    border-bottom-color: var(--accent);
   }
   .n {
     padding: 0 6px;
@@ -301,5 +328,11 @@
   }
   .tab-body {
     padding-top: var(--s4);
+    animation: rise 360ms var(--ease) backwards;
+  }
+  h1 {
+    background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--accent) 45%, var(--fg-strong)));
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 </style>

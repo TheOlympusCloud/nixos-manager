@@ -52,8 +52,8 @@
     color: var(--fg);
     background: var(--bg-side);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+    border-radius: var(--r-lg);
+    box-shadow: var(--edge), var(--shadow-3);
   }
   dialog::backdrop {
     background: rgb(0 0 0 / 0.45);
