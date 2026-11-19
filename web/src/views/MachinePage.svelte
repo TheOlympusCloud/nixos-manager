@@ -161,6 +161,7 @@
   }
   .title-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
   }

@@ -190,6 +190,18 @@
     grid-template-columns: 340px 1fr;
     height: 100%;
   }
+  /* Phones: the side panel above the content, one scroll for both. */
+  @media (max-width: 760px) {
+    .cv {
+      grid-template-columns: minmax(0, 1fr);
+      align-content: start;
+      overflow-y: auto;
+    }
+    .side {
+      border-right: 0;
+      border-bottom: 1px solid var(--border);
+    }
+  }
   .side {
     display: flex;
     flex-direction: column;

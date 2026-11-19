@@ -448,4 +448,15 @@
       display: none;
     }
   }
+  /* Phones: the rail already shows where you are. */
+  @media (max-width: 640px) {
+    .where,
+    .sep {
+      display: none;
+    }
+    .topbar {
+      gap: 4px;
+      padding: 0 var(--s2);
+    }
+  }
 </style>

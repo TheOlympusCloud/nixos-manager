@@ -227,9 +227,19 @@
   }
   .details {
     display: grid;
-    grid-template-columns: 88px 1fr;
+    grid-template-columns: 88px minmax(0, 1fr);
     gap: 8px 12px;
     padding: 2px 14px 14px 46px;
+  }
+  .details .chip {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 640px) {
+    .details {
+      grid-template-columns: minmax(0, 1fr);
+      padding-left: 14px;
+    }
   }
   .g-label {
     padding-top: 2px;
