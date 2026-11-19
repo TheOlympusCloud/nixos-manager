@@ -293,7 +293,7 @@ func list(xs []string) string {
 // behind their branch, or that stopped reporting while others report.
 func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	var out []Insight
-	var behind, silent []string
+	var behind, silent, never []string
 	reporting := false
 	for _, d := range deploys {
 		reporting = reporting || len(d.Reports) > 0
@@ -326,7 +326,9 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 				Detail: fmt.Sprintf("%s %s Deployments shows the error; journalctl -u comin on the machine has the whole log.", msg, runs)})
 		case d.State == "behind" && now.Sub(d.BehindSince) > behindAfter:
 			behind = append(behind, d.Host)
-		case d.State == "never" || d.State == "silent":
+		case d.State == "never":
+			never = append(never, d.Host)
+		case d.State == "silent":
 			silent = append(silent, d.Host)
 		}
 	}
@@ -343,7 +345,12 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 	if reporting && len(silent) > 0 {
 		out = append(out, Insight{ID: "deploy-silent", Severity: "info", Hosts: silent, Link: "#/deployments",
 			Title:  fmt.Sprintf("%s %s not reported a deployment in 7 days", list(silent), are(silent)),
-			Detail: "Other machines report what they deploy. Put the report token on these (Deployments shows how), or check that they are on and comin runs."})
+			Detail: "They reported before. Check that they are on, that comin runs, and that they still reach this console."})
+	}
+	if reporting && len(never) > 0 {
+		out = append(out, Insight{ID: "deploy-never", Severity: "info", Hosts: never, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s never reported a deployment", list(never), are(never)),
+			Detail: "Other machines report what they deploy. Put the report token on these (Deployments shows how); the next deployment then reports."})
 	}
 	return out
 }

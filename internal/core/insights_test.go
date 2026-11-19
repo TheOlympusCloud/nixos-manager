@@ -170,16 +170,19 @@ func TestDeployInsights(t *testing.T) {
 	if b := insightByID(got, "deploy-behind"); b.Severity != "warning" || strings.Join(b.Hosts, ",") != "nas" {
 		t.Errorf("deploy-behind: %+v", b)
 	}
-	if s := insightByID(got, "deploy-silent"); s.Severity != "info" || strings.Join(s.Hosts, ",") != "new,off" {
+	if s := insightByID(got, "deploy-silent"); s.Severity != "info" || strings.Join(s.Hosts, ",") != "off" {
 		t.Errorf("deploy-silent: %+v", s)
+	}
+	if n := insightByID(got, "deploy-never"); n.Severity != "info" || strings.Join(n.Hosts, ",") != "new" || n.Title != "new has never reported a deployment" {
+		t.Errorf("deploy-never: %+v", n)
 	}
 	if g := insightByID(got, "deploy-failed:gone"); g.ID != "" {
 		t.Errorf("a machine outside the fleet got a finding: %+v", g)
 	}
 	// Nobody reports yet: machines that never reported are not news.
 	quiet := []MachineDeployment{{Host: "new", State: "never", Reports: []DeployReport{}}}
-	if s := insightByID(Insights(m, quiet, "", now), "deploy-silent"); s.ID != "" {
-		t.Errorf("deploy-silent without reporting: %+v", s)
+	if s := insightByID(Insights(m, quiet, "", now), "deploy-never"); s.ID != "" {
+		t.Errorf("deploy-never without reporting: %+v", s)
 	}
 }
 

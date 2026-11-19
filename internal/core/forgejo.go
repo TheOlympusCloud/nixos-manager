@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -699,7 +700,8 @@ func (f *Forgejo) Hook(event, sig string, body []byte) (int, string) {
 		return 500, "no webhook secret"
 	}
 	if !VerifySignature([]byte(secret), body, sig) {
-		f.record(event, false, "Refused: the signature does not match. Copy the secret from Settings into the webhook again.")
+		// Logged, not shown as the last delivery: anyone who reaches the port could overwrite it.
+		slog.Warn("webhook refused: the signature does not match the secret in Settings", "event", event)
 		return 401, "bad signature"
 	}
 	switch event {

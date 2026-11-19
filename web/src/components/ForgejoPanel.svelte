@@ -270,7 +270,7 @@
           {#if st.last_delivery}
             <span><span class="when">Last delivery <time datetime={st.last_delivery.time} title={new Date(st.last_delivery.time).toLocaleString()}>{ago(st.last_delivery.time)}</time></span> · {st.last_delivery.result}</span>
           {:else}
-            <span class="muted">No delivery since the server started.</span>
+            <span class="muted">No delivery since the server started. If Forgejo's delivery log shows 401, its secret differs from the one above.</span>
           {/if}
           <button class="link small" onclick={load}>Refresh</button>
         </div>

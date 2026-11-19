@@ -67,7 +67,8 @@ to `nixosConfigurations.<its hostname>`.
 nixos-manager is happiest in its own NixOS container: Nix is right there, so it
 evaluates, locks and checks the fleet for real, and the container can later
 become one of the fleet's machines. The commands below run as root on the
-Proxmox host, then in the container.
+Proxmox host, then in the container. The module builds nixos-manager with the
+container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
 
 1. **Get the NixOS container template.** NixOS's Hydra builds it from
    `nixos/modules/virtualisation/proxmox-lxc.nix` for every 26.05 update
@@ -336,7 +337,10 @@ Other setups keep working:
 
 On the LAN, the container answers on `http://<address>:8080` (`openFirewall`
 opens the port); with Docker, the port is published on the host. It is plain
-HTTP: the password and the session cookie cross the LAN unencrypted.
+HTTP: the password, the session cookie and the machines' deployment reports
+(with their report token) cross the LAN unencrypted. Keep it on a trusted
+network, use Tailscale as below, or put a TLS reverse proxy (Caddy or nginx with
+a certificate) in front of it.
 
 Tailscale encrypts the traffic, and `tailscale serve` adds HTTPS on the tailnet:
 

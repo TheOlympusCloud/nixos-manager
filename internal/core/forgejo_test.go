@@ -429,8 +429,8 @@ func TestHook(t *testing.T) {
 		t.Fatalf("last delivery %+v, want %q", f.LastDelivery(), want)
 	}
 
-	if code, _ := f.Hook("push", sign("wrong", push), []byte(push)); code != 401 || f.LastDelivery().OK {
-		t.Fatalf("bad signature: %d %+v", code, f.LastDelivery())
+	if code, _ := f.Hook("push", sign("wrong", push), []byte(push)); code != 401 || f.LastDelivery() != nil {
+		t.Fatalf("bad signature: %d, and it must not replace the last delivery: %+v", code, f.LastDelivery())
 	}
 	if code, _ := f.Hook("push", "", []byte(push)); code != 401 {
 		t.Fatalf("no signature: %d", code)
