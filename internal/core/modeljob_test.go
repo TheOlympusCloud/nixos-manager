@@ -160,6 +160,30 @@ func TestNewerModelSkipsQueuedOlderOnes(t *testing.T) {
 	}
 }
 
+// History asking for the commit the working copy matches shares its queued job;
+// a later edit must not skip that job, or History shows a failure for the commit.
+func TestEditsDoNotSkipAnEvaluationHistoryWaitsOn(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, "testdata/fleet")
+	t.Setenv("NIXMGR_FAKE_DELAY", "0.2")
+	_, running, _ := s.Jobs.Model(ctx, "working")
+	for running.Info(false).State == "queued" {
+		time.Sleep(5 * time.Millisecond)
+	}
+	write(t, s.Repo, "a.nix", "1\n")
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "one", true))
+	_, shared, _ := s.Jobs.Model(ctx, "working")
+	if _, j, _ := s.Jobs.Model(ctx, "head"); j != shared {
+		t.Fatal("the commit's evaluation should share the queued job for the same tree")
+	}
+	write(t, s.Repo, "a.nix", "2\n")
+	s.Jobs.Model(ctx, "working")
+	if info := wait(t, shared); info.State != "passed" {
+		t.Fatalf("the evaluation History waits on was skipped: %+v", info)
+	}
+}
+
 // History can show what one commit changed: the model at any revision.
 func TestModelAtRevision(t *testing.T) {
 	ctx := context.Background()
@@ -183,4 +207,14 @@ func TestModelAtRevision(t *testing.T) {
 	}
 	_, _, err := s.Jobs.Model(ctx, "rev:nope")
 	isErr(t, err, ErrNotFound)
+}
+
+func TestCappedOutput(t *testing.T) {
+	c := capped{max: 4}
+	if _, err := c.Write([]byte("abc")); err != nil || c.over {
+		t.Fatal(err)
+	}
+	if _, err := c.Write([]byte("de")); err == nil || !c.over || c.buf.String() != "abc" {
+		t.Fatalf("over the cap: %v %q", err, c.buf.String())
+	}
 }

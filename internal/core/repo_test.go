@@ -550,3 +550,19 @@ func TestMergeStagesTheBranch(t *testing.T) {
 	_, err = r.Merge(ctx, "-x")
 	isErr(t, err, ErrInvalid)
 }
+
+func TestRevertRefusesAMergeCommit(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "a.nix", "base\n")
+	commitAll(t, r, "base")
+	ok(t, r.CreateBranch(ctx, "side", ""))
+	write(t, r, "b.nix", "side\n")
+	commitAll(t, r, "side")
+	ok(t, r.Switch(ctx, "main"))
+	gitOut(t, r.Dir, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "merge", "--no-ff", "-m", "merge side", "side")
+	isErr(t, r.Revert(ctx, "HEAD"), ErrInvalid)
+	if st := must[Status](t)(r.Status(ctx)); len(st.Files) != 0 {
+		t.Fatalf("a refused revert must leave git clean: %+v", st.Files)
+	}
+}

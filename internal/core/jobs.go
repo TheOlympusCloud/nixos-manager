@@ -68,6 +68,7 @@ type Job struct {
 	tree     string
 	key      string      // what a model or index job computes
 	skip     atomic.Bool // set while queued when the result would be outdated
+	keep     atomic.Bool // a request for a commit waits on it too: never skipped
 	state    string
 	started  time.Time
 	finished time.Time

@@ -16,7 +16,8 @@ let
       s = if lib.hasPrefix "/" s0 && builtins.pathExists "${s0}/default.nix" then "${s0}/default.nix" else s0;
     in
     if lib.hasPrefix root s then lib.removePrefix root s else "nixos";
-  # JSON-safe and bounded: packages by name, functions as a marker, nesting cut at four levels.
+  # JSON-safe and bounded: packages by name, functions as a marker, nesting cut at four
+  # levels and big sets or lists (systemd.services, nixpkgs.pkgs) shown by their size.
   show =
     depth: v:
     let
@@ -30,6 +31,10 @@ let
       toString v
     else if depth <= 0 && (t == "set" || t == "list") then
       "«…»"
+    else if t == "set" && builtins.length (builtins.attrNames v) > 200 then
+      "«${toString (builtins.length (builtins.attrNames v))} attributes»"
+    else if t == "list" && builtins.length v > 200 then
+      "«${toString (builtins.length v)} items»"
     else if t == "set" then
       lib.mapAttrs (_: show (depth - 1)) v
     else if t == "list" then

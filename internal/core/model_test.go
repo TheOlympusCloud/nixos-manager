@@ -113,3 +113,22 @@ func TestDiffInputs(t *testing.T) {
 		t.Fatalf("input changes\n got %+v\nwant %+v", got, want)
 	}
 }
+
+func TestVersionChangesWithSeveralVersionsOfAName(t *testing.T) {
+	pkgs := func(nv ...string) []Package {
+		var out []Package
+		for i := 0; i < len(nv); i += 2 {
+			out = append(out, Package{Name: nv[i], Version: nv[i+1]})
+		}
+		return out
+	}
+	before := pkgs("python3", "3.12.8", "python3", "3.13.1", "curl", "8.16.0")
+	if got := versionChanges(before, pkgs("python3", "3.13.1", "python3", "3.12.8", "curl", "8.16.0")); len(got) != 0 {
+		t.Fatalf("same versions in another order: %+v", got)
+	}
+	got := versionChanges(before, pkgs("python3", "3.12.9", "python3", "3.13.1", "curl", "8.17.0"))
+	want := []VersionChange{{Name: "curl", From: "8.16.0", To: "8.17.0"}, {Name: "python3", From: "3.12.8, 3.13.1", To: "3.12.9, 3.13.1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v", got)
+	}
+}

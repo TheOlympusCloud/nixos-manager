@@ -280,14 +280,26 @@ func DiffModels(head, working *Model) []HostDiff {
 }
 
 func versionChanges(before, after []Package) []VersionChange {
-	was := map[string]string{}
-	for _, p := range before {
-		was[p.Name] = p.Version
+	// A name can come in several versions (python3 3.12 and 3.13): compare the sets.
+	versions := func(ps []Package) map[string]string {
+		by := map[string][]string{}
+		for _, p := range ps {
+			if !slices.Contains(by[p.Name], p.Version) {
+				by[p.Name] = append(by[p.Name], p.Version)
+			}
+		}
+		out := map[string]string{}
+		for n, vs := range by {
+			slices.Sort(vs)
+			out[n] = strings.Join(vs, ", ")
+		}
+		return out
 	}
+	was, now := versions(before), versions(after)
 	var out []VersionChange
-	for _, p := range after {
-		if v, ok := was[p.Name]; ok && v != p.Version && !slices.ContainsFunc(out, func(c VersionChange) bool { return c.Name == p.Name }) {
-			out = append(out, VersionChange{Name: p.Name, From: v, To: p.Version})
+	for name, v := range now {
+		if w, ok := was[name]; ok && w != v {
+			out = append(out, VersionChange{Name: name, From: w, To: v})
 		}
 	}
 	slices.SortFunc(out, func(a, b VersionChange) int { return strings.Compare(a.Name, b.Name) })

@@ -99,6 +99,7 @@ func (js *Jobs) OptionValues(ctx context.Context, names, hosts []string) ([]Opti
 		return v.([]OptionValues), nil, nil
 	}
 	if err, ok := js.indexErrs[key]; ok {
+		delete(js.indexErrs, key) // reported once: asking again retries, in case the cause was passing
 		return nil, nil, err
 	}
 	for _, j := range js.jobs {

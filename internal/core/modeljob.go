@@ -109,18 +109,21 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 	if m := js.models[tree]; m != nil {
 		return m, nil, nil
 	}
-	for _, j := range js.jobs {
-		if j.Req.Kind == "model" && j.tree == tree && !j.finishedState() {
-			return nil, j, nil
-		}
-	}
 	key := "model:" + at
 	if key == "model:" {
 		key = "model:working"
 	}
+	for _, j := range js.jobs {
+		if j.Req.Kind == "model" && j.tree == tree && !j.finishedState() {
+			if key != "model:working" {
+				j.keep.Store(true)
+			}
+			return nil, j, nil
+		}
+	}
 	if key == "model:working" { // the working copy moved on: older evaluations still waiting are pointless
 		for _, j := range js.jobs {
-			if j.key == key && j.Info(false).State == "queued" {
+			if j.key == key && !j.keep.Load() && j.Info(false).State == "queued" {
 				j.skip.Store(true)
 			}
 		}
@@ -265,19 +268,40 @@ func (js *Jobs) evalJSONEnv(ctx context.Context, src string, env []string, expr 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--json", "--impure", "--expr", expr)...)
 	cmd.Env = append(append(os.Environ(), "NIXMGR_FLAKE=path:"+src), env...)
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
+	stdout := capped{max: maxEvalOutput}
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if stdout.over {
+			return fmt.Errorf("nix printed more than %d MB; the evaluation is too large to show", maxEvalOutput>>20)
+		}
 		var ee *exec.ExitError
 		if !errors.As(err, &ee) {
 			return fmt.Errorf("cannot run nix (%v); is Nix installed?", err)
 		}
 		return errors.New(tail(stderr.String(), 25))
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), out); err != nil {
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.buf.Bytes()), out); err != nil {
 		return fmt.Errorf("unexpected nix output: %v", err)
 	}
 	return nil
+}
+
+const maxEvalOutput = 64 << 20
+
+// capped collects output up to max bytes, then fails the write.
+type capped struct {
+	buf  bytes.Buffer
+	max  int
+	over bool
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	if c.buf.Len()+len(p) > c.max {
+		c.over = true
+		return 0, errors.New("output too large")
+	}
+	return c.buf.Write(p)
 }
 
 // tail keeps the last n lines of nix's error output, which hold the reason.

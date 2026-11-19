@@ -64,3 +64,21 @@ func TestOptionValuesAcrossTheFleet(t *testing.T) {
 	_, _, err = s.Jobs.OptionValues(ctx, nil, nil)
 	isErr(t, err, ErrInvalid)
 }
+
+// A failed read is reported once; asking again retries, so a passing cause (no network) does not stick.
+func TestOptionValuesRetryAfterAFailure(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, "testdata/fleet")
+	write(t, s.Repo, "BROKEN", "x\n")
+	names := []string{"time.timeZone"}
+	_, job, _ := s.Jobs.OptionValues(ctx, names, nil)
+	if info := wait(t, job); info.State != "failed" {
+		t.Fatalf("a flake that does not evaluate: %+v", info)
+	}
+	if _, _, err := s.Jobs.OptionValues(ctx, names, nil); err == nil {
+		t.Fatal("the failure was not reported")
+	}
+	if _, again, err := s.Jobs.OptionValues(ctx, names, nil); err != nil || again == nil {
+		t.Fatalf("no retry after the failure was reported: %v %v", again, err)
+	}
+}

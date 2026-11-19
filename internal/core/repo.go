@@ -819,6 +819,9 @@ func (r *Repo) Revert(ctx context.Context, rev string) error {
 	if err := r.clean(ctx); err != nil {
 		return err
 	}
+	if parents, _ := r.git(ctx, "rev-list", "--parents", "-n", "1", sha); len(strings.Fields(parents)) > 2 {
+		return errorf(ErrInvalid, "%.12s is a merge commit; revert the commits it brought in instead", sha)
+	}
 	if _, err := r.git(ctx, "revert", "--no-commit", sha); err != nil {
 		r.git(ctx, "revert", "--abort")
 		return errorf(ErrConflict, "%.12s cannot be reverted cleanly; later commits changed the same lines.\n%v", sha, err)
