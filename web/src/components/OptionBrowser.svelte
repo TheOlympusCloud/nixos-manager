@@ -2,7 +2,8 @@
   import { onMount } from 'svelte'
   import { api, type OptionInfo } from '../lib/api'
   import { fleet, hostByName, loadManaged, managedValue, searchIndexed, setOption } from '../lib/fleet.svelte'
-  import { fillPath, optionSegments } from '../lib/options'
+  import { fillPath, matchOption, optionSegments } from '../lib/options'
+  import { managedOptions, showValue } from '../lib/values'
   import Icon from './Icon.svelte'
   import JobLog from './JobLog.svelte'
   import OptionForm from './OptionForm.svelte'
@@ -24,6 +25,9 @@
   let error = $state('')
   let loading = $state(false)
   let picked = $state<OptionInfo | null>(null)
+  /** Names for the picked option's <name> placeholders, when it was opened by a concrete name. */
+  let pickedNames = $state<string[]>([])
+  let missing = $state('')
   let alive = true
 
   onMount(() => {
@@ -66,17 +70,72 @@
   // Open the selected option (from the URL), fetching it if it is not among the results.
   $effect(() => {
     const name = selected
-    if (!name) return void (picked = null)
+    missing = ''
+    if (!name) return void ((picked = null), (pickedNames = []))
     const hit = results?.find((o) => o.name === name)
-    if (hit) return void (picked = hit)
+    if (hit) return void ((picked = hit), (pickedNames = []))
     if (picked?.name === name) return
-    api.searchOptions(host, name, { exact: true }).then(
-      (r) => {
-        if (selected === name && r.state === 'ready' && r.results?.[0]) picked = r.results[0]
-      },
-      () => {},
-    )
+    resolve(name)
   })
+  async function resolve(name: string) {
+    const still = () => alive && selected === name
+    try {
+      const exact = await searchIndexed(() => api.searchOptions(host, name, { exact: true }), (job) => still() && (indexJob = job), still)
+      if (!still() || exact === null) return
+      indexJob = ''
+      if (exact[0]) return void ((picked = exact[0]), (pickedNames = []))
+      // A concrete name (users.users."pablo".shell): find the declaration with <name> placeholders.
+      const path = fillPath(optionSegments(name), [])
+      const r = await api.searchOptions(host, path.slice(-2).join('.'), { limit: 200 })
+      const near = r.state === 'ready' ? (r.results ?? []) : []
+      if (!still()) return
+      for (const o of near) {
+        const filled = matchOption(o.name, path)
+        if (filled) return void ((picked = o), (pickedNames = filled))
+      }
+      picked = null
+      missing = name
+    } catch {
+      if (still()) missing = name
+    }
+  }
+
+  // Already set on this machine: in its managed file, or evaluated as a feature.
+  const setHere = $derived(managedOptions(fleet.managed[host]?.settings))
+  const isSetHere = (o: OptionInfo) => {
+    const path = fillPath(optionSegments(o.name), [])
+    return setHere.some((s) => (s.path.length === path.length ? matchOption(o.name, s.path) !== null : false))
+  }
+
+  const popular = [
+    'time.timeZone',
+    'networking.hostName',
+    'i18n.defaultLocale',
+    'services.openssh.enable',
+    'services.openssh.settings.PermitRootLogin',
+    'networking.firewall.allowedTCPPorts',
+    'networking.networkmanager.enable',
+    'nix.gc.automatic',
+    'nix.settings.experimental-features',
+    'boot.loader.systemd-boot.enable',
+    'virtualisation.docker.enable',
+    'system.autoUpgrade.enable',
+  ]
+  const prefixes = [
+    ['services', 'Daemons: SSH, web servers, media, databases'],
+    ['programs', 'Programs with system-wide setup: shells, Steam, git'],
+    ['networking', 'Host name, firewall, NetworkManager, interfaces'],
+    ['boot', 'Boot loader, kernel, initrd'],
+    ['nix', 'Garbage collection, substituters, experimental features'],
+    ['users', 'Accounts, groups, SSH keys'],
+    ['hardware', 'Bluetooth, graphics, firmware'],
+    ['virtualisation', 'Docker, Podman, libvirt, containers'],
+    ['security', 'sudo, polkit, PAM, AppArmor'],
+    ['systemd', 'Units, timers, journald'],
+    ['environment', 'System packages, variables, /etc files'],
+    ['fonts', 'Font packages and fontconfig'],
+  ] as const
+  const suggestions = ['jellyfin', 'immich', 'nextcloud', 'home-assistant', 'syncthing', 'vaultwarden', 'adguardhome', 'grafana', 'docker', 'caddy']
 
   /** Group by the first two segments: services.openssh, programs.steam, … */
   const groups = $derived.by(() => {
@@ -93,7 +152,7 @@
   let enabling = $state('')
   async function turnOn(o: OptionInfo) {
     enabling = o.name
-    await setOption(host, fillPath(optionSegments(o.name), []), true)
+    await setOption(host, fillPath(optionSegments(o.name), []), true, `Enabled ${o.name.slice(0, -'.enable'.length).split('.').slice(1).join('.')} on ${host}`)
     enabling = ''
   }
   /** Already enabled: set in the managed file, or evaluated as a feature of the machine. */
@@ -128,8 +187,52 @@
         </div>
       {:else if loading && !results}
         <div class="pad skels">{#each [0, 1, 2, 3, 4] as i (i)}<span class="skel" style:width="{40 + ((i * 17) % 50)}%"></span>{/each}</div>
+      {:else if results === null && enable}
+        <div class="pad landing">
+          <p class="muted">Search the services and programs {host} can turn on, by name or by what they do.</p>
+          <div class="chips">{#each suggestions as q (q)}<button class="chip" onclick={() => (query = q)}>{q}</button>{/each}</div>
+        </div>
       {:else if results === null}
-        <p class="muted pad">Search by option name or words in its description.</p>
+        <div class="landing">
+          {#if setHere.length}
+            <section>
+              <h4>Set here on {host} <span class="num">{setHere.length}</span></h4>
+              <ul>
+                {#each setHere as o (o.name)}
+                  <li class:sel={selected === o.name}>
+                    <button class="o-row" onclick={() => (selected = o.name)}>
+                      <span class="o-name mono">{o.name}</span>
+                      <span class="o-type mono">{showValue(o.value)}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
+          <section>
+            <h4>Popular</h4>
+            <ul>
+              {#each popular as name (name)}
+                <li class:sel={selected === name}>
+                  <button class="o-row" onclick={() => (selected = name)}><span class="o-name mono">{name}</span></button>
+                </li>
+              {/each}
+            </ul>
+          </section>
+          <section>
+            <h4>Browse</h4>
+            <ul class="prefixes">
+              {#each prefixes as [p, note] (p)}
+                <li>
+                  <button class="o-row" onclick={() => (query = p + '.')}>
+                    <span class="o-name mono">{p}.</span>
+                    <span class="o-type">{note}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        </div>
       {:else if !results.length}
         <p class="muted pad">No {enable ? 'service or program' : 'option'} matches “{query}”.</p>
       {:else if enable}
@@ -158,7 +261,7 @@
               {#each opts as o (o.name)}
                 <li class:sel={picked?.name === o.name}>
                   <button class="o-row" aria-current={picked?.name === o.name} onclick={() => (selected = o.name)}>
-                    <span class="o-name mono">{rest(o.name, group)}</span>
+                    <span class="o-line"><span class="o-name mono">{rest(o.name, group)}</span>{#if isSetHere(o)}<span class="mark here">Set here</span>{:else if o.name.endsWith('.enable') && isOn(o)}<span class="mark">On</span>{/if}</span>
                     <span class="o-type">{o.type}</span>
                   </button>
                 </li>
@@ -173,7 +276,12 @@
     <div class="form-pane">
       {#if picked}
         {#if stacked}<button class="ghost back" onclick={() => (selected = '')}><Icon name="left" size={14} />Back to results</button>{/if}
-        {#key host + picked.name}<OptionForm {host} option={picked} />{/key}
+        {#key host + picked.name + pickedNames.join('\0')}<OptionForm {host} option={picked} initialNames={pickedNames} />{/key}
+      {:else if missing}
+        <div class="empty-form muted" role="status">
+          <Icon name="search" size={22} />
+          <p>{host} has no option called <span class="mono">{missing}</span>. A module it does not import may declare it.</p>
+        </div>
       {:else}
         <div class="empty-form muted">
           <Icon name="sliders" size={22} />
@@ -271,6 +379,8 @@
     align-items: flex-start;
     gap: 2px;
     width: 100%;
+    min-width: 0;
+    overflow: hidden;
     height: auto;
     padding: 6px 8px;
     font-weight: 400;
@@ -289,6 +399,39 @@
     color: var(--fg-strong);
     font-size: 12.5px;
     overflow-wrap: anywhere;
+  }
+  .o-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    max-width: 100%;
+  }
+  .mark {
+    flex: none;
+    padding: 0 5px;
+    color: var(--fg-muted);
+    font-size: 10.5px;
+    line-height: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+  }
+  .mark.here {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .landing {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .landing.pad {
+    gap: 12px;
+    line-height: 1.5;
+  }
+  h4 .num {
+    margin-left: 4px;
+    color: var(--fg-faint);
   }
   .o-type,
   .o-desc {

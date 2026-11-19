@@ -38,9 +38,9 @@
       {#if pending}
         <span class="badge busy">Re-evaluating</span>
       {:else if host.managedFile}
-        <span class="badge ok" title="Packages and options can be edited here ({host.managedFile})">Managed</span>
+        <span class="badge ok" title="Packages and options can be changed by clicking ({host.managedFile})">Editable here</span>
       {:else}
-        <span class="badge" title="This machine does not load a managed file, so it can only be edited as code">Visual editing off</span>
+        <span class="badge" title="It does not load a managed.json, so it is changed in its Nix files">Code only</span>
       {/if}
     </div>
   {/if}
@@ -105,6 +105,7 @@
   }
   .avatars {
     display: flex;
+    padding-right: 4px; /* the last avatar's negative margin */
   }
   .av {
     display: grid;

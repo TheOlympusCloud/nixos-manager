@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { Host } from '../../lib/api'
   import { openPackageSearch } from '../../lib/dialogs.svelte'
-  import { fleet, removePackageByName } from '../../lib/fleet.svelte'
+  import { fleet, managedAttr, removePackageByName } from '../../lib/fleet.svelte'
   import { isRepoFile } from '../../lib/graph'
-  import { codeLink, go } from '../../lib/router.svelte'
+  import { codeLink, go, machineLink } from '../../lib/router.svelte'
   import { confirmBox } from '../../lib/ui.svelte'
   import Icon from '../Icon.svelte'
 
@@ -19,7 +19,9 @@
   // Packages added since the last evaluation show up at once, marked as pending.
   const rows = $derived.by(() => {
     const known = new Set(host.packages.map((p) => p.name))
-    const pending = (managed?.packages ?? []).filter((a) => !known.has(a) && !known.has(a.split('.').pop()!))
+    // The model names packages (nodejs); managed.json lists attributes (nodejs_22): managedPackages maps them.
+    const pname = (a: string) => host.managedPackages?.[a]
+    const pending = (managed?.packages ?? []).filter((a) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? ''))
     const all = [
       ...host.packages.map((p) => ({ ...p, pending: false })),
       ...pending.map((a) => ({ name: a, version: '', files: host.managedFile ? [host.managedFile] : [], pending: true })),
@@ -31,6 +33,10 @@
       .sort((a, b) => a.name.localeCompare(b.name))
   })
   const hidden = $derived(host.packages.filter((p) => !p.files.some(isRepoFile)).length)
+
+  /** Evaluated from managed.json, but no longer in it: removed, waiting for the evaluation. */
+  const removing = (p: { name: string; files: string[]; pending: boolean }) =>
+    !p.pending && !!managed && !!host.managedFile && p.files.includes(host.managedFile) && !managedAttr(host.name, p.name)
 
   async function remove(p: { name: string; files: string[] }) {
     if (host.managedFile && p.files.includes(host.managedFile)) {
@@ -55,13 +61,13 @@
   <label class="toggle">
     <input type="checkbox" bind:checked={repoOnly} />
     Only from this repository
-    {#if repoOnly && hidden}<span class="muted small">({hidden} NixOS defaults hidden)</span>{/if}
+    {#if repoOnly && hidden}<span class="muted small">({hidden} defaults hidden)</span>{/if}
   </label>
   <span class="spacer"></span>
   {#if host.managedFile}
     <button class="primary" onclick={() => openPackageSearch('', [host.name])}><Icon name="plus" size={14} />Add packages</button>
   {:else}
-    <span class="muted small" title="Turn on visual editing to add packages by clicking">Visual editing is off: add packages in Code</span>
+    <span class="muted small">{host.name} is Code only: add packages in its Nix files, or <a href={machineLink(host.name)}>turn on editing</a>.</span>
   {/if}
 </div>
 
@@ -71,22 +77,26 @@
     <tbody>
       {#each rows as p (p.name)}
         {@const isManaged = !!host.managedFile && p.files.includes(host.managedFile)}
-        <tr class:pending={p.pending}>
+        {@const gone = removing(p)}
+        <tr class:pending={p.pending} class:gone>
           <td class="mono name">{p.name}</td>
           <td class="mono muted ver">{p.pending ? '' : p.version}</td>
           <td>
             <div class="chips">
-              {#if p.pending && fleet.computing}<span class="badge busy">Pending evaluation</span>{:else if p.pending}<span class="badge" title="In {host.managedFile}, but the evaluation lists no package by this name">Not in the evaluation</span>{/if}
+              {#if p.pending && fleet.computing}<span class="badge busy">Adding…</span>{:else if p.pending}<span class="badge" title="In {host.managedFile}, but the evaluation lists no package by this name">Not in the evaluation</span>{/if}
+              {#if gone}<span class="badge busy" title="Removed from {host.managedFile}; it disappears once {host.name} is evaluated again">Removing{fleet.computing ? '…' : ''}</span>{/if}
               {#each p.files as f (f)}
                 {#if f === host.managedFile}
-                  <span class="chip managed" title="Added by clicking ({f})"
-                    >managed<button class="x" aria-label="Remove {p.name} from {host.name}" title="Remove from {host.name}" disabled={busy === p.name} onclick={() => remove(p)}
-                      ><Icon name="x" size={11} /></button
-                    ></span>
+                  {#if !gone}
+                    <span class="chip managed" title="Set here, in {f}"
+                      >Set here<button class="x" aria-label="Remove {p.name} from {host.name}" title="Remove from {host.name} (you can undo)" disabled={busy === p.name} onclick={() => remove(p)}
+                        ><Icon name="x" size={11} /></button
+                      ></span>
+                  {/if}
                 {:else if isRepoFile(f)}
-                  <a class="chip mono" href={codeLink(f)} title="Open {f} in Code">{f}</a>
+                  <a class="chip mono" href={codeLink(f)} title="In code: open {f}">{f}</a>
                 {:else}
-                  <span class="chip" title="Installed by NixOS or a flake input by default">NixOS default</span>
+                  <span class="chip" title="Installed by NixOS or a flake input by default">Default</span>
                 {/if}
               {/each}
             </div>
@@ -135,7 +145,7 @@
     text-align: right;
   }
   .act button {
-    opacity: 0;
+    opacity: 0.35;
   }
   tr:hover .act button,
   .act button:focus-visible {
@@ -153,6 +163,11 @@
   }
   tr.pending td {
     background: color-mix(in srgb, var(--accent) 5%, transparent);
+  }
+  tr.gone .name,
+  tr.gone .ver {
+    color: var(--fg-faint);
+    text-decoration: line-through;
   }
   .none {
     padding: 18px var(--s3);

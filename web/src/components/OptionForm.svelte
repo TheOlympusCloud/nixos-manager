@@ -1,22 +1,29 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity'
   import type { OptionInfo } from '../lib/api'
-  import { fleet, hostByName, managedValue, setOption, unsetOption } from '../lib/fleet.svelte'
-  import { controlFor, docsHTML, fillPath, optionSegments, parseNix, type Scalar } from '../lib/options'
-  import { machineLink } from '../lib/router.svelte'
+  import { fleet, healthy, hostByName, managedValue, setOption, unsetOption, useValues, valueOf } from '../lib/fleet.svelte'
+  import { plural } from '../lib/format'
+  import { controlFor, docsHTML, fillPath, optionSegments, parseNix, pathName, type Scalar } from '../lib/options'
+  import { go, machineLink } from '../lib/router.svelte'
+  import { quietly, toast } from '../lib/ui.svelte'
+  import { copyable, effective, sameValue, showValue } from '../lib/values'
   import Icon from './Icon.svelte'
+  import SourceTag from './SourceTag.svelte'
   import Switch from './Switch.svelte'
 
   /** The form for one NixOS option on one machine, generated from the option's type. */
-  let { host, option }: { host: string; option: OptionInfo } = $props()
+  let { host, option, initialNames = [] }: { host: string; option: OptionInfo; initialNames?: string[] } = $props()
 
   const segs = $derived(optionSegments(option.name))
   const placeholders = $derived(segs.filter((s) => s.kind === 'name'))
   const inList = $derived(segs.some((s) => s.kind === 'list'))
-  let names = $state<string[]>([])
+  // svelte-ignore state_referenced_locally (the form is keyed on the option and its names)
+  let names = $state<string[]>([...initialNames])
   const path = $derived(fillPath(segs, names))
   const pathReady = $derived(placeholders.every((_, i) => names[i]?.trim()))
   const control = $derived(controlFor(option.type))
-  const managed = $derived(!!hostByName(host)?.managedFile)
+  const managedFile = $derived(hostByName(host)?.managedFile ?? null)
+  const managed = $derived(!!managedFile)
   const editable = $derived(managed && !option.readOnly && !inList && !!fleet.managed[host])
   const current = $derived(pathReady ? managedValue(host, path) : undefined)
   const fallback = $derived(parseNix(option.default))
@@ -29,12 +36,34 @@
     return v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v) : []
   })
 
+  // The effective value on every machine; typed names settle before they are asked for.
+  let asked = $state('')
+  $effect(() => {
+    const name = pathReady && !inList ? pathName(path) : ''
+    if (!placeholders.length || !name) return void (asked = name)
+    const t = setTimeout(() => (asked = name), 450)
+    return () => clearTimeout(t)
+  })
+  const vals = useValues(() => (asked ? { names: [asked] } : null))
+  const machines = $derived(healthy())
+  const eff = $derived(asked ? effective(valueOf(vals.values, asked, host), current, managedFile, !!fleet.managed[host]) : null)
+  const rows = $derived(
+    machines.map((h) => ({
+      host: h.name,
+      editable: !!h.managedFile,
+      eff: asked ? effective(valueOf(vals.values, asked, h.name), managedValue(h.name, path), h.managedFile, !!fleet.managed[h.name]) : null,
+    })),
+  )
+  const distinct = $derived(new Set(rows.filter((r) => r.eff?.state === 'value').map((r) => JSON.stringify(r.eff?.state === 'value' ? r.eff.value : null))).size)
+  /** What the form starts from: the value set here, else the machine's effective value, else the documented default. */
+  const base = $derived(current !== undefined ? current : eff?.state === 'value' && !eff.pending && copyable(eff.value) ? eff.value : fallback)
+
   // The draft follows the saved value until the user edits it.
   let draft = $state<unknown>(undefined)
   let jsonText = $state('')
   let touched = $state(false)
   $effect(() => {
-    const v = current !== undefined ? current : fallback
+    const v = base
     if (touched) return
     draft = v
     jsonText = v === undefined ? '' : JSON.stringify(v, null, 2)
@@ -86,6 +115,13 @@
     return draft === undefined || draft === null ? 'Pick a value.' : ''
   })
 
+  /**
+   * Lists and attribute sets are written whole, so they must start from the value that applies now:
+   * wait for it rather than overwrite hand-written entries with an edited default.
+   */
+  const waiting = $derived(
+    !!asked && current === undefined && (control.kind === 'list' || control.kind === 'json') && !vals.error && (!eff || (eff.state === 'value' && eff.pending)),
+  )
   const value = $derived(control.kind === 'json' ? (problem ? undefined : JSON.parse(jsonText)) : draft)
   const changed = $derived(touched && JSON.stringify(value) !== JSON.stringify(current))
 
@@ -110,12 +146,37 @@
   /** Short Nix values on one line: "[\n  22\n]" → "[ 22 ]". */
   const compact = (nix: string) => (nix.length <= 80 ? nix.replace(/\s*\n\s*/g, ' ') : nix)
   const asText = (v: unknown) => (v === undefined || v === null ? '' : String(v))
+
+  // Copy one machine's value to others (each written whole to its managed.json).
+  let copying = $state<{ from: string; value: unknown } | null>(null)
+  const targets = new SvelteSet<string>()
+  let copyBusy = $state(false)
+  const copyTargets = $derived(copying ? rows.filter((r) => r.editable && r.host !== copying!.from && r.eff?.state !== 'missing') : [])
+  function startCopy(from: string, value: unknown) {
+    copying = { from, value }
+    targets.clear()
+    for (const r of copyTargets) if (!(r.eff?.state === 'value' && sameValue(r.eff.value, value))) targets.add(r.host)
+  }
+  async function copy() {
+    if (!copying) return
+    copyBusy = true
+    const done: string[] = []
+    // One toast for the batch instead of one per machine.
+    await quietly(async () => {
+      for (const t of [...targets]) {
+        if (!(await setOption(t, path, copying!.value))) break
+        done.push(t)
+      }
+    })
+    if (done.length) toast(`Set ${pathName(path)} to ${showValue(copying.value)} on ${done.join(', ')}`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
+    copyBusy = false
+    copying = null
+  }
 </script>
 
 <div class="of">
   <div class="name-row">
     <h3 class="mono">{option.name}</h3>
-    {#if current !== undefined}<span class="badge ok" title="Set in {fleet.managed[host]?.path}">Set here</span>{/if}
   </div>
   <div class="type mono">{option.type}</div>
 
@@ -132,12 +193,12 @@
     {:else if inList}
       <p class="note"><Icon name="info" size={14} />This option sits inside a list of submodules, which a settings path cannot address. Set it in Code.</p>
     {:else if !managed}
-      <p class="note"><Icon name="info" size={14} />Visual editing is off on {host}. <a href={machineLink(host)}>Turn it on</a> to set options here.</p>
+      <p class="note"><Icon name="info" size={14} />{host} is Code only: change options in its Nix files, or <a href={machineLink(host)}>turn on editing</a> to set them here.</p>
     {:else if !fleet.managed[host]}
       <span class="skel" style:width="40%"></span>
     {/if}
 
-    {#if placeholders.length && editable}
+    {#if placeholders.length && !inList}
       <div class="names">
         {#each placeholders as p, i (i)}
           <label class="field">
@@ -156,6 +217,37 @@
           </label>
         {/each}
       </div>
+    {/if}
+
+    {#if asked}
+      <div class="now" aria-live="polite">
+        <span class="label">On {host}</span>
+        {#if vals.error}
+          <span class="error-text small">{vals.error}</span>
+        {:else if !eff}
+          <span class="skel" style:width="160px"></span>{#if vals.job}<span class="muted small">Evaluating {host}…</span>{/if}
+        {:else if eff.state === 'missing'}
+          <span class="muted">{placeholders.length ? `Nothing is set for ${names.filter(Boolean).map((n) => `“${n}”`).join(', ')} on ${host} yet.` : `${host} has no such option: none of its modules declares it.`}</span>
+        {:else if eff.state === 'error'}
+          <span class="error-text small">Could not evaluate it: {eff.error.split('\n')[0]}</span>
+        {:else}
+          <code class="val" title={showValue(eff.value)}>{showValue(eff.value)}</code>
+          <SourceTag source={eff.source} pending={eff.pending} />
+        {/if}
+      </div>
+      {#if eff?.state === 'value' && !eff.pending && !option.readOnly && !inList}
+        <p class="why">
+          {#if eff.source.kind === 'here'}
+            Set here, so it is {host}'s final value: a value set here wins over hand-written Nix (only <span class="mono">lib.mkForce</span> beats it).
+          {:else if eff.source.kind === 'code' && editable}
+            Written by hand. Saving a value here overrides it: values set here win over hand-written Nix.
+          {:else if eff.source.kind === 'code'}
+            Change it in <span class="mono">{eff.source.file}</span>.
+          {:else}
+            Nothing in the repository sets it, so NixOS's default applies.
+          {/if}
+        </p>
+      {/if}
     {/if}
 
     {#if editable && !option.readOnly && !inList}
@@ -236,7 +328,8 @@
       {#if touched && problem}<p class="problem" role="alert">{problem}</p>{/if}
 
       <div class="buttons">
-        <button class="primary" disabled={!changed || !!problem || busy} onclick={save}>{busy ? 'Saving…' : 'Save'}</button>
+        <button class="primary" disabled={!changed || !!problem || busy || waiting} onclick={save}>{busy ? 'Saving…' : 'Save'}</button>
+        {#if waiting}<span class="muted small wait">{eff ? `Reset here: wait for ${host}'s next evaluation` : 'Reading the value that applies now'}; this value is saved whole, starting from it.</span>{/if}
         {#if current !== undefined}
           <button disabled={busy} onclick={reset} title="Remove it from {fleet.managed[host]?.path}; the default or the hand-written value applies again">Reset</button>
         {/if}
@@ -244,6 +337,63 @@
       </div>
     {/if}
   </div>
+
+  {#if asked && machines.length > 1}
+    <section class="compare" aria-label="Value on every machine">
+      <div class="c-head">
+        <h4>On every machine</h4>
+        {#if vals.values}<span class="muted small">{distinct <= 1 ? 'The same everywhere it is set' : `${plural(distinct, 'different value')}`}</span>{/if}
+      </div>
+      <table class="data">
+        <colgroup><col style:width="24%" /><col style:width="34%" /><col /><col style:width="104px" /></colgroup>
+        <thead><tr><th>Machine</th><th>Value</th><th>From</th><th><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody>
+          {#each rows as r (r.host)}
+            {@const e = r.eff}
+            <tr class:me={r.host === host}>
+              <td class="m"><a href={machineLink(r.host)}>{r.host}</a>{#if !r.editable}<span class="co" title="Not editable here: it does not load a managed.json">Code only</span>{/if}</td>
+              <td class="v">
+                {#if vals.error}<span class="muted small">—</span>
+                {:else if !e}<span class="skel" style:width="70%"></span>
+                {:else if e.state === 'missing'}<span class="muted small">{placeholders.length ? 'Not set' : 'No such option'}</span>
+                {:else if e.state === 'error'}<span class="error-text small">Does not evaluate</span>
+                {:else}<code title={showValue(e.value)}>{showValue(e.value)}</code>{/if}
+              </td>
+              <td>{#if e?.state === 'value'}<SourceTag source={e.source} pending={e.pending} />{/if}</td>
+              <td class="act">
+                {#if e?.state === 'value' && !e.pending && copyable(e.value) && rows.some((x) => x.editable && x.host !== r.host && x.eff?.state !== 'missing')}
+                  <button class="small ghost" aria-expanded={copying?.from === r.host} onclick={() => (copying?.from === r.host ? (copying = null) : startCopy(r.host, e.value))}><Icon name="copy" size={12} />Copy to…</button>
+                {/if}
+              </td>
+            </tr>
+            {#if copying?.from === r.host}
+              <tr class="copy-row">
+                <td colspan="4">
+                  <div class="copy">
+                    <p>Set <code>{showValue(copying.value)}</code> from {r.host} on:</p>
+                    <div class="chips">
+                      {#each copyTargets as t (t.host)}
+                        <label class="target" class:on={targets.has(t.host)}>
+                          <input type="checkbox" checked={targets.has(t.host)} onchange={() => (targets.has(t.host) ? targets.delete(t.host) : targets.add(t.host))} />
+                          {t.host}
+                          {#if t.eff?.state === 'value' && sameValue(t.eff.value, copying.value)}<span class="muted">already</span>{/if}
+                        </label>
+                      {/each}
+                    </div>
+                    <p class="muted small">Each machine gets it in its managed.json, where it wins over hand-written Nix.</p>
+                    <div class="buttons">
+                      <button class="primary small" disabled={!targets.size || copyBusy} onclick={copy}>{copyBusy ? 'Copying…' : targets.size ? `Copy to ${plural(targets.size, 'machine')}` : 'Pick machines'}</button>
+                      <button class="small ghost" onclick={() => (copying = null)}>Cancel</button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            {/if}
+          {/each}
+        </tbody>
+      </table>
+    </section>
+  {/if}
 </div>
 
 <style>
@@ -389,6 +539,129 @@
   }
   .buttons {
     display: flex;
+    align-items: center;
     gap: 8px;
+  }
+  .wait {
+    margin-left: 4px;
+  }
+  .now {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+  }
+  .now .label {
+    min-width: 0;
+  }
+  .val {
+    max-width: 100%;
+    padding: 3px 8px;
+    overflow: hidden;
+    color: var(--fg-strong);
+    font-size: 12.5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+  }
+  .why {
+    max-width: 72ch;
+    margin-top: -4px;
+    color: var(--fg-muted);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+  }
+  .compare {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .c-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  h4 {
+    font-size: var(--fs-md);
+  }
+  .compare table {
+    table-layout: fixed;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .compare tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .compare td {
+    font-size: var(--fs-sm);
+  }
+  .m {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .m a {
+    color: var(--fg-strong);
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .m a:hover {
+    color: var(--accent);
+  }
+  .co {
+    margin-left: 8px;
+    color: var(--fg-faint);
+    font-size: var(--fs-xs);
+  }
+  tr.me td {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+  }
+  .compare td {
+    overflow: hidden;
+  }
+  .v code {
+    display: block;
+    overflow: hidden;
+    color: var(--fg-strong);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .compare .act {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .copy-row td,
+  .copy-row:hover td {
+    background: var(--bg-side);
+  }
+  .copy {
+    display: grid;
+    gap: 10px;
+    padding: 8px 2px 10px;
+  }
+  .copy code {
+    color: var(--fg-strong);
+  }
+  .target {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    cursor: pointer;
+  }
+  .target.on {
+    color: var(--fg-strong);
+    background: color-mix(in srgb, var(--accent-strong) 22%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .target .muted {
+    font-size: var(--fs-xs);
   }
 </style>

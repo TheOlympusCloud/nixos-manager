@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { controlFor, docsHTML, fillPath, optionSegments, parseNix, pathName } from './options'
+import { controlFor, docsHTML, fillPath, matchOption, optionSegments, parseNix, pathName } from './options'
 
 describe('controlFor', () => {
   it('maps each documented option type to its control', () => {
@@ -89,5 +89,16 @@ describe('docsHTML', () => {
     )
     expect(docsHTML('One\nline.\n\n- a\n- `b*c*`')).toBe('<p>One line.</p><ul><li>a</li><li><code>b*c*</code></li></ul>')
     expect(docsHTML(':::{.note}\nCareful.\n:::')).toBe('<p>Careful.</p>')
+  })
+})
+
+describe('matchOption', () => {
+  it('finds the names a concrete path gives the placeholders', () => {
+    expect(matchOption('users.users.<name>.openssh.authorizedKeys.keys', ['users', 'users', 'pablo', 'openssh', 'authorizedKeys', 'keys'])).toEqual(['pablo'])
+    expect(matchOption('services.nginx.virtualHosts.<name>.root', ['services', 'nginx', 'virtualHosts', 'a.lan', 'root'])).toEqual(['a.lan'])
+    expect(matchOption('time.timeZone', ['time', 'timeZone'])).toEqual([])
+    expect(matchOption('time.timeZone', ['time', 'zone'])).toBeNull()
+    expect(matchOption('users.users.<name>.shell', ['users', 'users', 'pablo'])).toBeNull()
+    expect(matchOption('fileSystems.<name>.options.*', ['fileSystems', '/', 'options', 'x'])).toBeNull()
   })
 })

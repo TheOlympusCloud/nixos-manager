@@ -5,6 +5,8 @@
   import { pkgSearch } from '../lib/dialogs.svelte'
   import { addPackages, fleet, healthy, searchIndexed } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
+  import { isRepoFile } from '../lib/graph'
+  import { machineLink } from '../lib/router.svelte'
   import Icon from './Icon.svelte'
   import JobLog from './JobLog.svelte'
 
@@ -19,11 +21,32 @@
   const targets = new SvelteSet<string>(pkgSearch.hosts)
 
   const machines = $derived(healthy())
-  const installedOn = (attr: string) => machines.filter((h) => targets.has(h.name) && h.packages.some((p) => p.name === attr)).map((h) => h.name)
+  const editable = $derived(machines.filter((h) => h.managedFile))
+  const codeOnly = $derived(machines.filter((h) => !h.managedFile))
+  /** Picked packages, by attribute, so adding can skip machines that already have them. */
+  const hits = new Map<string, PackageHit>()
+
+  /** Where a machine already gets this package: Set here, In code · file, or Default; null when it does not. */
+  function hasOn(hostName: string, r: PackageHit): string | null {
+    const h = machines.find((x) => x.name === hostName)
+    if (!h) return null
+    if (fleet.managed[h.name]?.packages.includes(r.attr)) return 'Set here'
+    const p = h.packages.find((x) => x.name === r.pname || x.name === r.attr)
+    if (!p) return null
+    if (h.managedFile && p.files.includes(h.managedFile)) return 'Set here'
+    const file = p.files.find(isRepoFile)
+    return file ? `In code · ${file}` : 'Default'
+  }
+  const onTargets = (r: PackageHit) => [...targets].flatMap((t) => (hasOn(t, r) ? [{ host: t, from: hasOn(t, r)! }] : []))
 
   onMount(() => {
     el.showModal()
-    if (!targets.size && machines.filter((h) => h.managedFile).length === 1) targets.add(machines.find((h) => h.managedFile)!.name)
+    if (!targets.size) {
+      // No machine given (e.g. from Packages): start from the ones picked last time.
+      const last: string[] = JSON.parse(localStorage.getItem('nixmgr.pkgTargets') ?? '[]')
+      for (const t of last) if (editable.some((h) => h.name === t)) targets.add(t)
+      if (!targets.size && editable.length === 1) targets.add(editable[0].name)
+    }
     if (query.trim()) search()
   })
 
@@ -43,6 +66,7 @@
       const r = await searchIndexed(() => api.searchPackages(q, 50), (job) => mine === seq && (indexJob = job), () => mine === seq && el?.open)
       if (mine !== seq || r === null) return
       results = r
+      for (const h of r) hits.set(h.attr, h)
       indexJob = ''
     } catch (e) {
       if (mine === seq) error = e instanceof Error ? e.message : String(e)
@@ -55,11 +79,15 @@
     pkgSearch.open = false
   }
 
+  /** Per machine, the picked packages it does not have yet. */
+  const plan = $derived([...targets].map((t) => ({ host: t, attrs: [...picked].filter((a) => !(hits.has(a) && hasOn(t, hits.get(a)!))) })))
+  const skipped = $derived(plan.reduce((n, p) => n + picked.size - p.attrs.length, 0))
+
   async function add() {
     adding = true
-    const attrs = [...picked]
+    localStorage.setItem('nixmgr.pkgTargets', JSON.stringify([...targets]))
     try {
-      for (const host of [...targets]) if (!(await addPackages(host, attrs))) return
+      for (const p of plan) if (p.attrs.length && !(await addPackages(p.host, p.attrs))) return
       close()
     } finally {
       adding = false
@@ -117,12 +145,15 @@
     {:else}
       <ul class="list" aria-label="Packages found">
         {#each results as r (r.attr)}
-          {@const on = installedOn(r.attr)}
+          {@const on = onTargets(r)}
+          {@const everywhere = targets.size > 0 && on.length === targets.size}
           <li>
-            <label class="row" class:picked={picked.has(r.attr)}>
-              <input type="checkbox" checked={picked.has(r.attr)} onchange={() => toggle(picked, r.attr)} />
+            <label class="row" class:picked={picked.has(r.attr)} class:have={everywhere}>
+              <input type="checkbox" checked={picked.has(r.attr)} disabled={everywhere && !picked.has(r.attr)} onchange={() => toggle(picked, r.attr)} />
               <span class="main">
-                <span class="top"><span class="attr mono">{r.attr}</span><span class="ver mono">{r.version}</span>{#if on.length}<span class="badge">on {on.join(', ')}</span>{/if}</span>
+                <span class="top"
+                  ><span class="attr mono">{r.attr}</span><span class="ver mono">{r.version}</span>
+                  {#each on as o (o.host)}<span class="badge" class:ok={o.from === 'Set here'} title="{r.pname} is already on {o.host}: {o.from}">{everywhere && on.length === 1 ? 'Already here' : `On ${o.host}`} · {o.from}</span>{/each}</span>
                 {#if r.description}<span class="desc">{r.description}</span>{/if}
               </span>
             </label>
@@ -147,19 +178,30 @@
     </div>
     <div class="targets" role="group" aria-label="Machines to add to">
       <span class="label">Add to</span>
-      {#each machines as h (h.name)}
-        <label class="target" class:on={targets.has(h.name)} class:disabled={!h.managedFile} title={h.managedFile ? h.managedFile : 'Visual editing is off on this machine'}>
-          <input type="checkbox" disabled={!h.managedFile} checked={targets.has(h.name)} onchange={() => toggle(targets, h.name)} />
+      {#each editable as h (h.name)}
+        <label class="target" class:on={targets.has(h.name)} title="Kept in {h.managedFile}">
+          <input type="checkbox" checked={targets.has(h.name)} onchange={() => toggle(targets, h.name)} />
           {h.name}
         </label>
+      {:else}
+        <span class="muted small">No machine is Editable here yet.</span>
       {/each}
+      {#if !targets.size && editable.length}<span class="hint small">Pick at least one machine.</span>{/if}
     </div>
+    {#if codeOnly.length}
+      <p class="code-only small">
+        <span class="label">Code only</span>
+        <span class="muted"
+          >{codeOnly.map((h) => h.name).join(', ')}: add packages in {codeOnly.length === 1 ? 'its' : 'their'} Nix files, or
+          <a href={machineLink(codeOnly[0].name)} onclick={() => el.close()}>turn on editing</a>.</span>
+      </p>
+    {/if}
     <div class="buttons">
-      {#if fleet.computing}<span class="muted small">Machines are re-evaluating; you can still add.</span>{/if}
+      {#if skipped}<span class="muted small">{plural(skipped, 'package')} already there will be skipped.</span>{:else if fleet.computing}<span class="muted small">Machines are re-evaluating; you can still add.</span>{/if}
       <span class="spacer"></span>
       <button onclick={() => el.close()}>Cancel</button>
-      <button class="primary" disabled={!picked.size || !targets.size || adding} onclick={add}>
-        {adding ? 'Adding…' : picked.size ? `Add ${plural(picked.size, 'package')}${targets.size ? ` to ${plural(targets.size, 'machine')}` : ''}` : 'Add packages'}
+      <button class="primary" disabled={!picked.size || !targets.size || adding || plan.every((p) => !p.attrs.length)} onclick={add}>
+        {adding ? 'Adding…' : !picked.size ? 'Add packages' : !targets.size ? 'Choose a machine' : `Add ${plural(picked.size, 'package')} to ${plural(targets.size, 'machine')}`}
       </button>
     </div>
   </footer>
@@ -315,9 +357,20 @@
     background: color-mix(in srgb, var(--accent-strong) 22%, transparent);
     border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
-  .target.disabled {
-    color: var(--fg-faint);
-    cursor: not-allowed;
+  .hint {
+    color: var(--yellow);
+  }
+  .code-only {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0;
+  }
+  .row.have .attr {
+    color: var(--fg-muted);
+  }
+  .top {
+    flex-wrap: wrap;
   }
   .buttons {
     display: flex;

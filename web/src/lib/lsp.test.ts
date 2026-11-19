@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { documentUri, socketTransport } from './lsp.svelte'
+import { documentUri, silentTransport, socketTransport } from './lsp.svelte'
 
 class FakeSocket extends EventTarget {
   readyState = 1
@@ -34,5 +34,21 @@ describe('socketTransport', () => {
 
   it('builds document URIs from the working copy root', () => {
     expect(documentUri('/srv/nixos-config', 'hosts/web/default.nix')).toBe('file:///srv/nixos-config/hosts/web/default.nix')
+  })
+})
+
+describe('silentTransport', () => {
+  it('answers initialize with no capabilities and other requests with null', async () => {
+    const t = silentTransport()
+    const got: unknown[] = []
+    t.subscribe((m) => got.push(JSON.parse(m)))
+    t.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }))
+    t.send(JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })) // a notification: no answer
+    t.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'textDocument/hover', params: {} }))
+    await Promise.resolve()
+    expect(got).toEqual([
+      { jsonrpc: '2.0', id: 1, result: { capabilities: {} } },
+      { jsonrpc: '2.0', id: 2, result: null },
+    ])
   })
 })

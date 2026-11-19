@@ -66,7 +66,25 @@ export function sanitizeHTML(html: string): string {
   return out.innerHTML
 }
 
-export const lspState = $state({ status: 'off' as 'off' | 'connecting' | 'ready' | 'down' })
+/**
+ * Stands in for nixd when the server cannot start it: it answers `initialize` with no
+ * capabilities, so the editor never asks for completion or hover and nothing times out.
+ */
+export function silentTransport(): Transport {
+  const handlers = new Set<(msg: string) => void>()
+  return {
+    send(msg) {
+      const m = JSON.parse(msg)
+      if (m.id === undefined || !m.method) return
+      const reply = JSON.stringify({ jsonrpc: '2.0', id: m.id, result: m.method === 'initialize' ? { capabilities: {} } : null })
+      queueMicrotask(() => handlers.forEach((h) => h(reply)))
+    },
+    subscribe: (h) => void handlers.add(h),
+    unsubscribe: (h) => void handlers.delete(h),
+  }
+}
+
+export const lspState = $state({ status: 'off' as 'off' | 'connecting' | 'ready' | 'down' | 'missing', reason: '' })
 
 let client: LSPClient | null = null
 let retries = 0
@@ -80,21 +98,36 @@ function connect() {
   const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/lsp`)
   socket = sock
   lspState.status = 'connecting'
+  let linked = false
+  let wait: ReturnType<typeof setTimeout> | undefined
   sock.addEventListener('open', () => {
-    c.connect(socketTransport(sock))
-    c.initializing.then(
-      () => {
-        retries = 0
-        lspState.status = 'ready'
-      },
-      () => {},
-    )
+    // The server closes the socket at once when nixd cannot start: wait a moment before
+    // talking, so no request is left waiting for a server that never came.
+    wait = setTimeout(() => {
+      if (socket !== sock) return
+      linked = true
+      c.connect(socketTransport(sock))
+      c.initializing.then(
+        () => {
+          retries = 0
+          Object.assign(lspState, { status: 'ready', reason: '' })
+        },
+        () => {},
+      )
+    }, 400)
   })
-  sock.addEventListener('close', () => {
+  sock.addEventListener('close', (e) => {
+    clearTimeout(wait)
     if (socket !== sock) return
     socket = null
-    c.disconnect()
-    lspState.status = 'down'
+    if (linked) c.disconnect()
+    if (/cannot start nixd/.test(e.reason)) {
+      // Retrying cannot help until nixd is installed; stop, say why, and keep the editor quiet.
+      Object.assign(lspState, { status: 'missing', reason: 'nixd is not installed on the server (or cannot start), so the editor has no completion, hover help or diagnostics. Install nixd, or use the container image, and reload.' })
+      c.connect(silentTransport())
+      return
+    }
+    Object.assign(lspState, { status: 'down', reason: e.reason || 'The connection to the language server closed; retrying.' })
     retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** retries++))
   })
 }

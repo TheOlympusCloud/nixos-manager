@@ -4,6 +4,7 @@
   import FileTree from '../components/FileTree.svelte'
   import Icon from '../components/Icon.svelte'
   import { lspState } from '../lib/lsp.svelte'
+  const lspStatus = { off: 'nixd idle', connecting: 'nixd starting', ready: 'nixd ready', down: 'nixd reconnecting', missing: 'nixd not installed' }
   import { codeLink, link, replace, route } from '../lib/router.svelte'
   import { activeTab, app, openFile } from '../lib/state.svelte'
   import { statusLine } from '../lib/ui.svelte'
@@ -65,7 +66,8 @@
   <footer class="status">
     <span class="msg" role="status">{statusLine.text}</span>
     {#if path}<a href={link('history', path.split('/'))}><Icon name="history" size={12} />History of this file</a>{/if}
-    <span title="Nix language server (nixd)"><span class="dot {lspState.status === 'ready' ? 'ok' : lspState.status === 'down' ? 'err' : 'off'}"></span>nixd {lspState.status === 'off' ? 'idle' : lspState.status}</span>
+    <span title={lspState.reason || 'Nix language server (nixd): completion, hover help and diagnostics'}
+      ><span class="dot {lspState.status === 'ready' ? 'ok' : lspState.status === 'down' ? 'err' : lspState.status === 'connecting' ? 'busy' : 'off'}"></span>{lspStatus[lspState.status]}</span>
   </footer>
 </div>
 

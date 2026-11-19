@@ -1,41 +1,84 @@
 <script lang="ts">
-  import type { Feature, Host } from '../../lib/api'
-  import { enablePath, fleet, managedValue, toggleFeature } from '../../lib/fleet.svelte'
-  import { isRepoFile } from '../../lib/graph'
+  import type { FeatureGroup, Host } from '../../lib/api'
+  import { enablePath, fleet, managedValue, setOption, unsetOption } from '../../lib/fleet.svelte'
   import { groupLabel, groupOrder } from '../../lib/matrix'
-  import { codeLink } from '../../lib/router.svelte'
+  import { machineLink } from '../../lib/router.svelte'
+  import { managedFeatures, sourceOf } from '../../lib/values'
   import Drawer from '../Drawer.svelte'
   import Icon from '../Icon.svelte'
   import OptionBrowser from '../OptionBrowser.svelte'
+  import SourceTag from '../SourceTag.svelte'
   import Switch from '../Switch.svelte'
 
   let { host }: { host: Host } = $props()
 
+  type Card = { group: FeatureGroup; name: string; description: string; files: string[]; inModel: boolean }
+
   let filter = $state('')
   let busy = $state('')
-  let drawer = $state<null | { kind: 'add' } | { kind: 'configure'; f: Feature }>(null)
+  let drawer = $state<null | { kind: 'add' } | { kind: 'configure'; f: Card }>(null)
   let selected = $state('')
 
-  const shown = $derived(host.features.filter((f) => !filter.trim() || (f.name + ' ' + f.description).toLowerCase().includes(filter.trim().toLowerCase())))
-  const fromManaged = (f: Feature) => !!host.managedFile && f.files.includes(host.managedFile)
-  const handFile = (f: Feature) => f.files.find((x) => isRepoFile(x) && x !== host.managedFile)
+  const editable = $derived(!!host.managedFile && !!fleet.managed[host.name])
+  // The evaluated features, plus switches set here that the evaluation does not show (yet).
+  const cards = $derived.by((): Card[] => {
+    const model = host.features.map((f) => ({ ...f, inModel: true }))
+    const extra = managedFeatures(fleet.managed[host.name]?.settings)
+      .filter((m) => !host.features.some((f) => f.group === m.group && f.name === m.name))
+      .map((m) => ({ group: m.group, name: m.name, description: '', files: host.managedFile ? [host.managedFile] : [], inModel: false }))
+    return [...model, ...extra]
+  })
+  const shown = $derived(cards.filter((f) => !filter.trim() || (f.name + ' ' + f.description).toLowerCase().includes(filter.trim().toLowerCase())))
 
-  async function toggle(f: Feature, on: boolean) {
+  const setHere = (f: Card) => managedValue(host.name, enablePath(f.group, f.name))
+  const handFiles = (f: Card) => f.files.filter((x) => x !== host.managedFile && x !== 'nixos')
+  /** Evaluated as on only because of a value set here. */
+  const onlyHere = (f: Card) => !!host.managedFile && f.files.includes(host.managedFile) && !handFiles(f).length
+  /** Whether the switch shows on: the value set here wins; one reset here goes off; otherwise the evaluation. */
+  function isOn(f: Card): boolean {
+    const v = setHere(f)
+    if (typeof v === 'boolean') return v
+    return f.inModel && !(onlyHere(f) && !!fleet.managed[host.name])
+  }
+  /** On here but not evaluated yet, or the reverse. */
+  const pendingOf = (f: Card) => (isOn(f) && !f.inModel ? 'on' : !isOn(f) && f.inModel ? 'off' : '')
+
+  async function toggle(f: Card, on: boolean) {
     busy = f.group + f.name
-    await toggleFeature(host.name, f.group, f.name, on)
+    const path = enablePath(f.group, f.name)
+    // Turning off something hand-written (or a default) takes an explicit false here, which wins over it.
+    if (on) await setOption(host.name, path, true, `Enabled ${f.name} on ${host.name}`)
+    else if (f.inModel && !onlyHere(f)) await setOption(host.name, path, false, `Disabled ${f.name} on ${host.name}`)
+    else await unsetOption(host.name, path, `Disabled ${f.name} on ${host.name}`)
     busy = ''
   }
-  const pending = $derived(fleet.pending.includes(host.name) && fleet.computing)
+  async function reset(f: Card) {
+    busy = f.group + f.name
+    await unsetOption(host.name, enablePath(f.group, f.name), `${f.name} on ${host.name} follows ${handFiles(f)[0] ?? 'its Nix files'} again`)
+    busy = ''
+  }
+  const sourceFor = (f: Card) => (setHere(f) !== undefined ? ({ kind: 'here' } as const) : sourceOf(f.files, host.managedFile))
 </script>
 
 <div class="toolbar">
   <input class="search" type="search" placeholder="Filter services and programs" aria-label="Filter services and programs" data-search bind:value={filter} />
-  {#if pending}<span class="badge busy">Re-evaluating; turned-off features disappear once it finishes</span>{/if}
+  {#if fleet.computing && cards.some((f) => pendingOf(f))}<span class="badge busy">Re-evaluating {host.name}</span>{/if}
   <span class="spacer"></span>
   {#if host.managedFile}
-    <button class="primary" onclick={() => (drawer = { kind: 'add' })}><Icon name="plus" size={14} />Add service or program</button>
+    <button class="primary" disabled={!editable} onclick={() => (drawer = { kind: 'add' })}><Icon name="plus" size={14} />Add service or program</button>
+  {:else}
+    <span class="muted small">{host.name} is Code only: <a href={machineLink(host.name)}>turn on editing</a> to switch services by clicking.</span>
   {/if}
 </div>
+
+{#if !cards.length}
+  <div class="empty card">
+    <p><strong>No services or programs are enabled on {host.name}.</strong></p>
+    <p class="muted">Features show up here as soon as something turns them on: a hand-written module, a flake input, or {host.managedFile ? 'the Add button above' : 'this app once editing is on'}.</p>
+  </div>
+{:else if !shown.length}
+  <p class="muted">Nothing matches “{filter}”.</p>
+{/if}
 
 {#each groupOrder as g (g)}
   {@const fs = shown.filter((f) => f.group === g)}
@@ -44,42 +87,35 @@
       <h2 class="g-head"><span class="dot" style:--c="var(--g-{g})"></span>{groupLabel[g]} <span class="muted num">{fs.length}</span></h2>
       <div class="cards">
         {#each fs as f (f.name)}
-          {@const hand = handFile(f)}
-          <article class="card feat g-{g}">
+          {@const pending = pendingOf(f)}
+          {@const on = isOn(f)}
+          <article class="card feat g-{g}" class:off={!on} class:pending={!!pending}>
             <div class="f-top">
               <h3>{f.name}</h3>
-              {#if fromManaged(f) && !hand}
-                <Switch checked={fleet.managed[host.name] ? managedValue(host.name, enablePath(f.group, f.name)) === true : true} busy={busy === g + f.name} label="{f.name} on {host.name}" onchange={(on) => toggle(f, on)} />
-              {:else if hand}
-                <a class="in-code small" href={codeLink(hand)} title="Enabled in {hand}; change it there">In code</a>
-              {:else}
-                <span class="in-code small" title="Enabled by NixOS or a flake input">Default</span>
+              {#if editable}
+                <Switch checked={on} busy={busy === g + f.name} label="{f.name} on {host.name}" onchange={(v) => toggle(f, v)} />
               {/if}
             </div>
-            <p class="desc">{f.description || 'No description.'}</p>
+            <p class="desc">{f.description || (f.inModel ? 'No description.' : `Turned on here; ${host.name} has not been evaluated with it yet.`)}</p>
             <div class="f-foot">
               <div class="chips">
-                {#each f.files as file (file)}
-                  {#if file === host.managedFile}
-                    <span class="chip managed">managed</span>
-                  {:else if isRepoFile(file)}
-                    <a class="chip mono" href={codeLink(file)}>{file}</a>
-                  {:else}
-                    <span class="chip">NixOS default</span>
-                  {/if}
-                {/each}
+                {#if pending}
+                  <span class="badge busy" title={fleet.computing ? 'The machine is being evaluated again' : 'The last evaluation does not show this change; check Changes'}
+                    >{pending === 'on' ? 'Turning on' : 'Turning off'}{fleet.computing ? '…' : ''}</span>
+                {/if}
+                <SourceTag source={sourceFor(f)} />
+                {#if editable && setHere(f) !== undefined && f.inModel && handFiles(f).length}
+                  <button class="small ghost" disabled={busy === g + f.name} onclick={() => reset(f)} title="Remove the value set here; {handFiles(f)[0]} decides again">Reset</button>
+                {/if}
               </div>
-              <button class="small ghost" onclick={() => ((selected = ''), (drawer = { kind: 'configure', f }))}><Icon name="sliders" size={13} />Configure</button>
+              {#if f.inModel}<button class="small ghost" onclick={() => ((selected = ''), (drawer = { kind: 'configure', f }))}><Icon name="sliders" size={13} />Configure</button>{/if}
             </div>
           </article>
         {/each}
       </div>
     </section>
   {/if}
-{:else}
-  <p class="muted">No features enabled.</p>
 {/each}
-{#if !shown.length && filter}<p class="muted">Nothing matches “{filter}”.</p>{/if}
 
 {#if drawer?.kind === 'add'}
   <Drawer title="Add a service or program to {host.name}" onclose={() => (drawer = null)} width={560}>
@@ -92,6 +128,17 @@
 {/if}
 
 <style>
+  .toolbar {
+    margin-bottom: var(--s2);
+  }
+  .empty {
+    display: grid;
+    gap: 6px;
+    max-width: 640px;
+    margin-top: var(--s4);
+    padding: 16px 18px;
+    line-height: 1.5;
+  }
   .g-head {
     display: flex;
     align-items: center;
@@ -110,6 +157,21 @@
     flex-direction: column;
     gap: 8px;
     padding: 12px 14px;
+    transition:
+      opacity var(--t) var(--ease),
+      border-color var(--t) var(--ease);
+  }
+  .feat.off:not(.pending) {
+    opacity: 0.6;
+  }
+  .feat.pending {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  }
+  .feat.pending.off h3 {
+    color: var(--fg-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--fg-faint);
   }
   .f-top {
     display: flex;
@@ -139,22 +201,8 @@
     gap: 8px;
     margin-top: auto;
   }
-  .chip.managed {
-    --c: var(--accent);
-  }
-  .in-code {
-    flex: none;
-    color: var(--fg-muted);
-    text-decoration: none;
-  }
-  a.in-code:hover {
-    color: var(--accent);
-  }
-  a.chip {
-    text-decoration: none;
-  }
-  a.chip:hover {
-    color: var(--fg-strong);
-    border-color: var(--line-strong);
+  .f-foot .chips {
+    align-items: center;
+    min-width: 0;
   }
 </style>

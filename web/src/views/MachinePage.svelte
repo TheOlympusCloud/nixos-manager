@@ -2,14 +2,16 @@
   import { onMount } from 'svelte'
   import Icon from '../components/Icon.svelte'
   import ModelGate from '../components/ModelGate.svelte'
+  import EssentialsTab from '../components/machine/EssentialsTab.svelte'
   import NetworkTab from '../components/machine/NetworkTab.svelte'
   import OverviewTab from '../components/machine/OverviewTab.svelte'
   import PackagesTab from '../components/machine/PackagesTab.svelte'
   import ServicesTab from '../components/machine/ServicesTab.svelte'
+  import TurnOnEditing from '../components/machine/TurnOnEditing.svelte'
   import UsersTab from '../components/machine/UsersTab.svelte'
   import { errorFile, evaluateAgain, fleet, hostByName, loadManaged } from '../lib/fleet.svelte'
   import { arch } from '../lib/format'
-  import { codeLink, machineLink } from '../lib/router.svelte'
+  import { codeLink, link, machineLink } from '../lib/router.svelte'
   import { copyText } from '../lib/util'
 
   let { host: name, tab }: { host: string; tab: string } = $props()
@@ -24,6 +26,7 @@
     host && !host.error
       ? [
           { id: 'overview', label: 'Overview' },
+          { id: 'essentials', label: 'Essentials' },
           { id: 'packages', label: 'Packages', n: host.packages.length },
           { id: 'services', label: 'Services & programs', n: host.features.length },
           { id: 'users', label: 'Users', n: host.users.length },
@@ -31,10 +34,13 @@
         ]
       : [],
   )
-  const line = $derived(`(import ./modules/managed.nix ./hosts/${name}/managed.json)`)
+  let showTurnOn = $state(false)
+
+  // A machine made by the wizard that the evaluation does not list (yet).
+  const made = $derived(fleet.created[name])
   let copied = $state(false)
-  async function copyLine() {
-    copied = await copyText(line)
+  async function copySnippet(text: string) {
+    copied = await copyText(text)
     setTimeout(() => (copied = false), 2000)
   }
 </script>
@@ -42,11 +48,35 @@
 <div class="page">
   <div class="page-inner">
     <ModelGate>
-      {#if !host}
+      {#if !host && made}
+        <div class="empty-state created" role="status">
+          <h2>{made.name} was created</h2>
+          {#if fleet.computing}
+            <p class="busy-line"><span class="dot busy"></span> Evaluating the fleet with {made.name} in it…</p>
+          {:else if !made.registered}
+            <p>This flake lists its machines by hand, so add {made.name} to <span class="mono">nixosConfigurations</span> in <span class="mono">flake.nix</span>:</p>
+          {:else}
+            <p>The flake picks up <span class="mono">hosts/{made.name}/</span> by itself, but the last evaluation does not list it. Check that it evaluates in Changes, or open its files.</p>
+          {/if}
+          {#if made.snippet && !made.registered}
+            <div class="snippet">
+              <code>{made.snippet}</code>
+              <button class="small" onclick={() => copySnippet(made.snippet!)}><Icon name={copied ? 'tick' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button>
+            </div>
+          {/if}
+          <ul class="made-files">
+            {#each made.files as f (f)}<li><a class="mono" href={codeLink(f)}><Icon name="file" size={13} />{f}</a></li>{/each}
+          </ul>
+          <div class="row">
+            {#if !made.registered}<a class="btn primary" href={codeLink('flake.nix')}><Icon name="code" size={14} />Open flake.nix</a>{/if}
+            <a class="btn" href="#/changes">Review in Changes</a>
+          </div>
+        </div>
+      {:else if !host}
         <div class="empty-state">
           <h2>No machine called “{name}”</h2>
           <p>It is not in <span class="mono">nixosConfigurations</span> of the working copy. It may have been renamed or removed.</p>
-          <div class="row"><a class="btn" href="#/machines">All machines</a></div>
+          <div class="row"><a class="btn" href="#/machines">All machines</a><a class="btn" href={link('machines', [], { new: '1' })}><Icon name="plus" size={14} />New machine</a></div>
         </div>
       {:else}
         <header class="mh">
@@ -59,12 +89,13 @@
             {:else if pending}
               <span class="badge busy">Re-evaluating</span>
             {:else if host.managedFile}
-              <span class="badge ok" title={host.managedFile}>Managed</span>
+              <span class="badge ok" title="Packages and options can be changed by clicking; they are kept in {host.managedFile}">Editable here</span>
             {:else}
-              <span class="badge">Visual editing off</span>
+              <span class="badge" title="{host.name} does not load a managed.json, so it is changed in its Nix files">Code only</span>
+              {#if !showTurnOn}<button class="link small" onclick={() => (showTurnOn = true)}>Turn on editing</button>{/if}
             {/if}
             <span class="spacer"></span>
-            {#if !host.error}<a class="btn" href="#/options/{encodeURIComponent(host.name)}"><Icon name="sliders" size={14} />Options</a>{/if}
+            {#if !host.error}<a class="btn" href={link('options', [host.name])}><Icon name="sliders" size={14} />Options</a>{/if}
           </div>
           {#if !host.error}
             <dl class="facts">
@@ -91,22 +122,7 @@
             </div>
           </section>
         {:else}
-          {#if !host.managedFile}
-            <section class="card turn-on">
-              <div class="to-text">
-                <h2>Turn on visual editing</h2>
-                <p class="muted">
-                  Add this line to {host.name}'s <span class="mono">modules</span> in <span class="mono">flake.nix</span>. The app then keeps the packages and options you set by clicking in
-                  <span class="mono">hosts/{host.name}/managed.json</span>; your hand-written Nix stays untouched.
-                </p>
-                <div class="line">
-                  <code>{line}</code>
-                  <button class="small" onclick={copyLine}><Icon name={copied ? 'tick' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button>
-                </div>
-              </div>
-              <a class="btn" href={codeLink('flake.nix')}><Icon name="code" size={14} />Open flake.nix in Code</a>
-            </section>
-          {/if}
+          {#if !host.managedFile && showTurnOn}<TurnOnEditing host={host.name} onclose={() => (showTurnOn = false)} />{/if}
 
           <nav class="tabs" aria-label="Machine sections">
             {#each tabs as t (t.id)}
@@ -117,7 +133,9 @@
           </nav>
 
           <div class="tab-body">
-            {#if tab === 'packages'}
+            {#if tab === 'essentials'}
+              <EssentialsTab {host} />
+            {:else if tab === 'packages'}
               <PackagesTab {host} />
             {:else if tab === 'services'}
               <ServicesTab {host} />
@@ -172,8 +190,7 @@
     margin: 0;
     color: var(--fg-strong);
   }
-  .errcard,
-  .turn-on {
+  .errcard {
     padding: var(--s4) var(--s5);
   }
   .errcard {
@@ -181,8 +198,7 @@
     gap: 10px;
     border-color: color-mix(in srgb, var(--red) 30%, var(--border));
   }
-  .errcard h2,
-  .turn-on h2 {
+  .errcard h2 {
     font-size: var(--fs-lg);
   }
   .errcard pre {
@@ -199,30 +215,19 @@
     display: flex;
     gap: 8px;
   }
-  .turn-on {
+  .created .busy-line {
     display: flex;
-    align-items: flex-start;
-    gap: var(--s5);
-    margin-bottom: var(--s4);
-    background: color-mix(in srgb, var(--accent-strong) 8%, var(--bg-raised));
-    border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
   }
-  .to-text {
-    display: grid;
-    flex: 1;
-    gap: 8px;
-    min-width: 0;
-  }
-  .to-text p {
-    max-width: 80ch;
-    line-height: 1.55;
-  }
-  .line {
+  .snippet {
     display: flex;
     align-items: center;
     gap: 8px;
+    max-width: 100%;
   }
-  .line code {
+  .snippet code {
     padding: 6px 10px;
     overflow-x: auto;
     color: var(--fg-strong);
@@ -230,6 +235,24 @@
     background: var(--bg-deep);
     border: 1px solid var(--border);
     border-radius: var(--r);
+  }
+  .made-files {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .made-files a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--fg);
+    font-size: 12.5px;
+    text-decoration: none;
+  }
+  .made-files a:hover {
+    color: var(--accent);
   }
   .tabs {
     position: sticky;

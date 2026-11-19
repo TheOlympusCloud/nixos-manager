@@ -64,7 +64,7 @@
         {#each host.files as f (f)}
           <li>
             <a href={codeLink(f)} class="mono"><Icon name="file" size={13} />{f}</a>
-            {#if f === host.managedFile}<span class="badge ok">managed</span>{/if}
+            {#if f === host.managedFile}<span class="badge ok" title="Changes made by clicking go here">Set here</span>{/if}
           </li>
         {/each}
       </ul>

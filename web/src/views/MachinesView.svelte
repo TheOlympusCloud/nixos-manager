@@ -2,9 +2,10 @@
   import Icon from '../components/Icon.svelte'
   import MachineCard from '../components/MachineCard.svelte'
   import ModelGate from '../components/ModelGate.svelte'
+  import NewMachine from '../components/NewMachine.svelte'
   import { fleet } from '../lib/fleet.svelte'
   import { age, plural } from '../lib/format'
-  import { machineLink } from '../lib/router.svelte'
+  import { machineLink, replace, route } from '../lib/router.svelte'
   import { app, startJob } from '../lib/state.svelte'
 
   let filter = $state('')
@@ -14,18 +15,28 @@
     return q ? all.filter((h) => [h.name, h.hostName, h.system, ...h.features.map((f) => f.name)].some((s) => s.toLowerCase().includes(q))) : all
   })
   const updating = $derived(app.jobs.some((j) => j.kind === 'update' && (j.state === 'running' || j.state === 'queued')))
+  // #/machines?new=1 opens the wizard (the command palette links there).
+  let wizard = $state(false)
+  const wizardOpen = $derived(wizard || route.query.new === '1')
+  function closeWizard() {
+    wizard = false
+    if (/[?&]new=1/.test(location.hash)) replace('#/machines') // not when the wizard already moved on to the new machine
+  }
 </script>
+
+{#if wizardOpen}<NewMachine onclose={closeWizard} />{/if}
 
 <div class="page">
   <div class="page-inner">
+    <div class="page-head">
+      <h1>Machines</h1>
+      {#if fleet.model?.hosts.length}<span class="sub num">{plural(fleet.model.hosts.length, 'machine')} in <span class="mono">nixosConfigurations</span></span>{/if}
+      <span class="spacer"></span>
+      {#if fleet.model?.hosts.length}<input class="filter" type="search" placeholder="Filter by name, system or service" aria-label="Filter machines" data-search bind:value={filter} />{/if}
+      <button class="primary" onclick={() => (wizard = true)}><Icon name="plus" size={14} />New machine</button>
+    </div>
     <ModelGate>
       {@const m = fleet.model!}
-      <div class="page-head">
-        <h1>Machines</h1>
-        <span class="sub num">{plural(m.hosts.length, 'machine')} in <span class="mono">nixosConfigurations</span></span>
-        <span class="spacer"></span>
-        <input class="filter" type="search" placeholder="Filter by name, system or service" aria-label="Filter machines" data-search bind:value={filter} />
-      </div>
 
       <div class="grid">
         {#each hosts as h (h.name)}

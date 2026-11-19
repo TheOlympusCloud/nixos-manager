@@ -39,6 +39,21 @@ export function fillPath(segs: Seg[], names: string[]): string[] {
   return segs.map((s) => (s.kind === 'name' ? (names[n++] ?? '') : s.text))
 }
 
+/**
+ * Does a documented option (with `<name>` placeholders) declare this concrete path?
+ * Returns the names that fill its placeholders, or null: users.users.<name>.shell vs users.users.pablo.shell → ["pablo"].
+ */
+export function matchOption(generic: string, path: string[]): string[] | null {
+  const segs = optionSegments(generic)
+  if (segs.length !== path.length) return null
+  const names: string[] = []
+  for (const [i, s] of segs.entries()) {
+    if (s.kind === 'name') names.push(path[i])
+    else if (s.kind === 'list' || s.text !== path[i]) return null
+  }
+  return names
+}
+
 /** Write a path back as an option name, quoting segments that need it. */
 export function pathName(path: string[]): string {
   return path.map((p) => (/^[A-Za-z_][A-Za-z0-9_'-]*$/.test(p) ? p : JSON.stringify(p))).join('.')
