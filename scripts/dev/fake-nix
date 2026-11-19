@@ -30,7 +30,8 @@ case "$*" in
 import json, os, sys
 data = json.load(open(sys.argv[1]))
 host = os.environ["NIXMGR_HOST"]
-# Settings in the host's managed.json win, as modules/managed.nix makes them do.
+# Settings in the host's managed.json win, as modules/managed.nix makes them do, and
+# are reported as defined in that file (the module sets _file).
 try:
     flake = os.environ.get("NIXMGR_FLAKE", "").removeprefix("path:")
     managed = json.load(open(os.path.join(flake, "hosts", host, "managed.json"))).get("settings") or {}
@@ -43,7 +44,7 @@ for path in json.loads(os.environ["NIXMGR_PATHS"]):
     for seg in path:
         node = node.get(seg) if isinstance(node, dict) else None
     if node is not None and not isinstance(node, dict):
-        got.update(exists=True, value=node, files=["modules/managed.nix"])
+        got.update(exists=True, value=node, files=["hosts/%s/managed.json" % host])
         got.setdefault("type", "unspecified")
     out[json.dumps(path, separators=(",", ":"))] = got
 print(json.dumps(out))

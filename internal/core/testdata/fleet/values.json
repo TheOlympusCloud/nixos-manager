@@ -187,8 +187,8 @@
    ],
    "files": [
     "modules/common.nix",
-    "modules/server.nix",
-    "hosts/homeserver/managed.json"
+    "hosts/homeserver/default.nix",
+    "nixos"
    ],
    "type": "list of 16 bit unsigned integer; between 0 and 65535 (both inclusive)"
   },
