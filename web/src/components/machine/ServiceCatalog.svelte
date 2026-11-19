@@ -15,14 +15,19 @@
   const names = recipes.map((r) => pathName(r.settings[0].path))
   const vals = useValues(() => ({ names, hosts: [host.name] }))
 
-  type State = 'on' | 'off' | 'missing' | 'unknown'
+  type State = 'on' | 'partial' | 'off' | 'missing' | 'unknown'
   function stateOf(r: Recipe): State {
     const path = r.settings[0].path
     const e = effective(valueOf(vals.values, pathName(path), host.name), managedValue(host.name, path), host.managedFile, !!fleet.managed[host.name])
     if (!e || e.state === 'error') return 'unknown'
     if (e.state === 'missing') return 'missing'
-    return e.value === true ? 'on' : 'off'
+    if (e.value !== true) return 'off'
+    // Added here, but a write after the first one failed: offer to finish.
+    const addedHere = managedValue(host.name, path) === true
+    return addedHere && r.settings.some((s) => managedValue(host.name, s.path) !== s.value) ? 'partial' : 'on'
   }
+  /** A port list set here replaces the whole option, so openFirewall in a recipe adds nothing. */
+  const portsSetHere = $derived(managedValue(host.name, ['networking', 'firewall', 'allowedTCPPorts']) !== undefined)
   const q = $derived(filter.trim().toLowerCase())
   const shown = $derived(recipes.filter((r) => !q || `${r.name} ${r.summary} ${r.category}`.toLowerCase().includes(q)))
 
@@ -47,6 +52,11 @@
   </p>
   <input class="search" type="search" placeholder="Filter: media, backup, containers…" aria-label="Filter the catalog" bind:value={filter} />
   {#if vals.error}<p class="error small">Could not read the current values: {vals.error}</p>{/if}
+  {#if portsSetHere}
+    <p class="note small">
+      <Icon name="alert" size={13} />{host.name}'s open ports are set here as one list, so services cannot open their own ports. After adding one that needs a port, add it in Network &amp; storage.
+    </p>
+  {/if}
   {#each categories as c (c)}
     {@const rs = shown.filter((r) => r.category === c)}
     {#if rs.length}
@@ -61,8 +71,8 @@
             {:else if st === 'missing'}
               <span class="badge" title="This machine's NixOS has no {pathName(r.settings[0].path)} option">Not in this NixOS</span>
             {:else}
-              <button class="small" class:primary={st === 'off'} disabled={st === 'unknown' || !!busy} onclick={() => add(r)}>
-                {#if busy === r.id}<span class="spin" aria-hidden="true"></span>Adding…{:else}<Icon name="plus" size={13} />Add{/if}
+              <button class="small" class:primary={st !== 'unknown'} disabled={st === 'unknown' || !!busy} onclick={() => add(r)}>
+                {#if busy === r.id}<span class="spin" aria-hidden="true"></span>Adding…{:else if st === 'partial'}<Icon name="refresh" size={13} />Finish adding{:else}<Icon name="plus" size={13} />Add{/if}
               </button>
             {/if}
           </div>
@@ -129,6 +139,17 @@
     color: var(--fg-faint);
     font-size: var(--fs-xs);
     overflow-wrap: anywhere;
+  }
+  .note {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    color: var(--yellow);
+    background: color-mix(in srgb, var(--yellow) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--yellow) 25%, transparent);
+    border-radius: var(--r-sm);
+    line-height: 1.45;
   }
   .badge {
     display: inline-flex;

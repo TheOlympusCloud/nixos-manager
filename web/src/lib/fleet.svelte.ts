@@ -122,7 +122,15 @@ export function managedValue(host: string, path: string[]): unknown {
 
 const list = (xs: string[]) => (xs.length <= 3 ? xs.join(', ') : `${xs.slice(0, 2).join(', ')} and ${xs.length - 2} more`)
 
-async function write(host: string, fn: () => Promise<Managed>, done: string, action?: ToastAction): Promise<boolean> {
+const writing = new Map<string, Promise<boolean>>()
+/** One write per machine at a time, so each starts from the hash the previous one left. */
+function write(host: string, fn: () => Promise<Managed>, done: string, action?: ToastAction): Promise<boolean> {
+  const next = (writing.get(host) ?? Promise.resolve(true)).then(() => writeNow(host, fn, done, action))
+  writing.set(host, next)
+  return next
+}
+
+async function writeNow(host: string, fn: () => Promise<Managed>, done: string, action?: ToastAction): Promise<boolean> {
   try {
     fleet.managed[host] = await fn()
   } catch (e) {
@@ -157,9 +165,12 @@ export async function removePackageByName(host: string, name: string) {
   return removePackages(host, [attr])
 }
 /** The hash of the managed file this tab last saw, so a stale form cannot overwrite a newer edit. */
-async function seenHash(host: string): Promise<string | undefined> {
+async function seenHash(host: string): Promise<string> {
   if (!fleet.managed[host]) await loadManaged(host)
-  return fleet.managed[host]?.hash
+  const hash = fleet.managed[host]?.hash
+  // Without it the server could not refuse to overwrite an edit made elsewhere.
+  if (hash === undefined) throw new Error(`${host}'s managed file could not be read, so nothing was changed. Reload and try again.`)
+  return hash
 }
 /** `done`: the confirmation in words ("Opened port 8080 on pi"); by default the option's name. */
 export const setOption = (host: string, path: string[], value: unknown, done = `Set ${pathName(path)} on ${host}`) =>
