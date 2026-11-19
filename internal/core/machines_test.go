@@ -37,6 +37,8 @@ func TestCreateMachine(t *testing.T) {
 		{Name: "ok", System: "sparc-linux", Role: "minimal"},
 		{Name: "ok", System: "x86_64-linux", Role: "gaming-rig"},
 		{Name: strings.Repeat("a", 64), System: "x86_64-linux", Role: "minimal"},
+		{Name: "_x", System: "x86_64-linux", Role: "minimal"},
+		{Name: "x-", System: "x86_64-linux", Role: "minimal"},
 	} {
 		_, err := s.CreateMachine(bad)
 		isErr(t, err, ErrInvalid)
@@ -49,5 +51,15 @@ func TestCreateMachineInAHandWrittenFlake(t *testing.T) {
 	res := must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "db", System: "x86_64-linux", Role: "minimal"}))
 	if res.Registered || !strings.Contains(res.Snippet, `db = mkHost "db";`) {
 		t.Fatalf("a flake that lists machines by hand needs the snippet: %+v", res)
+	}
+}
+
+func TestCreateMachineOverAHalfMadeOne(t *testing.T) {
+	s := newService(t)
+	write(t, s.Repo, "hosts/half/managed.json", "{}\n")
+	_, err := s.CreateMachine(MachineSpec{Name: "half", System: "x86_64-linux", Role: "minimal"})
+	isErr(t, err, ErrExists)
+	if _, _, err := s.Read("hosts/half/default.nix"); err == nil {
+		t.Fatal("default.nix was written before the clash was found")
 	}
 }

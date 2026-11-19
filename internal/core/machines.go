@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -88,10 +89,13 @@ const hardwarePlaceholder = `# Placeholder: replace with the output of nixos-gen
 }
 `
 
+// machineName becomes networking.hostName, so it follows NixOS's host name rule (lowercase here).
+var machineName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
 // CreateMachine adds hosts/<name>/ with a configuration, its hardware file and a managed.json preset.
 func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
-	if !hostName.MatchString(spec.Name) || len(spec.Name) > 63 || strings.ToLower(spec.Name) != spec.Name {
-		return MachineCreated{}, errorf(ErrInvalid, "a machine name is lowercase letters, digits, - and _ (at most 63)")
+	if !machineName.MatchString(spec.Name) {
+		return MachineCreated{}, errorf(ErrInvalid, "a machine name is lowercase letters, digits, - and _, starting and ending with a letter or digit (at most 63)")
 	}
 	if !systems[spec.System] {
 		return MachineCreated{}, errorf(ErrInvalid, "unsupported system %q (x86_64-linux or aarch64-linux)", spec.System)
@@ -104,9 +108,6 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 		return MachineCreated{}, errorf(ErrInvalid, "the hardware configuration is too large")
 	}
 	dir := "hosts/" + spec.Name
-	if _, _, err := s.Read(dir + "/default.nix"); err == nil {
-		return MachineCreated{}, errorf(ErrExists, "%s already exists", dir)
-	}
 	hardware := spec.Hardware
 	if strings.TrimSpace(hardware) == "" {
 		hardware = fmt.Sprintf(hardwarePlaceholder, spec.System)
@@ -121,6 +122,12 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 		{dir + "/default.nix", fmt.Sprintf(defaultNixTemplate, spec.Name)},
 		{dir + "/hardware-configuration.nix", hardware},
 		{dir + "/managed.json", managed.String()},
+	}
+	// Check every file first: stopping halfway would leave a machine the flake picks up.
+	for _, f := range files {
+		if _, _, err := s.Read(f.path); err == nil {
+			return MachineCreated{}, errorf(ErrExists, "%s already exists", f.path)
+		}
 	}
 	res := MachineCreated{Name: spec.Name, Files: []string{}}
 	for _, f := range files {

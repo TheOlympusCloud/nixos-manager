@@ -157,6 +157,9 @@
           {:else if autoFlake === false}
             <span class="warn"><Icon name="info" size={13} />flake.nix lists its machines by hand: you will get the line to add.</span>
           {/if}
+          {#if role === 'server'}
+            <span class="warn"><Icon name="key" size={13} />The server preset allows SSH keys only and creates no user: add yours with a key in Users before deploying, or nobody can log in over SSH.</span>
+          {/if}
         </p>
         <div class="files">
           <ul class="file-list" role="tablist" aria-label="Files">
