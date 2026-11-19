@@ -201,6 +201,10 @@
   "autoGC": false,
   "autoOptimise": false,
   "zram": true,
-  "sshUserKeys": 0
+  "sshUserKeys": 0,
+  "comin": true,
+  "cominRemotes": [
+   "https://forgejo.home.lan/pablo/nixos-config.git"
+  ]
  }
 }

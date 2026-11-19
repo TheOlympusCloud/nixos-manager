@@ -206,7 +206,7 @@ func (s *Server) Handler() http.Handler {
 		default:
 			// Deployment findings are extra: Health still answers when git cannot tell them.
 			ov, _ := s.Svc.Deploys.Overview(r.Context(), core.HostNames(m), time.Now())
-			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, ov.Machines, time.Now())}, nil)
+			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, ov.Machines, s.Svc.Remote(r.Context()), time.Now())}, nil)
 		}
 	})
 	api.HandleFunc("GET /api/fleet/values", func(w http.ResponseWriter, r *http.Request) {

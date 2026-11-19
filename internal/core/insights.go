@@ -36,9 +36,10 @@ type Setting struct {
 
 var severityRank = map[string]int{"error": 0, "warning": 1, "info": 2}
 
-// Insights checks the evaluated fleet and what its machines deployed; now dates
-// the flake inputs and the deployments.
-func Insights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
+// Insights checks the evaluated fleet and what its machines deployed; origin is
+// the remote this console pushes to ("" for none), and now dates the flake
+// inputs and the deployments.
+func Insights(m *Model, deploys []MachineDeployment, origin string, now time.Time) []Insight {
 	out := []Insight{}
 	add := func(in Insight) { // only when some machine is affected
 		if len(in.Hosts) > 0 {
@@ -136,6 +137,7 @@ func Insights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	out = append(out, missingPackages(healthy)...)
 	out = append(out, releaseInsights(healthy, now)...)
 	out = append(out, deployInsights(m, deploys, now)...)
+	out = append(out, cominInsights(healthy, origin)...)
 	slices.SortStableFunc(out, func(a, b Insight) int {
 		if d := severityRank[a.Severity] - severityRank[b.Severity]; d != 0 {
 			return d
@@ -235,6 +237,47 @@ func releaseInsights(healthy []Host, now time.Time) []Insight {
 		out = append(out, Insight{ID: "release-mixed", Severity: "info", Hosts: olds,
 			Title:  "Machines run different NixOS releases",
 			Detail: fmt.Sprintf("The newest is %s. Mixed releases mean different package versions and options across the fleet.", newest)})
+	}
+	return out
+}
+
+// cominInsights: a push only deploys machines whose comin pulls the repository this console pushes to.
+func cominInsights(healthy []Host, origin string) []Insight {
+	off, other := []string{}, []string{}
+	var elsewhere string
+	o, err := ParseRemote(origin)
+	known := err == nil && o.Kind != "local"
+	for _, h := range healthy {
+		if !h.Checks.Comin {
+			off = append(off, h.Name)
+			continue
+		}
+		if !known || len(h.Checks.CominRemotes) == 0 {
+			continue
+		}
+		match := false
+		for _, r := range h.Checks.CominRemotes {
+			if c, err := ParseRemote(r); err == nil && strings.EqualFold(c.Host, o.Host) && strings.EqualFold(c.Path, o.Path) {
+				match = true
+			}
+		}
+		if !match {
+			other = append(other, h.Name)
+			if elsewhere == "" {
+				elsewhere = h.Checks.CominRemotes[0]
+			}
+		}
+	}
+	var out []Insight
+	if len(off) > 0 {
+		out = append(out, Insight{ID: "no-comin", Severity: "warning", Hosts: off,
+			Title:  "Pushes don't reach these machines",
+			Detail: "comin is off on them, so they change only when someone runs nixos-rebuild there. Turn on services.comin with the Forgejo repository as its remote (the starter fleet does it in modules/common.nix)."})
+	}
+	if len(other) > 0 {
+		out = append(out, Insight{ID: "comin-other-repo", Severity: "warning", Hosts: other,
+			Title:  "comin pulls another repository",
+			Detail: fmt.Sprintf("These machines deploy from %s, not from the repository this console pushes to, so changes made here never reach them. Point services.comin.remotes at the Forgejo repository.", elsewhere)})
 	}
 	return out
 }

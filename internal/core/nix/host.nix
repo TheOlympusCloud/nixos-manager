@@ -130,6 +130,8 @@ in
     autoGC = try config.nix.gc.automatic false;
     autoOptimise = try (config.nix.optimise.automatic || config.nix.settings.auto-optimise-store) false;
     zram = try config.zramSwap.enable false;
+    comin = try config.services.comin.enable false;
+    cominRemotes = try (map (r: r.url) config.services.comin.remotes) [ ];
     # Keys that let a normal user in over SSH: without one, keys-only SSH locks everyone out.
     sshUserKeys = try (lib.length (
       lib.concatMap (u: u.openssh.authorizedKeys.keys ++ u.openssh.authorizedKeys.keyFiles) (

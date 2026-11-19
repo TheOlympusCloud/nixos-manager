@@ -349,7 +349,11 @@
   "autoGC": true,
   "autoOptimise": true,
   "zram": true,
-  "sshUserKeys": 1
+  "sshUserKeys": 1,
+  "comin": true,
+  "cominRemotes": [
+   "https://forgejo.home.lan/pablo/nixos-config.git"
+  ]
  },
  "managedPackages": {
   "vscode": "vscode",
