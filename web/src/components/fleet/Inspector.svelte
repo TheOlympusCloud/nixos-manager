@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { cubicOut } from 'svelte/easing'
   import { fly } from 'svelte/transition'
   import type { Model } from '../../lib/api'
   import { openPackageSearch } from '../../lib/dialogs.svelte'
@@ -35,7 +36,7 @@
 </script>
 
 
-<aside class="inspector" aria-label="Details" transition:fly={{ x: 24, duration: 180 }}>
+<aside class="inspector" aria-label="Details" in:fly={{ x: 36, duration: 320, easing: cubicOut }} out:fly={{ x: 24, duration: 160 }}>
   <header>
     <div class="head-text">
       <span class="kind">
@@ -243,10 +244,11 @@
     flex-direction: column;
     width: 360px;
     max-width: calc(100% - 24px);
-    background: var(--bg-side);
+    background: color-mix(in srgb, var(--bg-side) 84%, transparent);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--edge), var(--shadow-2);
+    backdrop-filter: blur(18px) saturate(1.3);
   }
   header {
     display: flex;
