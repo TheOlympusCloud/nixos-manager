@@ -186,13 +186,13 @@
     flex: 1;
     flex-direction: column;
     min-width: 0;
+    isolation: isolate; /* the glow's layer; a drawer's scrim inside .content still covers the top bar */
   }
   .content {
     position: relative;
     flex: 1;
     min-height: 0;
     overflow: clip;
-    isolation: isolate;
   }
   /* Ambient light behind every page: two soft glows that drift very slowly. */
   .content::before {
