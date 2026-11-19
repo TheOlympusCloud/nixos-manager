@@ -472,9 +472,8 @@
     gap: 8px;
     padding: 10px 14px;
     line-height: 1.5;
-    background: var(--bg-side);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--c, var(--line-strong));
+    background: color-mix(in srgb, var(--c, var(--line-strong)) 6%, var(--bg-side));
+    border: 1px solid color-mix(in srgb, var(--c, var(--line-strong)) 35%, var(--line));
     border-radius: var(--r);
   }
   .result.ok {
