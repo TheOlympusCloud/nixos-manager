@@ -11,6 +11,10 @@ let
   # message, and the fleet view still shows the rest of the machine.
   package =
     name: lib.attrByPath (lib.splitString "." name) (throw "managed.json: package ${name} is not in nixpkgs") pkgs;
+  # Priority on each value, never on a whole attribute set: users.users or
+  # services.openssh.settings set here must still merge with hand-written entries.
+  # Lists are values, so a list set here replaces the hand-written one.
+  values = v: if builtins.isAttrs v then lib.mapAttrs (_: values) v else lib.mkOverride 90 v;
 in
 {
   # Definitions below are reported as coming from the JSON file.
@@ -42,7 +46,7 @@ in
     # A value set by clicking is the machine's final value: it wins over hand-written
     # definitions of the same option (priority 90 beats the default 100), but not
     # over lib.mkForce. Lists are therefore written whole, not merged.
-    (lib.mkOverride 90 (data.settings or { }))
+    (values (data.settings or { }))
     { environment.systemPackages = map package (data.packages or [ ]); }
   ];
 }

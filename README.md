@@ -177,6 +177,10 @@ go build ./cmd/nixos-manager
 remote: login, lock, check, commit gate, commit, push, edit, history and
 restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 
+`NIXMGR_NIX_TESTS=1 go test ./templates` evaluates a machine with real Nix
+(network needed) to check that values set by clicking win without dropping
+the hand-written users and SSH settings around them.
+
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines
 (`internal/core/testdata/fleet/`). Run the server with
