@@ -1,5 +1,5 @@
 // The new-machine wizard: names, role presets and a preview of the files it writes.
-import type { MachineRole, MachineSpec } from './api'
+import type { MachinePlatform, MachineRole, MachineSpec } from './api'
 
 /** Problem with a new machine name ('' when fine). It becomes networking.hostName, so it must be a valid host name. */
 export function machineNameProblem(name: string, existing: string[]): string {
@@ -14,6 +14,61 @@ export const architectures: { system: MachineSpec['system']; label: string; note
   { system: 'x86_64-linux', label: 'x86_64', note: 'Intel and AMD PCs, most servers and virtual machines' },
   { system: 'aarch64-linux', label: 'aarch64', note: 'Raspberry Pi 4 and 5, ARM servers and boards' },
 ]
+
+export const platforms: { platform: MachinePlatform; label: string; note: string }[] = [
+  { platform: 'hardware', label: 'Physical machine', note: 'A PC, laptop, server or board. NixOS needs its hardware configuration.' },
+  { platform: 'proxmox-vm', label: 'Proxmox VM', note: 'A virtual machine: QEMU guest drivers and the guest agent, plus its hardware configuration.' },
+  { platform: 'proxmox-lxc', label: 'Proxmox LXC', note: 'A NixOS container: light and fast, with no disks or boot loader to set up.' },
+]
+
+// shortcut: verbatim copies of the default.nix templates in internal/core/machines.go (a test compares them);
+// %[1]q is the quoted name and %[2]q the quoted system.
+const defaultNixTemplates: Record<MachinePlatform, string> = {
+  hardware: `{ ... }:
+{
+  imports = [ ./hardware-configuration.nix ];
+
+  networking.hostName = %[1]q;
+
+  # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
+  system.stateVersion = "26.05";
+}
+`,
+  'proxmox-lxc': `{ modulesPath, ... }:
+{
+  # A NixOS container on Proxmox (unprivileged, nesting on): no disks or
+  # boot loader to configure, and Proxmox sets up the network.
+  imports = [ (modulesPath + "/virtualisation/proxmox-lxc.nix") ];
+
+  nixpkgs.hostPlatform = %[2]q;
+
+  # comin finds this machine's configuration by its host name,
+  # so NixOS sets it instead of Proxmox.
+  proxmoxLXC.manageHostName = true;
+  networking.hostName = %[1]q;
+
+  # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
+  system.stateVersion = "26.05";
+}
+`,
+  'proxmox-vm': `{ modulesPath, ... }:
+{
+  imports = [
+    ./hardware-configuration.nix
+    (modulesPath + "/profiles/qemu-guest.nix")
+  ];
+
+  # Lets Proxmox show the VM's address and shut it down cleanly
+  # (turn on "QEMU Guest Agent" in the VM's Options).
+  services.qemuGuest.enable = true;
+
+  networking.hostName = %[1]q;
+
+  # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
+  system.stateVersion = "26.05";
+}
+`,
+}
 
 // shortcut: these mirror the presets in internal/core/machines.go; update both together.
 export const roles: { role: MachineRole; label: string; note: string; gets: string[]; packages: string[]; settings: Record<string, unknown> }[] = [
@@ -62,6 +117,7 @@ export const roles: { role: MachineRole; label: string; note: string; gets: stri
 export function previewFiles(spec: MachineSpec): { path: string; content: string; note: string }[] {
   const dir = `hosts/${spec.name || '<name>'}`
   const preset = roles.find((r) => r.role === spec.role) ?? roles[2]
+  const platform = spec.platform ?? 'hardware'
   const hardware = spec.hardware?.trim()
     ? spec.hardware
     : `# Placeholder: replace with the output of nixos-generate-config --show-hardware-config\n# on the machine itself.\n{ lib, ... }:\n{\n  nixpkgs.hostPlatform = lib.mkDefault "${spec.system}";\n  boot.loader.grub.device = "nodev";\n  fileSystems."/" = {\n    device = "/dev/disk/by-label/nixos";\n    fsType = "ext4";\n  };\n}\n`
@@ -69,13 +125,17 @@ export function previewFiles(spec: MachineSpec): { path: string; content: string
     {
       path: `${dir}/default.nix`,
       note: 'The hand-written part: yours to edit in Code.',
-      content: `{ ... }:\n{\n  imports = [ ./hardware-configuration.nix ];\n\n  networking.hostName = ${JSON.stringify(spec.name)};\n\n  # The NixOS release this machine was first installed with. Keep it as it is when upgrading.\n  system.stateVersion = "26.05";\n}\n`,
+      content: defaultNixTemplates[platform].replaceAll('%[1]q', JSON.stringify(spec.name)).replaceAll('%[2]q', JSON.stringify(spec.system)),
     },
-    {
-      path: `${dir}/hardware-configuration.nix`,
-      note: spec.hardware?.trim() ? 'What you pasted.' : 'A placeholder until you paste the real one.',
-      content: hardware,
-    },
+    ...(platform === 'proxmox-lxc'
+      ? []
+      : [
+          {
+            path: `${dir}/hardware-configuration.nix`,
+            note: spec.hardware?.trim() ? 'What you pasted.' : 'A placeholder until you paste the real one.',
+            content: hardware,
+          },
+        ]),
     {
       path: `${dir}/managed.json`,
       note: `The ${preset.label.toLowerCase()} preset: what you change by clicking.`,

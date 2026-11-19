@@ -248,7 +248,7 @@ func New(svc *core.Service, version string) *mcp.Server {
 		res, err := ready(ctx, func() ([]core.OptionValues, *core.Job, error) { return svc.Jobs.OptionValues(ctx, in.Names, in.Hosts) })
 		return map[string][]core.OptionValues{"values": res}, err
 	})
-	tool(s, "create_machine", "Add a machine: hosts/<name>/ with default.nix, hardware-configuration.nix (the pasted nixos-generate-config output, or a placeholder) and a managed.json preset for the role. Says whether the flake picks it up by itself or which line to add.", func(ctx context.Context, in core.MachineSpec) (core.MachineCreated, error) {
+	tool(s, "create_machine", "Add a machine: hosts/<name>/ with default.nix for its platform, hardware-configuration.nix (the pasted nixos-generate-config output, or a placeholder; none for a Proxmox LXC) and a managed.json preset for the role. Says whether the flake picks it up by itself or which line to add.", func(ctx context.Context, in core.MachineSpec) (core.MachineCreated, error) {
 		return svc.CreateMachine(in)
 	})
 	tool(s, "host_details", "Everything the fleet model knows about one machine: packages with the files that add them, enabled features, users and home-manager, ports, file systems, files, and whether it has a managed.json.", func(ctx context.Context, in struct {

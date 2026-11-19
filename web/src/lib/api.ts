@@ -128,7 +128,8 @@ export type OptionValues = { name: string; path: string[]; hosts: HostValue[] }
 export type ValuesReply = { state: 'ready'; values: OptionValues[] } | { state: 'computing'; job: string }
 
 export type MachineRole = 'minimal' | 'server' | 'desktop'
-export type MachineSpec = { name: string; system: 'x86_64-linux' | 'aarch64-linux'; role: MachineRole; hardware?: string }
+export type MachinePlatform = 'hardware' | 'proxmox-lxc' | 'proxmox-vm'
+export type MachineSpec = { name: string; system: 'x86_64-linux' | 'aarch64-linux'; role: MachineRole; hardware?: string; platform?: MachinePlatform }
 /** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. */
 export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string }
 

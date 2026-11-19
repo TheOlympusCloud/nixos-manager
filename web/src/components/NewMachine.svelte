@@ -1,23 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type MachineRole, type MachineSpec } from '../lib/api'
+  import { api, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
   import { createMachine, fleet } from '../lib/fleet.svelte'
-  import { architectures, hardwareCheck, machineNameProblem, previewFiles, roles } from '../lib/machines'
+  import { architectures, hardwareCheck, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
   import { go, machineLink } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { toast } from '../lib/ui.svelte'
   import { copyText } from '../lib/util'
   import Icon from './Icon.svelte'
 
-  /** The new-machine wizard: name, architecture, role, hardware, then a preview of the files. */
+  /** The new-machine wizard: name, architecture, role, platform and hardware, then a preview of the files. */
   let { onclose }: { onclose: () => void } = $props()
 
   let el: HTMLDialogElement
-  const steps = ['Name', 'Role', 'Hardware', 'Review'] as const
+  const steps = ['Name', 'Role', 'Platform', 'Review'] as const
   let step = $state(0)
   let name = $state('')
   let system = $state<MachineSpec['system']>('x86_64-linux')
   let role = $state<MachineRole>('server')
+  let platform = $state<MachinePlatform>('hardware')
   let hardware = $state('')
   let creating = $state(false)
   let autoFlake = $state<boolean | null>(null)
@@ -28,10 +29,13 @@
     ...app.entries.filter((e) => e.dir && /^hosts\/[^/]+$/.test(e.path)).map((e) => e.path.slice(6)),
   ])
   const nameProblem = $derived(machineNameProblem(name.trim(), taken))
-  const hw = $derived(hardwareCheck(hardware))
-  const spec = $derived<MachineSpec>({ name: name.trim(), system, role, ...(hardware.trim() ? { hardware } : {}) })
+  // A container has no hardware configuration: whatever was pasted before choosing LXC is not sent.
+  const lxc = $derived(platform === 'proxmox-lxc')
+  const hw = $derived(lxc ? {} : hardwareCheck(hardware))
+  const spec = $derived<MachineSpec>({ name: name.trim(), system, role, platform, ...(!lxc && hardware.trim() ? { hardware } : {}) })
   const files = $derived(previewFiles(spec))
-  let openFile = $state(2)
+  let openName = $state('managed.json')
+  const shown = $derived(files.find((f) => f.path.endsWith('/' + openName)) ?? files[files.length - 1])
   const canNext = $derived(step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !hw.error : true)
 
   onMount(() => {
@@ -65,10 +69,13 @@
   }
 
   const command = 'nixos-generate-config --show-hardware-config'
-  let copied = $state(false)
-  async function copyCommand() {
-    copied = await copyText(command)
-    setTimeout(() => (copied = false), 2000)
+  const pctCommand = $derived(
+    `pct create <id> local:vztmpl/nixos-26.05-proxmox-lxc.tar.xz --hostname ${spec.name} --ostype nixos --unprivileged 1 --features nesting=1 --net0 name=eth0,bridge=vmbr0,ip=dhcp`,
+  )
+  let copied = $state('')
+  async function copyCommand(text: string) {
+    if (await copyText(text)) copied = text
+    setTimeout(() => (copied = ''), 2000)
   }
 </script>
 
@@ -128,26 +135,63 @@
         <p class="hint">All of it lands in <span class="mono">managed.json</span>, so you can change any of it by clicking later.</p>
       </fieldset>
     {:else if step === 2}
-      <div class="field">
-        <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
-        <p class="lead">
-          NixOS needs to know {name.trim()}'s disks and kernel modules. On the machine, booted from the NixOS installer or already running NixOS, run:
-        </p>
-        <div class="cmd">
-          <code>{command}</code>
-          <button type="button" class="small" onclick={copyCommand}><Icon name={copied ? 'tick' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button>
+      <fieldset class="field">
+        <legend class="label">Where does {name.trim()} run?</legend>
+        <div class="choices three">
+          {#each platforms as p (p.platform)}
+            <label class="choice" class:on={platform === p.platform}>
+              <input type="radio" name="platform" value={p.platform} bind:group={platform} />
+              <span class="c-title"><Icon name={p.platform === 'hardware' ? 'cpu' : p.platform === 'proxmox-vm' ? 'layers' : 'box'} size={15} />{p.label}</span>
+              <span class="c-note">{p.note}</span>
+            </label>
+          {/each}
         </div>
-        <p class="lead">and paste its output here:</p>
-        <textarea class="mono" rows="10" bind:value={hardware} spellcheck="false" placeholder={'{ config, lib, pkgs, modulesPath, ... }:\n{\n  imports = [ ... ];\n  fileSystems."/" = { ... };\n}'} aria-label="hardware-configuration.nix" aria-invalid={!!hw.error}
-        ></textarea>
-        {#if hw.error}
-          <span class="problem">{hw.error}</span>
-        {:else if hw.warning}
-          <span class="warn"><Icon name="alert" size={13} />{hw.warning}</span>
-        {:else if !hardware.trim()}
-          <span class="hint">Leave it empty to write a placeholder now; replace <span class="mono">hosts/{name.trim()}/hardware-configuration.nix</span> in Code before the first deploy.</span>
-        {/if}
-      </div>
+      </fieldset>
+      {#if lxc}
+        <div class="field">
+          <span class="label">Creating the container</span>
+          <p class="lead">
+            There is no hardware configuration: <span class="mono">default.nix</span> imports the Proxmox container module instead. On the Proxmox host, create
+            {name.trim()} from the NixOS LXC template, unprivileged and with nesting on (Nix and systemd's service sandboxing need it):
+          </p>
+          <div class="cmd">
+            <!-- Wrap between arguments only, never inside one such as --unprivileged. -->
+            <code class="wrap">{#each pctCommand.split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
+            <button type="button" class="small" onclick={() => copyCommand(pctCommand)}
+              ><Icon name={copied === pctCommand ? 'tick' : 'copy'} size={13} />{copied === pctCommand ? 'Copied' : 'Copy'}</button
+            >
+          </div>
+          <span class="hint">
+            Then switch it once to this configuration with <span class="mono">nixos-rebuild switch --flake &lt;repository&gt;#{name.trim()}</span>; comin keeps it up to date
+            from then on. The README's Proxmox section has the template download and the details.
+          </span>
+        </div>
+      {:else}
+        <div class="field">
+          <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
+          <p class="lead">
+            {#if platform === 'proxmox-vm'}
+              NixOS needs to know the VM's disks. Install NixOS in it from the ISO (and turn on <span class="mono">QEMU Guest Agent</span> in the VM's Options), then run inside it:
+            {:else}
+              NixOS needs to know {name.trim()}'s disks and kernel modules. On the machine, booted from the NixOS installer or already running NixOS, run:
+            {/if}
+          </p>
+          <div class="cmd">
+            <code>{command}</code>
+            <button type="button" class="small" onclick={() => copyCommand(command)}><Icon name={copied === command ? 'tick' : 'copy'} size={13} />{copied === command ? 'Copied' : 'Copy'}</button>
+          </div>
+          <p class="lead">and paste its output here:</p>
+          <textarea class="mono" rows="7" bind:value={hardware} spellcheck="false" placeholder={'{ config, lib, pkgs, modulesPath, ... }:\n{\n  imports = [ ... ];\n  fileSystems."/" = { ... };\n}'} aria-label="hardware-configuration.nix" aria-invalid={!!hw.error}
+          ></textarea>
+          {#if hw.error}
+            <span class="problem">{hw.error}</span>
+          {:else if hw.warning}
+            <span class="warn"><Icon name="alert" size={13} />{hw.warning}</span>
+          {:else if !hardware.trim()}
+            <span class="hint">Leave it empty to write a placeholder now; replace <span class="mono">hosts/{name.trim()}/hardware-configuration.nix</span> in Code before the first deploy.</span>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <div class="review">
         <p class="lead">
@@ -163,17 +207,17 @@
         </p>
         <div class="files">
           <ul class="file-list" role="tablist" aria-label="Files">
-            {#each files as f, i (f.path)}
+            {#each files as f (f.path)}
               <li>
-                <button type="button" role="tab" aria-selected={openFile === i} class:on={openFile === i} onclick={() => (openFile = i)}>
+                <button type="button" role="tab" aria-selected={shown === f} class:on={shown === f} onclick={() => (openName = f.path.split('/').pop()!)}>
                   <Icon name="file-plus" size={14} /><span class="mono">{f.path.split('/').pop()}</span>
                 </button>
               </li>
             {/each}
           </ul>
           <div class="file-view" role="tabpanel">
-            <div class="fv-head"><span class="mono">{files[openFile].path}</span><span class="muted small">{files[openFile].note}</span></div>
-            <pre>{files[openFile].content}</pre>
+            <div class="fv-head"><span class="mono">{shown.path}</span><span class="muted small">{shown.note}</span></div>
+            <pre>{shown.content}</pre>
           </div>
         </div>
       </div>
@@ -412,6 +456,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .cmd code.wrap {
+    flex: 1;
+    min-width: 0;
+  }
+  .nw {
+    white-space: nowrap;
   }
   .cmd code {
     padding: 6px 10px;

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ type MachineSpec struct {
 	System   string `json:"system"`             // x86_64-linux or aarch64-linux
 	Role     string `json:"role"`               // minimal, server or desktop
 	Hardware string `json:"hardware,omitempty"` // nixos-generate-config output; a placeholder when empty
+	Platform string `json:"platform,omitempty" jsonschema:"hardware (default: a physical machine), proxmox-lxc (a NixOS container on Proxmox: no hardware configuration) or proxmox-vm (a Proxmox virtual machine: QEMU guest support plus the hardware configuration)"`
 }
 
 type MachineCreated struct {
@@ -26,6 +28,9 @@ type MachineCreated struct {
 }
 
 var systems = map[string]bool{"x86_64-linux": true, "aarch64-linux": true}
+
+// Each platform's default.nix. A Proxmox LXC has no hardware file: the container module stands in for it.
+var platformTemplates = map[string]string{"hardware": defaultNixTemplate, "proxmox-lxc": proxmoxLXCTemplate, "proxmox-vm": proxmoxVMTemplate}
 
 // Role presets: what managed.json starts with. Everything stays editable by clicking.
 var rolePresets = map[string]map[string]any{
@@ -69,7 +74,43 @@ const defaultNixTemplate = `{ ... }:
 {
   imports = [ ./hardware-configuration.nix ];
 
-  networking.hostName = %q;
+  networking.hostName = %[1]q;
+
+  # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
+  system.stateVersion = "26.05";
+}
+`
+
+const proxmoxLXCTemplate = `{ modulesPath, ... }:
+{
+  # A NixOS container on Proxmox (unprivileged, nesting on): no disks or
+  # boot loader to configure, and Proxmox sets up the network.
+  imports = [ (modulesPath + "/virtualisation/proxmox-lxc.nix") ];
+
+  nixpkgs.hostPlatform = %[2]q;
+
+  # comin finds this machine's configuration by its host name,
+  # so NixOS sets it instead of Proxmox.
+  proxmoxLXC.manageHostName = true;
+  networking.hostName = %[1]q;
+
+  # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
+  system.stateVersion = "26.05";
+}
+`
+
+const proxmoxVMTemplate = `{ modulesPath, ... }:
+{
+  imports = [
+    ./hardware-configuration.nix
+    (modulesPath + "/profiles/qemu-guest.nix")
+  ];
+
+  # Lets Proxmox show the VM's address and shut it down cleanly
+  # (turn on "QEMU Guest Agent" in the VM's Options).
+  services.qemuGuest.enable = true;
+
+  networking.hostName = %[1]q;
 
   # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
   system.stateVersion = "26.05";
@@ -92,7 +133,8 @@ const hardwarePlaceholder = `# Placeholder: replace with the output of nixos-gen
 // machineName becomes networking.hostName, so it follows NixOS's host name rule (lowercase here).
 var machineName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
 
-// CreateMachine adds hosts/<name>/ with a configuration, its hardware file and a managed.json preset.
+// CreateMachine adds hosts/<name>/ with a configuration for its platform, its hardware file (none for a
+// Proxmox LXC) and a managed.json preset.
 func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 	if !machineName.MatchString(spec.Name) {
 		return MachineCreated{}, errorf(ErrInvalid, "a machine name is lowercase letters, digits, - and _, starting and ending with a letter or digit (at most 63)")
@@ -104,8 +146,19 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 	if !ok {
 		return MachineCreated{}, errorf(ErrInvalid, "unknown role %q (minimal, server or desktop)", spec.Role)
 	}
+	if spec.Platform == "" {
+		spec.Platform = "hardware"
+	}
+	template, ok := platformTemplates[spec.Platform]
+	if !ok {
+		return MachineCreated{}, errorf(ErrInvalid, "unknown platform %q (hardware, proxmox-lxc or proxmox-vm)", spec.Platform)
+	}
 	if len(spec.Hardware) > 64<<10 {
 		return MachineCreated{}, errorf(ErrInvalid, "the hardware configuration is too large")
+	}
+	lxc := spec.Platform == "proxmox-lxc"
+	if lxc && strings.TrimSpace(spec.Hardware) != "" {
+		return MachineCreated{}, errorf(ErrInvalid, "a Proxmox LXC has no hardware configuration: leave it out")
 	}
 	dir := "hosts/" + spec.Name
 	hardware := spec.Hardware
@@ -119,9 +172,12 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 		return MachineCreated{}, err
 	}
 	files := []struct{ path, content string }{
-		{dir + "/default.nix", fmt.Sprintf(defaultNixTemplate, spec.Name)},
+		{dir + "/default.nix", fmt.Sprintf(template, spec.Name, spec.System)},
 		{dir + "/hardware-configuration.nix", hardware},
 		{dir + "/managed.json", managed.String()},
+	}
+	if lxc {
+		files = slices.Delete(files, 1, 2)
 	}
 	// Check every file first: stopping halfway would leave a machine the flake picks up.
 	for _, f := range files {

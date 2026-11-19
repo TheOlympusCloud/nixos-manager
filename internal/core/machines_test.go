@@ -1,8 +1,12 @@
 package core
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/TheOlympusCloud/nixos-manager/templates"
 )
 
 func TestCreateMachine(t *testing.T) {
@@ -61,5 +65,61 @@ func TestCreateMachineOverAHalfMadeOne(t *testing.T) {
 	isErr(t, err, ErrExists)
 	if _, _, err := s.Read("hosts/half/default.nix"); err == nil {
 		t.Fatal("default.nix was written before the clash was found")
+	}
+}
+
+func TestCreateMachineOnProxmox(t *testing.T) {
+	s := newService(t)
+	lxc := must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "ct", System: "x86_64-linux", Role: "server", Platform: "proxmox-lxc"}))
+	if strings.Join(lxc.Files, " ") != "hosts/ct/default.nix hosts/ct/managed.json" {
+		t.Fatalf("a container has no hardware file: %v", lxc.Files)
+	}
+	def, _, _ := s.Read("hosts/ct/default.nix")
+	for _, want := range []string{`(modulesPath + "/virtualisation/proxmox-lxc.nix")`, `nixpkgs.hostPlatform = "x86_64-linux";`, "proxmoxLXC.manageHostName = true;", `networking.hostName = "ct";`} {
+		if !strings.Contains(def, want) {
+			t.Errorf("container default.nix lacks %s:\n%s", want, def)
+		}
+	}
+
+	vm := must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "vm", System: "aarch64-linux", Role: "minimal", Platform: "proxmox-vm"}))
+	def, _, _ = s.Read("hosts/vm/default.nix")
+	hw, _, _ := s.Read("hosts/vm/hardware-configuration.nix")
+	if len(vm.Files) != 3 || !strings.Contains(def, "./hardware-configuration.nix") || !strings.Contains(def, `(modulesPath + "/profiles/qemu-guest.nix")`) ||
+		!strings.Contains(def, "services.qemuGuest.enable = true;") || !strings.Contains(def, `networking.hostName = "vm";`) || !strings.Contains(hw, `"aarch64-linux"`) {
+		t.Fatalf("vm files %v:\n%s\n%s", vm.Files, def, hw)
+	}
+
+	// No platform is a physical machine, as before platforms existed.
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "pc", System: "x86_64-linux", Role: "minimal"}))
+	def, _, _ = s.Read("hosts/pc/default.nix")
+	if strings.Contains(def, "modulesPath") || strings.Contains(def, "%!") || !strings.Contains(def, `networking.hostName = "pc";`) {
+		t.Fatalf("hardware default.nix:\n%s", def)
+	}
+
+	_, err := s.CreateMachine(MachineSpec{Name: "ok", System: "x86_64-linux", Role: "minimal", Platform: "xen"})
+	isErr(t, err, ErrInvalid)
+	_, err = s.CreateMachine(MachineSpec{Name: "ok", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-lxc", Hardware: "{ }"})
+	isErr(t, err, ErrInvalid)
+}
+
+// The platform templates must make machines Nix can evaluate: instantiate a whole container and VM
+// system from the starter flake.
+func TestCreatedMachinesEvaluate(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	s := newService(t)
+	if _, err := s.Repo.Seed(templates.Fleet); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []MachineSpec{
+		{Name: "ct", System: "x86_64-linux", Role: "server", Platform: "proxmox-lxc"},
+		{Name: "vm", System: "x86_64-linux", Role: "server", Platform: "proxmox-vm"},
+	} {
+		must[MachineCreated](t)(s.CreateMachine(spec))
+		attr := "path:" + s.Repo.Dir + "#nixosConfigurations." + spec.Name + ".config.system.build.toplevel.drvPath"
+		if out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "eval", "--raw", attr).CombinedOutput(); err != nil {
+			t.Errorf("%s: %v\n%s", spec.Platform, err, out)
+		}
 	}
 }

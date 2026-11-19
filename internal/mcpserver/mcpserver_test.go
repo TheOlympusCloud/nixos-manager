@@ -231,3 +231,20 @@ func TestEditCheckCommitFlow(t *testing.T) {
 		t.Fatalf("restore with the current hash: %s", text(res))
 	}
 }
+
+// platform is optional: clients written before it existed still create physical machines.
+func TestCreateMachinePlatform(t *testing.T) {
+	cs, _ := session(t)
+	var res core.MachineCreated
+	call(t, cs, "create_machine", map[string]any{"name": "pc", "system": "x86_64-linux", "role": "minimal"}, &res)
+	if len(res.Files) != 3 {
+		t.Fatalf("without a platform: %+v", res)
+	}
+	call(t, cs, "create_machine", map[string]any{"name": "ct", "system": "x86_64-linux", "role": "server", "platform": "proxmox-lxc"}, &res)
+	if strings.Join(res.Files, " ") != "hosts/ct/default.nix hosts/ct/managed.json" {
+		t.Fatalf("container: %+v", res)
+	}
+	if r := call(t, cs, "create_machine", map[string]any{"name": "x", "system": "x86_64-linux", "role": "minimal", "platform": "xen"}, nil); !r.IsError {
+		t.Fatal("an unknown platform was accepted")
+	}
+}

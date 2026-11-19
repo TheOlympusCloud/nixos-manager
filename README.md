@@ -55,7 +55,209 @@ The repository is a normal git repository whose remote is Forgejo. Each machine
 runs [comin](https://github.com/nlewo/comin), pulls from Forgejo and switches
 to `nixosConfigurations.<its hostname>`.
 
+## Run it in a Proxmox LXC (recommended)
+
+nixos-manager is happiest in its own NixOS container: Nix is right there, so it
+evaluates, locks and checks the fleet for real, and the container can later
+become one of the fleet's machines. The commands below run as root on the
+Proxmox host, then in the container.
+
+1. **Get the NixOS container template.** NixOS's Hydra builds it from
+   `nixos/modules/virtualisation/proxmox-lxc.nix` for every 26.05 update
+   (x86_64 only):
+
+   ```sh
+   wget -O /var/lib/vz/template/cache/nixos-26.05-proxmox-lxc.tar.xz \
+     https://hydra.nixos.org/job/nixos/release-26.05/nixos.proxmoxLXC.x86_64-linux/latest/download-by-type/file/system-tarball
+   ```
+
+   That folder is the `local` storage's container templates; in the web UI the
+   same is **local → CT Templates → Download from URL**.
+
+2. **Create the container.** Put your SSH public key in a file first; Proxmox
+   copies it to root in the container (a root password set from Proxmox does
+   not work on NixOS).
+
+   ```sh
+   echo 'ssh-ed25519 AAAA... you@laptop' > /root/me.pub
+   pct create 120 local:vztmpl/nixos-26.05-proxmox-lxc.tar.xz \
+     --hostname nixos-manager \
+     --ostype nixos --unprivileged 1 --features nesting=1 \
+     --cores 4 --memory 4096 --swap 2048 \
+     --rootfs local-lvm:30 \
+     --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+     --ssh-public-keys /root/me.pub \
+     --onboot 1 --start 1
+   lxc-info -n 120 -iH    # the container's address
+   ```
+
+   - `120` is any free ID, and `local-lvm` the storage for its disk
+     (`local-zfs` on a ZFS install).
+   - `--ostype nixos` makes Proxmox hand the network to systemd-networkd, as the
+     image expects. `--features nesting=1` is required: systemd's service
+     sandboxing and Nix's build sandbox need it.
+   - Size: every machine is a full NixOS evaluation, so memory goes first.
+     4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
+     holds a few nixpkgs revisions and their builds. More cores make checks
+     faster.
+
+3. **Configure it.** `ssh root@<address>`, then write `/etc/nixos/flake.nix`:
+
+   ```nix
+   {
+     inputs = {
+       nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+       nixos-manager = {
+         url = "github:TheOlympusCloud/nixos-manager";
+         inputs.nixpkgs.follows = "nixpkgs";
+       };
+     };
+
+     outputs =
+       { nixpkgs, nixos-manager, ... }:
+       {
+         nixosConfigurations.nixos-manager = nixpkgs.lib.nixosSystem {
+           modules = [
+             nixos-manager.nixosModules.default
+             ./configuration.nix
+           ];
+         };
+       };
+   }
+   ```
+
+   and `/etc/nixos/configuration.nix`:
+
+   ```nix
+   { config, modulesPath, ... }:
+   {
+     imports = [ (modulesPath + "/virtualisation/proxmox-lxc.nix") ];
+
+     nixpkgs.hostPlatform = "x86_64-linux";
+     nix.settings.experimental-features = [
+       "nix-command"
+       "flakes"
+     ];
+     # Each nixpkgs revision the fleet moves past stays in the store until collected.
+     nix.gc = {
+       automatic = true;
+       dates = "weekly";
+       options = "--delete-older-than 14d";
+     };
+
+     services.nixos-manager = {
+       enable = true;
+       openFirewall = true; # port 8080
+       author = {
+         name = "Your Name"; # every commit is made as this person
+         email = "you@example.com";
+       };
+       passwordHashFile = "/var/lib/secrets/nixos-manager-password";
+     };
+     # For `nixos-manager hash-password`.
+     environment.systemPackages = [ config.services.nixos-manager.package ];
+
+     system.stateVersion = "26.05";
+   }
+   ```
+
+   Switch to it. The first time builds nixos-manager (Go and the web UI), which
+   takes a few minutes:
+
+   ```sh
+   nixos-rebuild switch --flake /etc/nixos#nixos-manager
+   ```
+
+   If this repository lives on your Forgejo instead of GitHub, use
+   `url = "git+https://forgejo.lan/you/nixos-manager.git";` and add
+   `programs.git.enable = true;`: Nix fetches git inputs with git, which the
+   template lacks, so borrow it for the first switch:
+
+   ```sh
+   nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#git \
+     -c nixos-rebuild switch --flake /etc/nixos#nixos-manager
+   ```
+
+4. **Set the login password.** The service waits for this file:
+
+   ```sh
+   install -d -m 700 /var/lib/secrets
+   read -rsp 'Password: ' pw; echo
+   printf '%s\n' "$pw" | nixos-manager hash-password > /var/lib/secrets/nixos-manager-password
+   unset pw
+   systemctl restart nixos-manager
+   ```
+
+5. Open `http://<address>:8080`, log in, and connect Forgejo in **Settings**
+   (see [Forgejo access](#forgejo-access)).
+
+The service runs as the `nixos-manager` user, with its working copy, deploy
+key, tokens and Nix caches in `/var/lib/nixos-manager`; `journalctl -u
+nixos-manager` has its log. Other options: `listen` (default `0.0.0.0:8080`),
+`remote` (sets `NIXMGR_REMOTE`; leave it out to connect Forgejo in Settings),
+`environmentFile` (extra secrets as `KEY=value`) and `extraEnvironment`.
+
+### Make the container one of the fleet's machines
+
+Once the fleet is on Forgejo and comin deploys it, the container can be managed
+like every other machine:
+
+1. In nixos-manager, **New machine**: name it `nixos-manager` (its host name),
+   pick a role and the **Proxmox LXC** platform. The server role allows SSH keys
+   only and no root login: add your user and key under **Users** first.
+2. Add the app to the fleet's flake inputs and run **Lock**:
+
+   ```nix
+   nixos-manager = {
+     url = "github:TheOlympusCloud/nixos-manager";
+     inputs.nixpkgs.follows = "nixpkgs";
+   };
+   ```
+
+3. Move the service settings into `hosts/nixos-manager/default.nix` (the
+   starter flake passes `inputs` to every machine):
+
+   ```nix
+   { inputs, modulesPath, ... }:
+   {
+     imports = [
+       (modulesPath + "/virtualisation/proxmox-lxc.nix")
+       inputs.nixos-manager.nixosModules.default
+     ];
+
+     nixpkgs.hostPlatform = "x86_64-linux";
+     proxmoxLXC.manageHostName = true;
+     networking.hostName = "nixos-manager";
+
+     services.nixos-manager = {
+       enable = true;
+       openFirewall = true;
+       author = {
+         name = "Your Name";
+         email = "you@example.com";
+       };
+       passwordHashFile = "/var/lib/secrets/nixos-manager-password";
+     };
+
+     system.stateVersion = "26.05";
+   }
+   ```
+
+4. Check, commit and push. Then switch the container once from its own working
+   copy, as root in the container:
+
+   ```sh
+   nixos-rebuild switch --flake path:/var/lib/nixos-manager/repo#nixos-manager
+   ```
+
+   From then on comin (on in every machine through `modules/common.nix`) pulls
+   from Forgejo and switches the container; `/etc/nixos` is no longer used.
+   `path:` reads the files as they are, so do this with nothing uncommitted.
+   Updating nixos-manager itself is then an update of its flake input.
+
 ## Run it with Docker Compose
+
+The alternative, on any host with Docker. The image carries its own Nix.
 
 1. Pick a login password and store its hash:
 
@@ -65,15 +267,13 @@ to `nixosConfigurations.<its hostname>`.
    ```
 
 2. Edit `compose.yaml`: set `NIXMGR_AUTHOR_NAME` and `NIXMGR_AUTHOR_EMAIL` (the
-   identity of every commit) and, once the Forgejo repository exists,
-   `NIXMGR_REMOTE`.
+   identity of every commit).
 3. `docker compose up -d --build`, then open `http://<server>:8080`.
 
-Without `NIXMGR_REMOTE` the app starts a new repository with a starter flake
-(an example host, a home-manager user and comin). Run **Lock** once to create
-`flake.lock`, then stage, check and commit. To connect Forgejo later, set
-`NIXMGR_REMOTE` and restart: it is added as `origin`, and **Push** publishes the
-branch.
+Either way, without a remote the app starts a new repository with a starter
+flake (an example host, a home-manager user and comin). Run **Lock** once to
+create `flake.lock`, then stage, check and commit. Connect Forgejo in
+**Settings** when it is ready (below); **Push** publishes the branch.
 
 ### Forgejo access
 
@@ -83,16 +283,27 @@ branch.
 - HTTPS: put `https://<user>:<token>@forgejo.lan` in a git credentials file,
   mount it, and add `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=credential.helper`,
   `GIT_CONFIG_VALUE_0=store --file=/run/secrets/nixmgr/git-credentials` to the
-  environment. Do not put the token in `NIXMGR_REMOTE`.
+  environment. Use the plain `https://forgejo.lan/you/nixos-config.git` as the
+  remote; never put the token in the URL.
 
 ### LAN and Tailscale
 
-The port is published on the host, so it is reachable on the LAN and on the
-host's Tailscale address. On the LAN it is plain HTTP: the password and the
-session cookie cross the LAN unencrypted. Tailscale traffic is encrypted, and
-`tailscale serve --bg 8080` on the host adds HTTPS on the tailnet. If the LAN is
-not trusted, publish the port on loopback only (`"127.0.0.1:8080:8080"`) and use
-it through Tailscale.
+On the LAN, the container answers on `http://<address>:8080` (`openFirewall`
+opens the port); with Docker, the port is published on the host. It is plain
+HTTP: the password and the session cookie cross the LAN unencrypted.
+
+Tailscale encrypts the traffic, and `tailscale serve` adds HTTPS on the tailnet:
+
+- **LXC.** Tailscale needs the TUN device: on the Proxmox host run
+  `pct set 120 --dev0 /dev/net/tun` and restart the container. Add
+  `services.tailscale.enable = true;` to its configuration and switch, then
+  run `tailscale up` once and `tailscale serve --bg 8080`. It is reachable at
+  `https://nixos-manager.<tailnet>.ts.net`.
+- **Docker.** Run `tailscale serve --bg 8080` on the host.
+
+If the LAN is not trusted, listen on loopback only and use it through
+Tailscale: `listen = "127.0.0.1:8080";` without `openFirewall` in the
+container, or `"127.0.0.1:8080:8080"` as the published port with Docker.
 
 ## Using it
 
@@ -177,9 +388,11 @@ go build ./cmd/nixos-manager
 remote: login, lock, check, commit gate, commit, push, edit, history and
 restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 
-`NIXMGR_NIX_TESTS=1 go test ./templates` evaluates a machine with real Nix
-(network needed) to check that values set by clicking win without dropping
-the hand-written users and SSH settings around them.
+`NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
+runs the checks that need real Nix (network needed): values set by clicking
+win without dropping the hand-written users and SSH settings around them, the
+deployment reporter wires into comin, new LXC and VM machines evaluate, and
+the flake builds the package and passes `nix flake check`.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines
