@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keySummary, parseSSHKey, userNameProblem } from './users'
+import { editableList, keySummary, parseSSHKey, parseSSHKeys, userNameProblem } from './users'
 
 // A well-formed ed25519 public key: its own type, then 32 bytes.
 const blob = (type: string, n = 32) => {
@@ -36,5 +36,32 @@ describe('userNameProblem', () => {
     expect(userNameProblem('root', [])).toMatch(/system account/)
     expect(userNameProblem('pablo', ['pablo'])).toMatch(/already exists/)
     expect(userNameProblem('a'.repeat(33), [])).toMatch(/32/)
+  })
+})
+
+describe('parseSSHKeys', () => {
+  it('takes one key per line', () => {
+    const rsa = `ssh-rsa ${blob('ssh-rsa', 256)} work`
+    expect(parseSSHKeys(`${ed}\n\n  ${rsa}\n`)).toEqual({ keys: [ed, rsa] })
+  })
+  it('names the line that is wrong', () => {
+    expect((parseSSHKeys(`${ed}\nssh-ed25519`) as { problem: string }).problem).toMatch(/^Key 2: /)
+    expect(parseSSHKeys('  \n')).toHaveProperty('problem')
+  })
+})
+
+describe('editableList', () => {
+  const here = { kind: 'here' } as const
+  it('edits only a list whose value is known', () => {
+    expect(editableList({ state: 'value', value: ['a'], source: here, pending: false })).toEqual(['a'])
+    expect(editableList({ state: 'value', value: ['a'], source: here, pending: true })).toBeNull()
+    expect(editableList({ state: 'error', error: 'boom' })).toBeNull()
+    expect(editableList({ state: 'missing' })).toBeNull()
+  })
+  it('refuses a list it never read, e.g. past the cap on options per request', () => {
+    expect(editableList(null)).toBeNull()
+  })
+  it('starts a user created here with empty lists', () => {
+    expect(editableList(null, true)).toEqual([])
   })
 })

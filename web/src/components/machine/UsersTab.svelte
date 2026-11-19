@@ -6,7 +6,7 @@
   import { pathName } from '../../lib/options'
   import { machineLink } from '../../lib/router.svelte'
   import { confirmBox } from '../../lib/ui.svelte'
-  import { commonGroups, keySummary, parseSSHKey, userNameProblem } from '../../lib/users'
+  import { commonGroups, editableList, keySummary, parseSSHKeys, userNameProblem } from '../../lib/users'
   import { effective, type Effective } from '../../lib/values'
   import Icon from '../Icon.svelte'
   import SourceTag from '../SourceTag.svelte'
@@ -33,9 +33,13 @@
   const vals = useValues(() => ({ names: [PW, ...host.users.flatMap((u) => [pathName(keysPath(u.name)), pathName(groupsPath(u.name))])].slice(0, 40), hosts: [host.name] }))
   const eff = (path: string[]): Effective | null =>
     effective(valueOf(vals.values, pathName(path), host.name), managedValue(host.name, path), host.managedFile, !!fleet.managed[host.name])
-  const listOf = (e: Effective | null, fallback: string[]): string[] => (e?.state === 'value' && Array.isArray(e.value) ? (e.value as string[]) : fallback)
-  const groupsOf = (u: { name: string; groups: string[] }) => listOf(eff(groupsPath(u.name)), u.groups)
-  const keysOf = (u: string) => listOf(eff(keysPath(u)), [])
+  const fresh = (u: string) => !host.users.some((x) => x.name === u)
+  /** The lists to edit, null while unknown (still reading, the read failed, or past the 40-option cap). */
+  const knownGroups = (u: string) => editableList(eff(groupsPath(u)), fresh(u))
+  const knownKeys = (u: string) => editableList(eff(keysPath(u)), fresh(u))
+  /** What to show: the known list, else the last evaluation's groups. */
+  const groupsOf = (u: { name: string; groups: string[] }) => knownGroups(u.name) ?? u.groups
+  const keysOf = (u: string) => knownKeys(u) ?? []
   const passwordsOff = $derived.by(() => {
     const e = eff(PW.split('.'))
     return e?.state === 'value' ? e.value === false : host.checks?.sshPasswordAuthentication === false
@@ -57,12 +61,15 @@
   let groupText = $state('')
   async function addGroup(u: { name: string; groups: string[] }, g: string) {
     g = g.trim()
-    if (!g || groupsOf(u).includes(g)) return
-    await run(u.name + ':groups', () => setOption(host.name, groupsPath(u.name), [...groupsOf(u), g], `Added ${u.name} to ${g} on ${host.name}`))
+    const now = knownGroups(u.name)
+    if (!g || !now || now.includes(g)) return
+    await run(u.name + ':groups', () => setOption(host.name, groupsPath(u.name), [...now, g], `Added ${u.name} to ${g} on ${host.name}`))
     addingGroup = ''
     groupText = ''
   }
   async function removeGroup(u: { name: string; groups: string[] }, g: string) {
+    const now = knownGroups(u.name)
+    if (!now) return
     if (g === 'wheel' && wheelUsers.length === 1) {
       const ok = await confirmBox({
         title: `Remove ${u.name} from wheel?`,
@@ -72,7 +79,7 @@
       })
       if (!ok) return
     }
-    await run(u.name + ':groups', () => setOption(host.name, groupsPath(u.name), groupsOf(u).filter((x) => x !== g), `Removed ${u.name} from ${g} on ${host.name}`))
+    await run(u.name + ':groups', () => setOption(host.name, groupsPath(u.name), now.filter((x) => x !== g), `Removed ${u.name} from ${g} on ${host.name}`))
   }
 
   // ---- SSH keys ----
@@ -80,20 +87,25 @@
   let keyText = $state('')
   const keyProblem = $derived.by(() => {
     if (!keyText.trim()) return ''
-    const k = parseSSHKey(keyText)
+    const k = parseSSHKeys(keyText)
     if ('problem' in k) return k.problem
-    return addingKey && keysOf(addingKey).some((x) => x.trim().split(/\s+/)[1] === k.data) ? 'This key is already there.' : ''
+    const data = (x: string) => x.trim().split(/\s+/)[1]
+    return addingKey && k.keys.some((n) => keysOf(addingKey).some((x) => data(x) === data(n))) ? 'This key is already there.' : ''
   })
   async function addKey(e: SubmitEvent, u: string) {
     e.preventDefault()
-    const k = parseSSHKey(keyText)
-    if ('problem' in k || keyProblem) return
-    await run(u + ':keys', () => setOption(host.name, keysPath(u), [...keysOf(u), [k.type, k.data, k.comment].filter(Boolean).join(' ')], `Added ${k.comment || 'a key'} to ${u} on ${host.name}`))
+    const k = parseSSHKeys(keyText)
+    const now = knownKeys(u)
+    if ('problem' in k || keyProblem || !now) return
+    const what = k.keys.length > 1 ? `${k.keys.length} keys` : keySummary(k.keys[0]).comment || 'a key'
+    await run(u + ':keys', () => setOption(host.name, keysPath(u), [...now, ...k.keys], `Added ${what} to ${u} on ${host.name}`))
     addingKey = ''
     keyText = ''
   }
   async function removeKey(u: string, key: string) {
-    const rest = keysOf(u).filter((x) => x !== key)
+    const now = knownKeys(u)
+    if (!now) return
+    const rest = now.filter((x) => x !== key)
     if (!rest.length && passwordsOff) {
       const ok = await confirmBox({
         title: `Remove ${u}'s only key?`,
@@ -114,13 +126,8 @@
   let newKeys = $state('')
   const nameProblem = $derived(userNameProblem(newName.trim(), users.map((u) => u.name)))
   const keyLines = $derived(newKeys.split('\n').map((l) => l.trim()).filter(Boolean))
-  const keysProblem = $derived.by(() => {
-    for (const [i, l] of keyLines.entries()) {
-      const k = parseSSHKey(l)
-      if ('problem' in k) return keyLines.length > 1 ? `Key ${i + 1}: ${k.problem}` : k.problem
-    }
-    return ''
-  })
+  const parsedNew = $derived(parseSSHKeys(newKeys))
+  const keysProblem = $derived(keyLines.length && 'problem' in parsedNew ? parsedNew.problem : '')
   function openAdd() {
     adding = true
     newName = ''
@@ -133,7 +140,7 @@
     e.preventDefault()
     const name = newName.trim()
     if (!name || nameProblem || keysProblem) return
-    const keys = keyLines.map((l) => parseSSHKey(l)).flatMap((k) => ('problem' in k ? [] : [[k.type, k.data, k.comment].filter(Boolean).join(' ')]))
+    const keys = 'keys' in parsedNew ? parsedNew.keys : []
     const user: Record<string, unknown> = { isNormalUser: true, extraGroups: [...newGroups] }
     if (newDesc.trim()) user.description = newDesc.trim()
     if (keys.length) user.openssh = { authorizedKeys: { keys } }
@@ -213,6 +220,8 @@
     {@const gEff = eff(groupsPath(u.name))}
     {@const kEff = eff(keysPath(u.name))}
     {@const keys = keysOf(u.name)}
+    {@const gKnown = knownGroups(u.name)}
+    {@const kKnown = knownKeys(u.name)}
     <section class="card user" class:pending>
       <div class="u-head">
         <span class="av">{initial(u.name)}</span>
@@ -230,11 +239,11 @@
           <div class="chips">
             {#each groups as g (g)}
               <span class="chip" class:admin={g === 'wheel'} title={commonGroups.find((c) => c.name === g)?.note}
-                >{g}{#if editable}<button class="x" aria-label="Remove {u.name} from {g}" disabled={busy === u.name + ':groups'} onclick={() => removeGroup(u, g)}><Icon name="x" size={11} /></button>{/if}</span>
+                >{g}{#if editable && gKnown}<button class="x" aria-label="Remove {u.name} from {g}" disabled={busy === u.name + ':groups'} onclick={() => removeGroup(u, g)}><Icon name="x" size={11} /></button>{/if}</span>
             {:else}
               <span class="muted small">none</span>
             {/each}
-            {#if editable && addingGroup !== u.name}
+            {#if editable && gKnown && addingGroup !== u.name}
               <button class="chip add-btn" onclick={() => ((addingGroup = u.name), (groupText = ''))} aria-label="Add a group to {u.name}"><Icon name="plus" size={11} />Group</button>
             {/if}
           </div>
@@ -265,10 +274,13 @@
                   <span class="k-type">{s.type}</span>
                   <span class="k-comment" title={k}>{s.comment || 'no comment'}</span>
                   <span class="k-tail mono" title={k}>…{s.tail}</span>
-                  {#if editable}<button class="icon" aria-label="Remove key {s.comment || s.tail} from {u.name}" title="Remove this key" disabled={busy === u.name + ':keys'} onclick={() => removeKey(u.name, k)}><Icon name="x" size={13} /></button>{/if}
+                  {#if editable && kKnown}<button class="icon" aria-label="Remove key {s.comment || s.tail} from {u.name}" title="Remove this key" disabled={busy === u.name + ':keys'} onclick={() => removeKey(u.name, k)}><Icon name="x" size={13} /></button>{/if}
                 </li>
               {:else}
-                <li class="none muted small">{passwordsOff ? 'No key, and password logins are off: this user cannot log in over SSH.' : 'No authorized keys.'}</li>
+                <li class="none muted small">
+                  {#if !kKnown}{vals.error ? `Could not read the keys (${vals.error}), so they cannot be changed here.` : 'The keys are not known yet, so they cannot be changed here.'}
+                  {:else}{passwordsOff ? 'No key, and password logins are off: this user cannot log in over SSH.' : 'No authorized keys.'}{/if}
+                </li>
               {/each}
             </ul>
             {#if editable && addingKey === u.name}
@@ -282,9 +294,9 @@
                 </div>
               </form>
             {/if}
-            {#if (editable && addingKey !== u.name) || kEff?.state === 'value'}
+            {#if (editable && kKnown && addingKey !== u.name) || kEff?.state === 'value'}
               <div class="src-line">
-                {#if editable && addingKey !== u.name}<button class="small ghost" onclick={() => ((addingKey = u.name), (keyText = ''))}><Icon name="plus" size={12} />Add key</button>{/if}
+                {#if editable && kKnown && addingKey !== u.name}<button class="small ghost" onclick={() => ((addingKey = u.name), (keyText = ''))}><Icon name="plus" size={12} />Add key</button>{/if}
                 <span class="spacer"></span>
                 {#if kEff?.state === 'value'}<SourceTag source={kEff.source} pending={kEff.pending} />{/if}
               </div>

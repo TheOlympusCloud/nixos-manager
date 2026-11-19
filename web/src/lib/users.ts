@@ -1,4 +1,5 @@
 // Users and SSH keys: checks before they reach managed.json.
+import { copyable, type Effective } from './values'
 
 const KEY_TYPES = [
   'ssh-ed25519',
@@ -34,6 +35,28 @@ export function parseSSHKey(line: string): SSHKey | { problem: string } {
   const inner = bytes.slice(4, 4 + n)
   if (inner !== type) return { problem: `The key data is for ${inner || 'another type'}, not ${type}.` }
   return { type, data, comment: rest.join(' ') }
+}
+
+/**
+ * A list option to edit, or null while its value is not known: a list set here replaces
+ * the whole option, so editing from a guess would drop entries written in code.
+ * `fresh`: a user created here that no evaluation has seen yet, whose lists start empty.
+ */
+export function editableList(e: Effective | null, fresh = false): string[] | null {
+  if (e?.state === 'value') return !e.pending && Array.isArray(e.value) && copyable(e.value) ? (e.value as string[]) : null
+  return fresh ? [] : null
+}
+
+/** Every key in pasted text, one per line, or the first line's problem. */
+export function parseSSHKeys(text: string): { keys: string[] } | { problem: string } {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  const keys: string[] = []
+  for (const [i, l] of lines.entries()) {
+    const k = parseSSHKey(l)
+    if ('problem' in k) return { problem: lines.length > 1 ? `Key ${i + 1}: ${k.problem}` : k.problem }
+    keys.push([k.type, k.data, k.comment].filter(Boolean).join(' '))
+  }
+  return keys.length ? { keys } : { problem: 'Paste a public key, e.g. the contents of ~/.ssh/id_ed25519.pub.' }
 }
 
 /** "ssh-ed25519 AAAA…xyz me@laptop" → what to show: the type, the comment and the end of the data. */
