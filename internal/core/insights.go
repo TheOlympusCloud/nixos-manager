@@ -120,6 +120,7 @@ func Insights(m *Model, now time.Time) []Insight {
 		Title:  "Visual editing off",
 		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
 	out = append(out, missingPackages(healthy)...)
+	out = append(out, releaseInsights(healthy, now)...)
 	slices.SortStableFunc(out, func(a, b Insight) int {
 		if d := severityRank[a.Severity] - severityRank[b.Severity]; d != 0 {
 			return d
@@ -154,6 +155,71 @@ func missingPackages(healthy []Host) []Insight {
 					Detail: "Probably an oversight; add it if this machine should match the others."})
 			}
 		}
+	}
+	return out
+}
+
+// releaseEnd is when a NixOS release ("26.05", "26.11pre-git") stops getting
+// updates: seven months after it comes out, at the end of a month.
+func releaseEnd(release string) (time.Time, bool) {
+	var yy, mm int
+	if len(release) < 5 {
+		return time.Time{}, false
+	}
+	if _, err := fmt.Sscanf(release[:5], "%2d.%2d", &yy, &mm); err != nil || (mm != 5 && mm != 11) {
+		return time.Time{}, false
+	}
+	return time.Date(2000+yy, time.Month(mm+8), 1, 0, 0, 0, 0, time.UTC), true
+}
+
+// releaseInsights flags unsupported or soon unsupported NixOS releases, and a fleet on several.
+func releaseInsights(healthy []Host, now time.Time) []Insight {
+	var eol, soon, olds []string
+	var eolRel, soonRel []string
+	newest := ""
+	for _, h := range healthy {
+		if _, ok := releaseEnd(h.Release); ok && h.Release[:5] > newest {
+			newest = h.Release[:5]
+		}
+	}
+	for _, h := range healthy {
+		end, ok := releaseEnd(h.Release)
+		if !ok {
+			continue
+		}
+		rel := h.Release[:5]
+		switch {
+		case !now.Before(end):
+			eol = append(eol, h.Name)
+			if !slices.Contains(eolRel, rel) {
+				eolRel = append(eolRel, rel)
+			}
+		case now.After(end.AddDate(0, 0, -31)):
+			soon = append(soon, h.Name)
+			if !slices.Contains(soonRel, rel) {
+				soonRel = append(soonRel, rel)
+			}
+		}
+		if rel != newest {
+			olds = append(olds, h.Name)
+		}
+	}
+	var out []Insight
+	if len(eol) > 0 {
+		out = append(out, Insight{ID: "release-eol", Severity: "warning", Hosts: eol,
+			Title:  fmt.Sprintf("NixOS %s no longer %s security updates", list(eolRel), map[bool]string{true: "gets", false: "get"}[len(eolRel) == 1]),
+			Detail: "Point the nixpkgs input in flake.nix at a supported release branch, read its release notes, then check the machines before deploying."})
+	}
+	if len(soon) > 0 {
+		end, _ := releaseEnd(soonRel[0])
+		out = append(out, Insight{ID: "release-eol-soon", Severity: "info", Hosts: soon,
+			Title:  fmt.Sprintf("NixOS %s support ends on %s", list(soonRel), end.AddDate(0, 0, -1).Format("2 Jan 2006")),
+			Detail: "Plan the move to the next release: switch the nixpkgs input to its branch and check the machines."})
+	}
+	if len(olds) > 0 {
+		out = append(out, Insight{ID: "release-mixed", Severity: "info", Hosts: olds,
+			Title:  "Machines run different NixOS releases",
+			Detail: fmt.Sprintf("The newest is %s. Mixed releases mean different package versions and options across the fleet.", newest)})
 	}
 	return out
 }

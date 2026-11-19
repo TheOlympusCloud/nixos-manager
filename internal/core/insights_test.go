@@ -92,3 +92,40 @@ func ids(in []Insight) []string {
 	}
 	return out
 }
+
+func TestReleaseInsights(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	fleet := func(releases ...string) *Model {
+		m := &Model{}
+		for i, r := range releases {
+			m.Hosts = append(m.Hosts, Host{Name: string(rune('a' + i)), Release: r, Ports: Ports{Firewall: true},
+				Checks: Checks{AutoGC: true, AutoOptimise: true}, ManagedFile: managed("x")})
+		}
+		return m
+	}
+	byID := func(m *Model, at time.Time) map[string]Insight {
+		out := map[string]Insight{}
+		for _, in := range Insights(m, at) {
+			out[in.ID] = in
+		}
+		return out
+	}
+
+	got := byID(fleet("26.05", "26.05", "25.05", "26.11pre-git"), now)
+	if in, ok := got["release-eol"]; !ok || in.Severity != "warning" || strings.Join(in.Hosts, ",") != "c" {
+		t.Errorf("25.05 ended on 2025-12-31, so only c is unsupported: %+v", in)
+	}
+	if in := byID(fleet("25.11", "25.05"), now)["release-eol"]; in.Title != "NixOS 25.11 and 25.05 no longer get security updates" {
+		t.Errorf("title %q", in.Title)
+	}
+	if in, ok := got["release-mixed"]; !ok || in.Severity != "info" || strings.Join(in.Hosts, ",") != "a,b,c" {
+		t.Errorf("all but the newest release should be listed: %+v", in)
+	}
+	// 26.05 is supported until the end of 2026: a heads-up in December, nothing before.
+	if in := byID(fleet("26.05"), time.Date(2026, 12, 10, 0, 0, 0, 0, time.UTC))["release-eol-soon"]; len(in.Hosts) != 1 || in.Severity != "info" {
+		t.Errorf("26.05 ends this month: %+v", in)
+	}
+	if got := byID(fleet("26.05", "26.05", ""), now); len(got) != 0 {
+		t.Errorf("one supported release (and an unknown one) is healthy: %v", got)
+	}
+}
