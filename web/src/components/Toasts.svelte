@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { flip } from 'svelte/animate'
+  import { backOut } from 'svelte/easing'
   import { fly } from 'svelte/transition'
   import { dismiss, toasts } from '../lib/ui.svelte'
   import Icon from './Icon.svelte'
@@ -8,7 +10,7 @@
 
 <div class="toasts" aria-live="polite">
   {#each toasts as t (t.id)}
-    <div class="toast {t.kind}" role={t.kind === 'error' ? 'alert' : 'status'} transition:fly={{ y: 12, duration: 180 }}>
+    <div class="toast {t.kind}" role={t.kind === 'error' ? 'alert' : 'status'} in:fly={{ y: 16, duration: 320, easing: backOut }} out:fly={{ x: 24, duration: 180 }} animate:flip={{ duration: 220 }}>
       <span class="ico">{#if t.kind === 'busy'}<span class="spin" aria-hidden="true"></span>{:else}<Icon name={icon[t.kind]} size={15} />{/if}</span>
       <div class="body">
         {#if t.title}<strong>{t.title}</strong>{/if}
@@ -42,10 +44,11 @@
     align-items: flex-start;
     gap: 10px;
     padding: 10px 8px 10px 12px;
-    background: var(--bg-raised);
+    background: color-mix(in srgb, var(--bg-raised) 90%, transparent);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--edge), var(--shadow-2);
+    backdrop-filter: blur(14px);
   }
   .ico {
     display: grid;

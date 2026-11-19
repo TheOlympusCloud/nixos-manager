@@ -31,6 +31,17 @@
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const running = $derived(app.jobs.some((j) => ['check', 'lock', 'update'].includes(j.kind) && (j.state === 'running' || j.state === 'queued')))
 
+  // The highlight slides from the old page to the new one instead of jumping.
+  const order = [...items.map((i) => i.view), 'settings']
+  let railEl = $state<HTMLElement>()
+  let marker = $state<{ y: number; h: number } | null>(null)
+  $effect(() => {
+    void route.view
+    void collapsed
+    const cur = railEl?.querySelector<HTMLElement>('a.item[aria-current="page"]')
+    marker = cur && order.includes(route.view) ? { y: cur.offsetTop, h: cur.offsetHeight } : null
+  })
+
   function toggle() {
     collapsed = !collapsed
     localStorage.setItem('nixmgr.rail', collapsed ? 'collapsed' : 'open')
@@ -41,14 +52,15 @@
   <a class="item" href={link(view)} aria-current={route.view === view ? 'page' : undefined} title={collapsed ? `${label} (g ${key})` : `g ${key}`}>
     <Icon name={icon} size={18} />
     <span class="label">{label}</span>
-    {#if view === 'changes' && changes}<span class="count num" aria-label="{changes} changed files">{changes}</span>{/if}
+    {#if view === 'changes' && changes}{#key changes}<span class="count num" aria-label="{changes} changed files">{changes}</span>{/key}{/if}
     {#if view === 'deployments' && failedDeploys}<span class="count num sev err" aria-label="{failedDeploys} failed deployments">{failedDeploys}</span>{/if}
     {#if view === 'health' && findings.length}<span class="count num sev" class:err={errors} aria-label="{findings.length} errors and warnings">{findings.length}</span>{/if}
     {#if view === 'changes' && running}<span class="dot busy" aria-label="A check is running"></span>{/if}
   </a>
 {/snippet}
 
-<nav class="rail" class:collapsed aria-label="Main">
+<nav class="rail" class:collapsed aria-label="Main" bind:this={railEl}>
+  {#if marker}<span class="marker" style:transform="translateY({marker.y}px)" style:height="{marker.h}px" aria-hidden="true"></span>{/if}
   <a class="brand" href="#/fleet" aria-label="nixos-manager, fleet">
     <span class="mark"><Icon name="mark" size={18} /></span>
     <span class="label">nixos-manager</span>
@@ -72,15 +84,41 @@
 
 <style>
   .rail {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--s1);
     width: 200px;
     height: 100%;
     padding: var(--s2);
-    background: var(--bg-deep);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 5%, var(--bg-deep)), var(--bg-deep) 38%);
     border-right: 1px solid var(--border);
-    transition: width var(--t) var(--ease);
+    transition: width 260ms var(--ease);
+  }
+  .marker {
+    position: absolute;
+    top: 0;
+    right: var(--s2);
+    left: var(--s2);
+    background: var(--bg-active);
+    border-radius: var(--r);
+    box-shadow: var(--edge);
+    transition:
+      transform 320ms var(--ease),
+      height var(--t) var(--ease);
+    pointer-events: none;
+  }
+  /* The accent bar on its left edge. */
+  .marker::before {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: -1px;
+    width: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 80%, transparent);
+    content: '';
   }
   .rail.collapsed {
     width: 56px;
@@ -108,6 +146,17 @@
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: 8px;
+    box-shadow: 0 0 18px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+    transition: box-shadow var(--t-slow) var(--ease);
+  }
+  .mark :global(svg) {
+    transition: transform 700ms var(--ease);
+  }
+  .brand:hover .mark {
+    box-shadow: 0 0 22px -2px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .brand:hover .mark :global(svg) {
+    transform: rotate(60deg);
   }
   .items,
   .bottom {
@@ -140,13 +189,27 @@
       background var(--t-fast) var(--ease),
       color var(--t-fast) var(--ease);
   }
+  .item :global(svg) {
+    flex: none;
+    transition:
+      color var(--t) var(--ease),
+      transform var(--t) var(--ease-spring);
+  }
   .item:hover {
     color: var(--fg-strong);
     background: var(--bg-hover);
   }
-  .item[aria-current='page'] {
+  .item:hover :global(svg) {
+    transform: scale(1.12);
+  }
+  .item:active :global(svg) {
+    transform: scale(0.94);
+  }
+  /* The sliding marker is this item's background. */
+  .item[aria-current='page'],
+  .item[aria-current='page']:hover {
     color: var(--fg-strong);
-    background: var(--bg-active);
+    background: none;
   }
   .item[aria-current='page'] :global(svg) {
     color: var(--accent);
@@ -168,6 +231,7 @@
     text-align: center;
     background: color-mix(in srgb, var(--accent-strong) 60%, var(--bg-active));
     border-radius: 9px;
+    animation: bump var(--t-slow) var(--ease-spring) backwards;
   }
   .count.sev {
     color: #1b1406;

@@ -59,9 +59,17 @@
 
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.35), 0 4px 14px rgb(0 0 0 / 0.22);
   --shadow-2: 0 10px 34px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
+  --shadow-3: 0 24px 70px rgb(0 0 0 / 0.6), 0 4px 14px rgb(0 0 0 / 0.35);
+  /* Raised surfaces catch a little light on their top edge. */
+  --edge: inset 0 1px 0 rgb(255 255 255 / 0.045);
+  --surface: linear-gradient(180deg, color-mix(in srgb, #fff 2.6%, var(--bg-raised)) 0%, var(--bg-raised) 64px);
+  --glass: color-mix(in srgb, var(--bg-side) 78%, transparent);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent), 0 8px 28px -10px color-mix(in srgb, var(--accent) 55%, transparent);
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.45, 0.5, 1);
   --t-fast: 120ms;
   --t: 180ms;
+  --t-slow: 420ms;
 
   color-scheme: dark;
 }
@@ -163,14 +171,16 @@ button {
   transition:
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease);
+    color var(--t-fast) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t-fast) var(--ease);
 }
 button:hover:not(:disabled) {
   background: var(--bg-active);
   border-color: var(--line-strong);
 }
 button:active:not(:disabled) {
-  transform: translateY(0.5px);
+  transform: scale(0.975);
 }
 button:disabled {
   opacity: 0.45;
@@ -178,12 +188,18 @@ button:disabled {
 }
 button.primary {
   color: #fff;
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 10%, var(--accent-strong)), var(--accent-strong));
+  border-color: color-mix(in srgb, #fff 12%, var(--accent-strong));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.4);
 }
 button.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 12%, var(--accent-hover)), var(--accent-hover));
+  border-color: color-mix(in srgb, #fff 16%, var(--accent-hover));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    0 6px 22px -6px color-mix(in srgb, var(--accent-strong) 85%, transparent);
 }
 button.danger {
   color: #fff;
@@ -251,12 +267,18 @@ a.btn:hover {
 }
 a.btn.primary {
   color: #fff;
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 10%, var(--accent-strong)), var(--accent-strong));
+  border-color: color-mix(in srgb, #fff 12%, var(--accent-strong));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.4);
 }
 a.btn.primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 12%, var(--accent-hover)), var(--accent-hover));
+  border-color: color-mix(in srgb, #fff 16%, var(--accent-hover));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    0 6px 22px -6px color-mix(in srgb, var(--accent-strong) 85%, transparent);
 }
 button.small {
   height: 24px;
@@ -365,6 +387,9 @@ input[type='radio'] {
   background: color-mix(in srgb, var(--c) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--c) 28%, transparent);
   border-radius: 999px;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
 }
 button.chip {
   height: 22px;
@@ -436,9 +461,36 @@ button.chip:hover:not(:disabled) {
 .dot.off {
   --c: var(--fg-faint);
 }
+.dot.ok,
+.dot.err {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent);
+}
+/* A failing machine keeps calling for attention, quietly. */
+.dot.err {
+  position: relative;
+}
+.dot.err::after,
+.dot.busy::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent);
+  animation: ping 2.4s var(--ease) infinite;
+  content: '';
+}
 .dot.busy {
   --c: var(--accent);
+  position: relative;
   animation: pulse 1.2s ease-in-out infinite;
+}
+.dot.busy::after {
+  animation-duration: 1.2s;
+}
+@keyframes ping {
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
 }
 @keyframes pulse {
   50% {
@@ -517,9 +569,10 @@ button.chip:hover:not(:disabled) {
   letter-spacing: -0.005em;
 }
 .card {
-  background: var(--bg-raised);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
+  box-shadow: var(--edge);
 }
 
 .toolbar {
@@ -558,6 +611,9 @@ table.data td {
   padding: 4px var(--s3);
   border-bottom: 1px solid var(--border);
 }
+table.data td {
+  transition: background var(--t-fast) var(--ease);
+}
 table.data tbody tr:hover td {
   background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
 }
@@ -566,7 +622,7 @@ table.data tbody tr:hover td {
 .skel {
   display: block;
   height: 12px;
-  background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-active) 50%, var(--bg-hover) 100%) 0 0 / 200% 100%;
+  background: linear-gradient(90deg, var(--bg-hover) 0%, color-mix(in srgb, var(--accent) 14%, var(--bg-active)) 50%, var(--bg-hover) 100%) 0 0 / 200% 100%;
   border-radius: var(--r-sm);
   animation: shimmer 1.4s linear infinite;
 }
@@ -584,6 +640,15 @@ table.data tbody tr:hover td {
   max-width: 560px;
   margin: 10vh auto;
   padding: var(--s5);
+}
+.empty-state > * {
+  animation: rise var(--t-slow) var(--ease) backwards;
+}
+.empty-state > :nth-child(2) {
+  animation-delay: 60ms;
+}
+.empty-state > :nth-child(n + 3) {
+  animation-delay: 120ms;
 }
 .empty-state h2 {
   font-size: var(--fs-xl);
@@ -667,6 +732,9 @@ table.data tbody tr:hover td {
   align-items: center;
   padding-right: 8px;
 }
+.item {
+  transition: background var(--t-fast) var(--ease);
+}
 .item:hover,
 .item:focus-within {
   background: var(--bg-hover);
@@ -723,6 +791,7 @@ table.data tbody tr:hover td {
   display: flex;
   gap: 2px;
   opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
 }
 .item:hover .item-tools,
 .item:focus-within .item-tools {
@@ -795,6 +864,163 @@ table.data tbody tr:hover td {
   white-space: nowrap;
 }
 
+/* ---- depth and motion ---- */
+
+/* A page arrives: its blocks rise into place one after another. `backwards` leaves nothing behind once it ends,
+   so sticky headers and fixed popovers inside keep working. */
+.page-inner > * {
+  animation: rise var(--t-slow) var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 50ms);
+}
+.page-inner > :nth-child(2) {
+  --i: 1;
+}
+.page-inner > :nth-child(3) {
+  --i: 2;
+}
+.page-inner > :nth-child(4) {
+  --i: 3;
+}
+.page-inner > :nth-child(5) {
+  --i: 4;
+}
+.page-inner > :nth-child(n + 6) {
+  --i: 5;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.975);
+  }
+}
+
+/* Grids of cards deal themselves out. */
+.stagger > * {
+  animation: rise var(--t-slow) var(--ease) backwards;
+  animation-delay: calc(60ms + var(--n, 0) * 45ms);
+}
+.stagger > :nth-child(2) {
+  --n: 1;
+}
+.stagger > :nth-child(3) {
+  --n: 2;
+}
+.stagger > :nth-child(4) {
+  --n: 3;
+}
+.stagger > :nth-child(5) {
+  --n: 4;
+}
+.stagger > :nth-child(6) {
+  --n: 5;
+}
+.stagger > :nth-child(7) {
+  --n: 6;
+}
+.stagger > :nth-child(n + 8) {
+  --n: 7;
+}
+
+/* Surfaces you can open lift toward you, and light up under the pointer (use:spotlight sets --mx / --my). */
+.lift {
+  position: relative;
+  isolation: isolate;
+  background: var(--surface);
+  box-shadow: var(--edge);
+  transition:
+    transform var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease);
+}
+.lift::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), color-mix(in srgb, var(--lift-c, var(--accent)) 11%, transparent), transparent 70%);
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--t-slow) var(--ease);
+  content: '';
+  pointer-events: none;
+}
+.lift:hover,
+a:focus-visible > .lift,
+.lift:focus-visible {
+  border-color: color-mix(in srgb, var(--lift-c, var(--accent)) 42%, var(--line));
+  box-shadow:
+    var(--edge),
+    0 10px 30px -12px rgb(0 0 0 / 0.7),
+    0 0 0 1px color-mix(in srgb, var(--lift-c, var(--accent)) 10%, transparent);
+  transform: translateY(-2px);
+}
+.lift:hover::before {
+  opacity: 1;
+}
+.lift:active {
+  transform: translateY(0);
+  transition-duration: var(--t-fast);
+}
+
+/* Dialogs rise out of a blurred console. */
+dialog[open] {
+  animation: dialog-in 300ms var(--ease);
+}
+dialog::backdrop {
+  backdrop-filter: blur(5px) saturate(0.85);
+  animation: fade-in 260ms var(--ease);
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.965);
+  }
+}
+
+/* Numbers that just changed, badges that just appeared. */
+.bump {
+  animation: bump var(--t-slow) var(--ease-spring) backwards;
+}
+@keyframes bump {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+
+/* A bar that is working: light travels along it. */
+.sheen {
+  position: relative;
+  overflow: hidden;
+}
+.sheen::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+  transform: translateX(-100%);
+  animation: sheen 1.6s var(--ease) infinite;
+  content: '';
+}
+@keyframes sheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+details > summary {
+  cursor: pointer;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -802,5 +1028,18 @@ table.data tbody tr:hover td {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+  /* Entrances are decoration: without motion, things are simply there. */
+  .page-inner > *,
+  .stagger > * {
+    animation: none !important;
+  }
+  .lift:hover {
+    transform: none;
+  }
+  .sheen::after,
+  .dot.err::after,
+  .dot.busy::after {
+    display: none;
   }
 }

@@ -133,6 +133,7 @@
     max-width: 520px;
     padding: 24px;
     color: var(--fg-muted);
+    animation: rise var(--t-slow) var(--ease) backwards;
   }
   .welcome h1 {
     margin: 0 0 8px;

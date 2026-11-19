@@ -315,9 +315,10 @@
     display: grid;
     gap: 6px;
     padding: 14px 16px;
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
   }
   .log-bar {
     display: flex;

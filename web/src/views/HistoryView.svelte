@@ -130,6 +130,7 @@
     margin: 20vh auto 0;
     text-align: center;
     line-height: 1.5;
+    animation: rise var(--t-slow) var(--ease) backwards;
   }
   .hint :global(svg) {
     color: var(--fg-muted);

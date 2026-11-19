@@ -33,6 +33,10 @@
     background: var(--bg-active);
     border: 1px solid var(--line-strong);
     border-radius: 10px;
+    transition:
+      background 220ms var(--ease),
+      border-color 220ms var(--ease),
+      box-shadow 220ms var(--ease);
   }
   .switch:hover:not(:disabled) {
     background: #2d3845;
@@ -40,6 +44,7 @@
   .switch.on {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
+    box-shadow: 0 0 14px -3px color-mix(in srgb, var(--accent-strong) 90%, transparent);
   }
   .switch.on:hover:not(:disabled) {
     background: var(--accent-hover);
@@ -53,10 +58,19 @@
     background: var(--fg-strong);
     border-radius: 50%;
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
-    transition: transform var(--t) var(--ease);
+    transition:
+      transform 260ms var(--ease-spring),
+      width var(--t-fast) var(--ease);
   }
   .on .knob {
     transform: translateX(14px);
+  }
+  /* The knob squashes toward where it is about to go. */
+  .switch:active:not(:disabled) .knob {
+    width: 18px;
+  }
+  .switch.on:active:not(:disabled) .knob {
+    transform: translateX(10px);
   }
   .busy .knob {
     animation: pulse 0.9s ease-in-out infinite;

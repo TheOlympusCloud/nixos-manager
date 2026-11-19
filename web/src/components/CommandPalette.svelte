@@ -253,18 +253,22 @@
     padding: 0;
     overflow: hidden;
     color: var(--fg);
-    background: var(--bg-side);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+    background: color-mix(in srgb, var(--bg-side) 86%, transparent);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    box-shadow:
+      var(--edge),
+      var(--shadow-3),
+      0 0 80px -20px color-mix(in srgb, var(--accent-strong) 55%, transparent);
+    backdrop-filter: blur(22px) saturate(1.4);
   }
   .palette[open] {
-    animation: pal-in var(--t) var(--ease);
+    animation: pal-in 260ms var(--ease);
   }
   @keyframes pal-in {
     from {
       opacity: 0;
-      transform: translateY(-6px) scale(0.99);
+      transform: translateY(-14px) scale(0.965);
     }
   }
   .palette::backdrop {
@@ -320,12 +324,18 @@
     padding: 4px 10px;
     border-radius: var(--r);
     cursor: pointer;
+    transition: background 90ms var(--ease);
   }
   .opt[aria-selected='true'] {
-    background: var(--bg-active);
+    background: color-mix(in srgb, var(--accent) 13%, var(--bg-hover));
+    box-shadow: inset 2px 0 0 var(--accent);
   }
   .opt[aria-selected='true'] .ico {
     color: var(--accent);
+    transform: scale(1.1);
+  }
+  .ico {
+    transition: transform var(--t) var(--ease-spring);
   }
   .ico {
     display: grid;

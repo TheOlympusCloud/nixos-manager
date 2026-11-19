@@ -143,8 +143,8 @@
 
 <header class="topbar">
   <div class="where">
-    <span class="title">{titles[route.view]}</span>
-    {#if crumb}<Icon name="right" size={14} /><span class="crumb">{crumb}</span>{/if}
+    {#key route.view}<span class="title">{titles[route.view]}</span>{/key}
+    {#if crumb}<Icon name="right" size={14} />{#key crumb}<span class="crumb">{crumb}</span>{/key}{/if}
   </div>
 
   <span class="spacer"></span>
@@ -238,9 +238,32 @@
     align-items: center;
     gap: var(--s2);
     height: 48px;
+    position: relative;
+    z-index: 5; /* its menus open over the page */
     padding: 0 var(--s3) 0 var(--s4);
     background: var(--bg-deep);
     border-bottom: 1px solid var(--border);
+  }
+  /* A hairline of light under the bar, brightest where the title sits. */
+  .topbar::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 38%, transparent), transparent 46%);
+    content: '';
+    pointer-events: none;
+  }
+  .title,
+  .crumb {
+    animation: slide-in var(--t-slow) var(--ease) backwards;
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
   }
   .where {
     display: flex;
@@ -271,8 +294,14 @@
   .model {
     text-decoration: none;
     transition:
-      background var(--t-fast) var(--ease),
-      border-color var(--t-fast) var(--ease);
+      background var(--t) var(--ease),
+      border-color var(--t) var(--ease),
+      color var(--t) var(--ease),
+      box-shadow var(--t) var(--ease);
+  }
+  .model.warn:hover,
+  .model.err:hover {
+    box-shadow: 0 0 18px -4px color-mix(in srgb, currentColor 55%, transparent);
   }
   .model.ok {
     color: var(--fg);
@@ -362,11 +391,13 @@
     z-index: 50;
     width: 340px;
     padding: 6px;
-    background: var(--bg-raised);
+    background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
-    animation: drop var(--t) var(--ease);
+    box-shadow: var(--edge), var(--shadow-2);
+    backdrop-filter: blur(14px) saturate(1.3);
+    transform-origin: top right;
+    animation: drop 220ms var(--ease);
   }
   .menu.right {
     right: 0;
@@ -379,7 +410,7 @@
   @keyframes drop {
     from {
       opacity: 0;
-      transform: translateY(-4px);
+      transform: translateY(-6px) scale(0.97);
     }
   }
   .menu-title {

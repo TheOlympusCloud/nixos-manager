@@ -469,9 +469,10 @@
     gap: 12px;
     margin-top: 6px;
     padding: 14px;
-    background: var(--bg-raised);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+    box-shadow: var(--edge);
   }
   .note {
     display: flex;
