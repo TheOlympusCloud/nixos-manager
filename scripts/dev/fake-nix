@@ -1,0 +1,61 @@
+#!/bin/sh
+# Stand-in for nix during development and tests (never in production): answers the
+# app's evaluations from fixture files and echoes every other command.
+#   NIXMGR_FAKE_FIXTURES  fixture folder (default: internal/core/testdata/fleet)
+#   NIXMGR_FAKE_DELAY     seconds to wait per machine, to see progress in the UI
+dir=${NIXMGR_FAKE_FIXTURES:-$(dirname "$0")/../../internal/core/testdata/fleet}
+case "$*" in
+  *"nixmgr:discover"*)
+    # A file named BROKEN in the evaluated tree plays a flake with a syntax error.
+    if [ -f "${NIXMGR_FLAKE#path:}/BROKEN" ]; then
+      echo "error: syntax error, unexpected '}' at /nix/store/x-source/flake.nix:3:1" >&2
+      exit 1
+    fi
+    cat "$dir/discover.json" ;;
+  *"nixmgr:host"*)
+    sleep "${NIXMGR_FAKE_DELAY:-0}"
+    if [ -f "$dir/host-$NIXMGR_HOST.json" ]; then
+      cat "$dir/host-$NIXMGR_HOST.json"
+    else
+      printf 'error: infinite recursion encountered\n       at /nix/store/x-source/hosts/%s/default.nix:12:3\n' "$NIXMGR_HOST" >&2
+      exit 1
+    fi ;;
+  *"nixmgr:home"*) cat "$dir/home-$NIXMGR_HOST.json" ;;
+  *"nixmgr:values"*)
+    if [ ! -f "$dir/host-$NIXMGR_HOST.json" ]; then
+      printf 'error: infinite recursion encountered\n' >&2
+      exit 1
+    fi
+    python3 -I - "$dir/values.json" <<'PY'
+import json, os, sys
+data = json.load(open(sys.argv[1]))
+host = os.environ["NIXMGR_HOST"]
+# Settings in the host's managed.json win, as modules/managed.nix makes them do, and
+# are reported as defined in that file (the module sets _file).
+try:
+    flake = os.environ.get("NIXMGR_FLAKE", "").removeprefix("path:")
+    managed = json.load(open(os.path.join(flake, "hosts", host, "managed.json"))).get("settings") or {}
+except (OSError, ValueError):
+    managed = {}
+out = {}
+for path in json.loads(os.environ["NIXMGR_PATHS"]):
+    got = dict(data.get(".".join(path), {}).get(host, {"exists": False}))
+    node = managed
+    for seg in path:
+        node = node.get(seg) if isinstance(node, dict) else None
+    if node is not None and not isinstance(node, dict):
+        got.update(exists=True, value=node, files=["hosts/%s/managed.json" % host])
+        got.setdefault("type", "unspecified")
+    out[json.dumps(path, separators=(",", ":"))] = got
+print(json.dumps(out))
+PY
+    ;;
+  *"nixmgr:options"*) cat "$dir/options.json" ;;
+  *" search "*) cat "$dir/packages.json" ;;
+  *"flake lock"*)
+    echo "nix $*"
+    all="$*"
+    target="${all##*path:}"
+    [ -f "$target/flake.lock" ] || cp "$dir/flake.lock" "$target/flake.lock" ;;
+  *) echo "nix $*" ;;
+esac

@@ -1,0 +1,1179 @@
+{
+ "services.openssh.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "services.openssh.settings.PermitRootLogin": {
+  "workstation": {
+   "exists": true,
+   "value": "prohibit-password",
+   "files": [],
+   "type": "one of \"yes\", \"without-password\", \"prohibit-password\", \"forced-commands-only\", \"no\""
+  },
+  "homeserver": {
+   "exists": true,
+   "value": "no",
+   "files": [
+    "hosts/homeserver/default.nix"
+   ],
+   "type": "one of \"yes\", \"without-password\", \"prohibit-password\", \"forced-commands-only\", \"no\""
+  },
+  "pi": {
+   "exists": true,
+   "value": "yes",
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "type": "one of \"yes\", \"without-password\", \"prohibit-password\", \"forced-commands-only\", \"no\""
+  }
+ },
+ "services.openssh.settings.PasswordAuthentication": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [],
+   "type": "null or boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [
+    "hosts/homeserver/default.nix"
+   ],
+   "type": "null or boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [],
+   "type": "null or boolean"
+  }
+ },
+ "time.timeZone": {
+  "workstation": {
+   "exists": true,
+   "value": "Europe/Madrid",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "null or string without spaces"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": "Europe/Madrid",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "null or string without spaces"
+  },
+  "pi": {
+   "exists": true,
+   "value": "Europe/Madrid",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "null or string without spaces"
+  }
+ },
+ "i18n.defaultLocale": {
+  "workstation": {
+   "exists": true,
+   "value": "es_ES.UTF-8",
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "type": "string"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": "en_US.UTF-8",
+   "files": [],
+   "type": "string"
+  },
+  "pi": {
+   "exists": true,
+   "value": "en_US.UTF-8",
+   "files": [],
+   "type": "string"
+  }
+ },
+ "console.keyMap": {
+  "workstation": {
+   "exists": true,
+   "value": "es",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string or path"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": "es",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string or path"
+  },
+  "pi": {
+   "exists": true,
+   "value": "es",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string or path"
+  }
+ },
+ "networking.firewall.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "networking.firewall.allowedTCPPorts": {
+  "workstation": {
+   "exists": true,
+   "value": [
+    22
+   ],
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "list of 16 bit unsigned integer; between 0 and 65535 (both inclusive)"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": [
+    22,
+    80,
+    443,
+    3000,
+    8096
+   ],
+   "files": [
+    "modules/common.nix",
+    "hosts/homeserver/default.nix",
+    "nixos"
+   ],
+   "type": "list of 16 bit unsigned integer; between 0 and 65535 (both inclusive)"
+  },
+  "pi": {
+   "exists": true,
+   "value": [
+    22,
+    1883,
+    8123
+   ],
+   "files": [
+    "modules/common.nix",
+    "hosts/pi/default.nix"
+   ],
+   "type": "list of 16 bit unsigned integer; between 0 and 65535 (both inclusive)"
+  }
+ },
+ "nix.gc.automatic": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "nix.gc.dates": {
+  "workstation": {
+   "exists": true,
+   "value": "weekly",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": "weekly",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string"
+  },
+  "pi": {
+   "exists": true,
+   "value": "03:15",
+   "files": [],
+   "type": "string"
+  }
+ },
+ "nix.gc.options": {
+  "workstation": {
+   "exists": true,
+   "value": "--delete-older-than 14d",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": "--delete-older-than 14d",
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "string"
+  },
+  "pi": {
+   "exists": true,
+   "value": "",
+   "files": [],
+   "type": "string"
+  }
+ },
+ "nix.optimise.automatic": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "zramSwap.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/workstation/default.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "services.fail2ban.enable": {
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/server.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.tailscale.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "system.autoUpgrade.enable": {
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "boot.loader.systemd-boot.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/workstation/hardware-configuration.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/homeserver/hardware-configuration.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "programs.zsh.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "services.printing.enable": {
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "type": "boolean"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "users.users.pablo.openssh.authorizedKeys.keys": {
+  "workstation": {
+   "exists": true,
+   "value": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeExampleKeyForTheFixtureFleetOnly pablo@workstation"
+   ],
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "list of (optionally newline-terminated) single-line string"
+  },
+  "homeserver": {
+   "exists": true,
+   "value": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeExampleKeyForTheFixtureFleetOnly pablo@workstation"
+   ],
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "list of (optionally newline-terminated) single-line string"
+  },
+  "pi": {
+   "exists": true,
+   "value": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeExampleKeyForTheFixtureFleetOnly pablo@workstation"
+   ],
+   "files": [
+    "modules/common.nix"
+   ],
+   "type": "list of (optionally newline-terminated) single-line string"
+  }
+ },
+ "services.jellyfin.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/homeserver/managed.json"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.jellyfin.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/homeserver/managed.json"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.immich.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.immich.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.syncthing.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.syncthing.openDefaultPorts": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.samba.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.samba.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.home-assistant.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.home-assistant.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/pi/default.nix"
+   ],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.adguardhome.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.adguardhome.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.avahi.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.avahi.nssmdns4": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.avahi.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.docker.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "hosts/workstation/managed.json"
+   ],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.podman.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/server.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.podman.dockerCompat": {
+  "homeserver": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/server.nix"
+   ],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "virtualisation.libvirtd.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "programs.virt-manager.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.cockpit.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.cockpit.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.prometheus.exporters.node.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.prometheus.exporters.node.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.smartd.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.postgresql.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.ollama.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.open-webui.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.open-webui.openFirewall": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "services.flatpak.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ },
+ "hardware.bluetooth.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "hardware.bluetooth.powerOnBoot": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": true,
+   "files": [
+    "modules/desktop.nix"
+   ],
+   "type": "boolean"
+  }
+ },
+ "services.fwupd.enable": {
+  "homeserver": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "pi": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  },
+  "workstation": {
+   "exists": true,
+   "value": false,
+   "files": [],
+   "type": "boolean"
+  }
+ }
+}

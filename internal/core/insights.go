@@ -1,0 +1,356 @@
+package core
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Insight is a health or consistency finding about the fleet, with a fix
+// the console can apply by clicking when there is one.
+type Insight struct {
+	ID       string      `json:"id"`
+	Severity string      `json:"severity"` // error, warning, info
+	Title    string      `json:"title"`
+	Detail   string      `json:"detail"`
+	Hosts    []string    `json:"hosts"`
+	Fix      *InsightFix `json:"fix,omitempty"`
+	// NoSSHKey: affected machines where no user has an SSH key, so a keys-only fix
+	// would lock everyone out; add a key before applying the fix there.
+	NoSSHKey []string `json:"noSshKey,omitempty"`
+	Link     string   `json:"link,omitempty"` // a console route with more about it, e.g. #/deployments
+}
+
+// InsightFix either sets options in each affected machine's managed.json or updates a flake input.
+type InsightFix struct {
+	Label       string    `json:"label"`
+	Settings    []Setting `json:"settings,omitempty"`
+	UpdateInput string    `json:"updateInput,omitempty"`
+}
+
+type Setting struct {
+	Path  []string `json:"path"`
+	Value any      `json:"value"`
+}
+
+var severityRank = map[string]int{"error": 0, "warning": 1, "info": 2}
+
+// Insights checks the evaluated fleet and what its machines deployed; origin is
+// the remote this console pushes to ("" for none), and now dates the flake
+// inputs and the deployments.
+func Insights(m *Model, deploys []MachineDeployment, origin string, now time.Time) []Insight {
+	out := []Insight{}
+	add := func(in Insight) { // only when some machine is affected
+		if len(in.Hosts) > 0 {
+			out = append(out, in)
+		}
+	}
+	var healthy []Host
+	var broken []string
+	for _, h := range m.Hosts {
+		if h.Error != "" {
+			broken = append(broken, h.Name)
+		} else {
+			healthy = append(healthy, h)
+		}
+	}
+	where := func(f func(Host) bool) []string {
+		hosts := []string{}
+		for _, h := range healthy {
+			if f(h) {
+				hosts = append(hosts, h.Name)
+			}
+		}
+		return hosts
+	}
+	if len(broken) > 0 {
+		out = append(out, Insight{ID: "eval-error", Severity: "error", Hosts: broken,
+			Title:  fmt.Sprintf("%s does not evaluate", list(broken)),
+			Detail: "Nix cannot build the configuration, so nothing about it can be shown or deployed. Open the machine to see the error."})
+	}
+	add(Insight{ID: "firewall-off", Severity: "warning", Hosts: where(func(h Host) bool { return !h.Ports.Firewall }),
+		Title:  "Firewall disabled",
+		Detail: "Every port a service opens is reachable from the network.",
+		Fix:    &InsightFix{Label: "Turn the firewall on", Settings: []Setting{{Path: []string{"networking", "firewall", "enable"}, Value: true}}}})
+	// Keys-only SSH locks a machine whose users have no key: tell every client, the MCP ones too.
+	keysFirst := func(in Insight) Insight {
+		for _, h := range healthy {
+			if slices.Contains(in.Hosts, h.Name) && (h.Checks.SSHUserKeys == nil || *h.Checks.SSHUserKeys == 0) {
+				in.NoSSHKey = append(in.NoSSHKey, h.Name)
+			}
+		}
+		return in
+	}
+	add(keysFirst(Insight{ID: "ssh-password", Severity: "warning",
+		Hosts: where(func(h Host) bool {
+			return h.Checks.SSH && (h.Checks.SSHPasswordAuthentication == nil || *h.Checks.SSHPasswordAuthentication)
+		}),
+		Title:  "SSH accepts passwords",
+		Detail: "Password logins invite brute-force attempts. Make sure your SSH key is authorized first, then allow keys only.",
+		Fix:    &InsightFix{Label: "Allow SSH keys only", Settings: []Setting{{Path: []string{"services", "openssh", "settings", "PasswordAuthentication"}, Value: false}}}}))
+	add(keysFirst(Insight{ID: "ssh-root-login", Severity: "warning",
+		Hosts: where(func(h Host) bool {
+			return h.Checks.SSH && h.Checks.SSHPermitRootLogin != nil && *h.Checks.SSHPermitRootLogin == "yes"
+		}),
+		Title:  "SSH allows root logins",
+		Detail: "Log in as a user and use sudo instead.",
+		Fix:    &InsightFix{Label: "Forbid root logins", Settings: []Setting{{Path: []string{"services", "openssh", "settings", "PermitRootLogin"}, Value: "no"}}}}))
+	add(Insight{ID: "ssh-no-fail2ban", Severity: "info", Hosts: where(func(h Host) bool { return h.Checks.SSH && !h.Checks.Fail2ban }),
+		Title:  "SSH without fail2ban",
+		Detail: "fail2ban blocks addresses that keep failing to log in.",
+		Fix:    &InsightFix{Label: "Enable fail2ban", Settings: []Setting{{Path: []string{"services", "fail2ban", "enable"}, Value: true}}}})
+	add(Insight{ID: "no-auto-gc", Severity: "info", Hosts: where(func(h Host) bool { return !h.Checks.AutoGC }),
+		Title:  "No automatic garbage collection",
+		Detail: "Old generations pile up in /nix/store until the disk fills.",
+		Fix: &InsightFix{Label: "Collect weekly, keep 14 days", Settings: []Setting{
+			{Path: []string{"nix", "gc", "automatic"}, Value: true},
+			{Path: []string{"nix", "gc", "dates"}, Value: "weekly"},
+			{Path: []string{"nix", "gc", "options"}, Value: "--delete-older-than 14d"},
+		}}})
+	add(Insight{ID: "no-store-optimise", Severity: "info", Hosts: where(func(h Host) bool { return !h.Checks.AutoOptimise }),
+		Title:  "Store not optimised",
+		Detail: "Identical files in /nix/store are kept as separate copies; optimising hard-links them and saves space.",
+		Fix:    &InsightFix{Label: "Optimise the store automatically", Settings: []Setting{{Path: []string{"nix", "optimise", "automatic"}, Value: true}}}})
+	for _, in := range m.Inputs {
+		if in.LastModified == 0 {
+			continue
+		}
+		days := int(now.Sub(time.Unix(in.LastModified, 0)).Hours() / 24)
+		sev := ""
+		switch {
+		case days > 60:
+			sev = "warning"
+		case days > 30:
+			sev = "info"
+		}
+		if sev != "" {
+			out = append(out, Insight{ID: "input-old:" + in.Name, Severity: sev, Hosts: []string{},
+				Title:  fmt.Sprintf("%s is %d days old", in.Name, days),
+				Detail: "Updating brings security fixes and new versions; check the result before committing.",
+				Fix:    &InsightFix{Label: "Update " + in.Name, UpdateInput: in.Name}})
+		}
+	}
+	add(Insight{ID: "not-managed", Severity: "info", Hosts: where(func(h Host) bool { return h.ManagedFile == nil }),
+		Title:  "Visual editing off",
+		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
+	out = append(out, missingPackages(healthy)...)
+	out = append(out, releaseInsights(healthy, now)...)
+	out = append(out, deployInsights(m, deploys, now)...)
+	out = append(out, cominInsights(healthy, origin)...)
+	slices.SortStableFunc(out, func(a, b Insight) int {
+		if d := severityRank[a.Severity] - severityRank[b.Severity]; d != 0 {
+			return d
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out
+}
+
+// missingPackages finds repository packages that every healthy machine has but one.
+func missingPackages(healthy []Host) []Insight {
+	if len(healthy) < 3 {
+		return nil
+	}
+	count := map[string]int{}
+	for _, h := range healthy {
+		for _, p := range h.Packages {
+			if slices.ContainsFunc(p.Files, func(f string) bool { return f != "nixos" }) {
+				count[p.Name]++
+			}
+		}
+	}
+	var out []Insight
+	for name, n := range count {
+		if n != len(healthy)-1 {
+			continue
+		}
+		for _, h := range healthy {
+			if !slices.ContainsFunc(h.Packages, func(p Package) bool { return p.Name == name }) {
+				out = append(out, Insight{ID: "missing-package:" + name, Severity: "info", Hosts: []string{h.Name},
+					Title:  fmt.Sprintf("%s is on every machine except %s", name, h.Name),
+					Detail: "Probably an oversight; add it if this machine should match the others."})
+			}
+		}
+	}
+	return out
+}
+
+// releaseEnd is when a NixOS release ("26.05", "26.11pre-git") stops getting
+// updates: seven months after it comes out, at the end of a month.
+func releaseEnd(release string) (time.Time, bool) {
+	var yy, mm int
+	if len(release) < 5 {
+		return time.Time{}, false
+	}
+	if _, err := fmt.Sscanf(release[:5], "%2d.%2d", &yy, &mm); err != nil || (mm != 5 && mm != 11) {
+		return time.Time{}, false
+	}
+	return time.Date(2000+yy, time.Month(mm+8), 1, 0, 0, 0, 0, time.UTC), true
+}
+
+// releaseInsights flags unsupported or soon unsupported NixOS releases, and a fleet on several.
+func releaseInsights(healthy []Host, now time.Time) []Insight {
+	var eol, soon, olds []string
+	var eolRel, soonRel []string
+	newest := ""
+	for _, h := range healthy {
+		if _, ok := releaseEnd(h.Release); ok && h.Release[:5] > newest {
+			newest = h.Release[:5]
+		}
+	}
+	for _, h := range healthy {
+		end, ok := releaseEnd(h.Release)
+		if !ok {
+			continue
+		}
+		rel := h.Release[:5]
+		switch {
+		case !now.Before(end):
+			eol = append(eol, h.Name)
+			if !slices.Contains(eolRel, rel) {
+				eolRel = append(eolRel, rel)
+			}
+		case now.After(end.AddDate(0, 0, -31)):
+			soon = append(soon, h.Name)
+			if !slices.Contains(soonRel, rel) {
+				soonRel = append(soonRel, rel)
+			}
+		}
+		if rel != newest {
+			olds = append(olds, h.Name)
+		}
+	}
+	var out []Insight
+	if len(eol) > 0 {
+		out = append(out, Insight{ID: "release-eol", Severity: "warning", Hosts: eol,
+			Title:  fmt.Sprintf("NixOS %s no longer %s security updates", list(eolRel), map[bool]string{true: "gets", false: "get"}[len(eolRel) == 1]),
+			Detail: "Point the nixpkgs input in flake.nix at a supported release branch, read its release notes, then check the machines before deploying."})
+	}
+	if len(soon) > 0 {
+		end, _ := releaseEnd(soonRel[0])
+		out = append(out, Insight{ID: "release-eol-soon", Severity: "info", Hosts: soon,
+			Title:  fmt.Sprintf("NixOS %s support ends on %s", list(soonRel), end.AddDate(0, 0, -1).Format("2 Jan 2006")),
+			Detail: "Plan the move to the next release: switch the nixpkgs input to its branch and check the machines."})
+	}
+	if len(olds) > 0 {
+		out = append(out, Insight{ID: "release-mixed", Severity: "info", Hosts: olds,
+			Title:  "Machines run different NixOS releases",
+			Detail: fmt.Sprintf("The newest is %s. Mixed releases mean different package versions and options across the fleet.", newest)})
+	}
+	return out
+}
+
+// cominInsights: a push only deploys machines whose comin pulls the repository this console pushes to.
+func cominInsights(healthy []Host, origin string) []Insight {
+	off, other := []string{}, []string{}
+	var elsewhere string
+	o, err := ParseRemote(origin)
+	known := err == nil && o.Kind != "local"
+	for _, h := range healthy {
+		if !h.Checks.Comin {
+			off = append(off, h.Name)
+			continue
+		}
+		if !known || len(h.Checks.CominRemotes) == 0 {
+			continue
+		}
+		match := false
+		for _, r := range h.Checks.CominRemotes {
+			if c, err := ParseRemote(r); err == nil && strings.EqualFold(c.Host, o.Host) && strings.EqualFold(c.Path, o.Path) {
+				match = true
+			}
+		}
+		if !match {
+			other = append(other, h.Name)
+			if elsewhere == "" {
+				elsewhere = h.Checks.CominRemotes[0]
+			}
+		}
+	}
+	var out []Insight
+	if len(off) > 0 {
+		out = append(out, Insight{ID: "no-comin", Severity: "warning", Hosts: off,
+			Title:  "Pushes don't reach these machines",
+			Detail: "comin is off on them, so they change only when someone runs nixos-rebuild there. Turn on services.comin with the Forgejo repository as its remote (the starter fleet does it in modules/common.nix)."})
+	}
+	if len(other) > 0 {
+		out = append(out, Insight{ID: "comin-other-repo", Severity: "warning", Hosts: other,
+			Title:  "comin pulls another repository",
+			Detail: fmt.Sprintf("These machines deploy from %s, not from the repository this console pushes to, so changes made here never reach them. Point services.comin.remotes at the Forgejo repository.", elsewhere)})
+	}
+	return out
+}
+
+func list(xs []string) string {
+	if len(xs) <= 2 {
+		return strings.Join(xs, " and ")
+	}
+	return strings.Join(xs[:len(xs)-1], ", ") + " and " + xs[len(xs)-1]
+}
+
+// deployInsights flags fleet machines whose last deployment failed, that lag
+// behind their branch, or that stopped reporting while others report.
+func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
+	var out []Insight
+	var behind, silent, never []string
+	reporting := false
+	for _, d := range deploys {
+		reporting = reporting || len(d.Reports) > 0
+		if !slices.ContainsFunc(m.Hosts, func(h Host) bool { return h.Name == d.Host }) {
+			continue // reported by a machine that is not in this fleet (any more)
+		}
+		switch {
+		case d.State == "failed" && d.Failure != nil:
+			f := d.Failure
+			what := "deploy"
+			if f.Phase == "build" {
+				what = "build"
+			}
+			runs := "It has not deployed anything successfully yet."
+			if d.Commit != "" {
+				runs = fmt.Sprintf("It still runs %.7s.", d.Commit)
+			}
+			msg, _, more := strings.Cut(strings.TrimSpace(f.Error), "\n") // the rest is on Deployments
+			if len(msg) > 240 {
+				msg, more = strings.ToValidUTF8(msg[:240], ""), true
+			}
+			if more {
+				msg += "…"
+			}
+			if msg == "" {
+				msg = "comin gave no error message."
+			}
+			out = append(out, Insight{ID: "deploy-failed:" + d.Host, Severity: "error", Hosts: []string{d.Host}, Link: "#/deployments",
+				Title:  fmt.Sprintf("%s failed to %s %.7s", d.Host, what, f.Commit),
+				Detail: fmt.Sprintf("%s %s Deployments shows the error; journalctl -u comin on the machine has the whole log.", msg, runs)})
+		case d.State == "behind" && now.Sub(d.BehindSince) > behindAfter:
+			behind = append(behind, d.Host)
+		case d.State == "never":
+			never = append(never, d.Host)
+		case d.State == "silent":
+			silent = append(silent, d.Host)
+		}
+	}
+	are := func(hs []string) string { return map[bool]string{true: "has", false: "have"}[len(hs) == 1] }
+	if len(behind) > 0 {
+		it, runs, them := "They", "run", "them"
+		if len(behind) == 1 {
+			it, runs, them = "It", "runs", "it"
+		}
+		out = append(out, Insight{ID: "deploy-behind", Severity: "warning", Hosts: behind, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s not caught up for over an hour", list(behind), are(behind)),
+			Detail: fmt.Sprintf("%s still %s an older commit of the branch comin follows. comin may fail to evaluate or build the new one (older comin versions do not report that), or cannot reach Forgejo: run journalctl -u comin on %s.", it, runs, them)})
+	}
+	if reporting && len(silent) > 0 {
+		out = append(out, Insight{ID: "deploy-silent", Severity: "info", Hosts: silent, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s not reported a deployment in 7 days", list(silent), are(silent)),
+			Detail: "They reported before. Check that they are on, that comin runs, and that they still reach this console."})
+	}
+	if reporting && len(never) > 0 {
+		out = append(out, Insight{ID: "deploy-never", Severity: "info", Hosts: never, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s never reported a deployment", list(never), are(never)),
+			Detail: "Other machines report what they deploy. Put the report token on these (Deployments shows how); the next deployment then reports."})
+	}
+	return out
+}
