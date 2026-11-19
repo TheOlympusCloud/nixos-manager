@@ -8,6 +8,7 @@
   import Icon from '../Icon.svelte'
   import OptionBrowser from '../OptionBrowser.svelte'
   import SourceTag from '../SourceTag.svelte'
+  import ServiceCatalog from './ServiceCatalog.svelte'
   import Switch from '../Switch.svelte'
 
   let { host }: { host: Host } = $props()
@@ -16,7 +17,7 @@
 
   let filter = $state('')
   let busy = $state('')
-  let drawer = $state<null | { kind: 'add' } | { kind: 'configure'; f: Card }>(null)
+  let drawer = $state<null | { kind: 'add' } | { kind: 'catalog' } | { kind: 'configure'; f: Card }>(null)
   let selected = $state('')
 
   const editable = $derived(!!host.managedFile && !!fleet.managed[host.name])
@@ -65,6 +66,7 @@
   {#if fleet.computing && cards.some((f) => pendingOf(f))}<span class="badge busy">Re-evaluating {host.name}</span>{/if}
   <span class="spacer"></span>
   {#if host.managedFile}
+    <button disabled={!editable} onclick={() => (drawer = { kind: 'catalog' })}><Icon name="grid" size={14} />Popular services</button>
     <button class="primary" disabled={!editable} onclick={() => (drawer = { kind: 'add' })}><Icon name="plus" size={14} />Add service or program</button>
   {:else}
     <span class="muted small">{host.name} is Code only: <a href={machineLink(host.name)}>turn on editing</a> to switch services by clicking.</span>
@@ -120,6 +122,10 @@
 {#if drawer?.kind === 'add'}
   <Drawer title="Add a service or program to {host.name}" onclose={() => (drawer = null)} width={560}>
     <OptionBrowser host={host.name} enable stacked />
+  </Drawer>
+{:else if drawer?.kind === 'catalog'}
+  <Drawer title="Popular services for {host.name}" onclose={() => (drawer = null)} width={560}>
+    <ServiceCatalog {host} />
   </Drawer>
 {:else if drawer?.kind === 'configure'}
   <Drawer title="Configure {drawer.f.name} on {host.name}" onclose={() => (drawer = null)} width={720}>
