@@ -234,7 +234,7 @@ func New(svc *core.Service, version string) *mcp.Server {
 		}
 		return out, nil
 	})
-	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine), each with a suggested fix.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
+	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine), each with a suggested fix. noSshKey lists machines where no user has an SSH key: do not apply an SSH fix there before adding one, or nobody can log in.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
 		m, err := working(ctx)
 		if err != nil {
 			return nil, err

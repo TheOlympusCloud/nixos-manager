@@ -16,6 +16,9 @@ type Insight struct {
 	Detail   string      `json:"detail"`
 	Hosts    []string    `json:"hosts"`
 	Fix      *InsightFix `json:"fix,omitempty"`
+	// NoSSHKey: affected machines where no user has an SSH key, so a keys-only fix
+	// would lock everyone out; add a key before applying the fix there.
+	NoSSHKey []string `json:"noSshKey,omitempty"`
 }
 
 // InsightFix either sets options in each affected machine's managed.json or updates a flake input.
@@ -67,20 +70,29 @@ func Insights(m *Model, now time.Time) []Insight {
 		Title:  "Firewall disabled",
 		Detail: "Every port a service opens is reachable from the network.",
 		Fix:    &InsightFix{Label: "Turn the firewall on", Settings: []Setting{{Path: []string{"networking", "firewall", "enable"}, Value: true}}}})
-	add(Insight{ID: "ssh-password", Severity: "warning",
+	// Keys-only SSH locks a machine whose users have no key: tell every client, the MCP ones too.
+	keysFirst := func(in Insight) Insight {
+		for _, h := range healthy {
+			if slices.Contains(in.Hosts, h.Name) && (h.Checks.SSHUserKeys == nil || *h.Checks.SSHUserKeys == 0) {
+				in.NoSSHKey = append(in.NoSSHKey, h.Name)
+			}
+		}
+		return in
+	}
+	add(keysFirst(Insight{ID: "ssh-password", Severity: "warning",
 		Hosts: where(func(h Host) bool {
 			return h.Checks.SSH && (h.Checks.SSHPasswordAuthentication == nil || *h.Checks.SSHPasswordAuthentication)
 		}),
 		Title:  "SSH accepts passwords",
 		Detail: "Password logins invite brute-force attempts. Make sure your SSH key is authorized first, then allow keys only.",
-		Fix:    &InsightFix{Label: "Allow SSH keys only", Settings: []Setting{{Path: []string{"services", "openssh", "settings", "PasswordAuthentication"}, Value: false}}}})
-	add(Insight{ID: "ssh-root-login", Severity: "warning",
+		Fix:    &InsightFix{Label: "Allow SSH keys only", Settings: []Setting{{Path: []string{"services", "openssh", "settings", "PasswordAuthentication"}, Value: false}}}}))
+	add(keysFirst(Insight{ID: "ssh-root-login", Severity: "warning",
 		Hosts: where(func(h Host) bool {
 			return h.Checks.SSH && h.Checks.SSHPermitRootLogin != nil && *h.Checks.SSHPermitRootLogin == "yes"
 		}),
 		Title:  "SSH allows root logins",
 		Detail: "Log in as a user and use sudo instead.",
-		Fix:    &InsightFix{Label: "Forbid root logins", Settings: []Setting{{Path: []string{"services", "openssh", "settings", "PermitRootLogin"}, Value: "no"}}}})
+		Fix:    &InsightFix{Label: "Forbid root logins", Settings: []Setting{{Path: []string{"services", "openssh", "settings", "PermitRootLogin"}, Value: "no"}}}}))
 	add(Insight{ID: "ssh-no-fail2ban", Severity: "info", Hosts: where(func(h Host) bool { return h.Checks.SSH && !h.Checks.Fail2ban }),
 		Title:  "SSH without fail2ban",
 		Detail: "fail2ban blocks addresses that keep failing to log in.",

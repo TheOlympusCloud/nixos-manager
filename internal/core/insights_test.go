@@ -9,6 +9,16 @@ import (
 func managed(name string) *string { p := "hosts/" + name + "/managed.json"; return &p }
 func bp(b bool) *bool             { return &b }
 func sp(s string) *string         { return &s }
+func ip(n int) *int               { return &n }
+
+func insightByID(in []Insight, id string) Insight {
+	for _, x := range in {
+		if x.ID == id {
+			return x
+		}
+	}
+	return Insight{}
+}
 
 func TestInsights(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
@@ -67,6 +77,13 @@ func TestInsights(t *testing.T) {
 	}
 	if in := byID["ssh-password"]; len(in.Hosts) != 1 || in.Hosts[0] != "pi" || in.Fix == nil || strings.Join(in.Fix.Settings[0].Path, ".") != "services.openssh.settings.PasswordAuthentication" || in.Fix.Settings[0].Value != false {
 		t.Errorf("ssh-password insight %+v", in)
+	}
+	if in := byID["ssh-password"]; len(in.NoSSHKey) != 1 || in.NoSSHKey[0] != "pi" {
+		t.Errorf("pi's key count is unknown, so the fix must warn about it: %v", in.NoSSHKey)
+	}
+	m.Hosts[1].Checks.SSHUserKeys = ip(2)
+	if in := insightByID(Insights(m, now), "ssh-password"); in.NoSSHKey != nil {
+		t.Errorf("pi has keys now: %v", in.NoSSHKey)
 	}
 	if in := byID["no-auto-gc"]; len(in.Hosts) != 1 || in.Hosts[0] != "pi" || len(in.Fix.Settings) != 3 {
 		t.Errorf("gc insight should only list pi (server and laptop collect garbage) and set gc fully: %+v", in)
