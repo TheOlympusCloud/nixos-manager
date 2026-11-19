@@ -1,5 +1,5 @@
 // Fleet matrices: packages × machines and features × machines.
-import type { Feature, FeatureGroup, Host, HostDiff } from './api'
+import type { Feature, FeatureGroup, Host } from './api'
 import { isRepoFile } from './graph'
 
 export type PkgCell = { version: string; files: string[]; managed: boolean }
@@ -40,34 +40,4 @@ export function featureMatrix(hosts: Host[]): FeatRow[] {
   })
   const rank = (g: FeatureGroup) => (groupOrder.indexOf(g) + 5) % 5 // unknown groups last
   return [...rows.values()].sort((a, b) => rank(a.group) - rank(b.group) || a.name.localeCompare(b.name))
-}
-
-// ---- model diff (working copy against the last commit) ----
-
-export type DiffPart = { label: string; added: string[]; removed: string[] }
-
-/** The non-empty parts of a machine's diff, in a fixed order. */
-export function diffParts(d: HostDiff): DiffPart[] {
-  return [
-    { label: 'Packages', added: d.packagesAdded ?? [], removed: d.packagesRemoved ?? [] },
-    { label: 'Features', added: d.featuresAdded ?? [], removed: d.featuresRemoved ?? [] },
-    { label: 'Users', added: d.usersAdded ?? [], removed: d.usersRemoved ?? [] },
-    { label: 'Ports', added: d.portsAdded ?? [], removed: d.portsRemoved ?? [] },
-  ].filter((p) => p.added.length || p.removed.length)
-}
-
-/** One line for a machine's diff, e.g. "+2 −1 packages · +1 features". */
-export function diffSummary(d: HostDiff): string {
-  if (d.status === 'unchanged') return 'No changes'
-  if (d.status === 'error') return 'Does not evaluate'
-  const parts = diffParts(d).map((p) => [p.added.length && `+${p.added.length}`, p.removed.length && `−${p.removed.length}`, p.label.toLowerCase()].filter(Boolean).join(' '))
-  const lead = d.status === 'added' ? 'New machine' : d.status === 'removed' ? 'Machine removed' : ''
-  return [lead, ...parts].filter(Boolean).join(' · ') || 'Changed'
-}
-
-/** Changed machines first (errors, then added, changed, removed), unchanged ones apart. */
-export function splitDiffs(ds: HostDiff[]): { changed: HostDiff[]; unchanged: HostDiff[] } {
-  const order = ['error', 'added', 'changed', 'removed']
-  const changed = ds.filter((d) => d.status !== 'unchanged').sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || a.host.localeCompare(b.host))
-  return { changed, unchanged: ds.filter((d) => d.status === 'unchanged') }
 }

@@ -10,7 +10,9 @@
   import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import { startJob } from '../../lib/state.svelte'
   import { copyText } from '../../lib/util'
+  import { sourceOf } from '../../lib/values'
   import Icon from '../Icon.svelte'
+  import SourceTag from '../SourceTag.svelte'
   import Switch from '../Switch.svelte'
 
   let { node, model, onclose }: { node: GNode; model: Model; onclose: () => void } = $props()
@@ -32,13 +34,6 @@
   let copied = $state(false)
 </script>
 
-{#snippet fileChip(f: string)}
-  {#if isRepoFile(f)}
-    <a class="chip mono" href={codeLink(f)} title="Open {f} in Code">{f}</a>
-  {:else}
-    <span class="chip" title="Set by NixOS or a flake input, not by this repository">NixOS default</span>
-  {/if}
-{/snippet}
 
 <aside class="inspector" aria-label="Details" transition:fly={{ x: 24, duration: 180 }}>
   <header>
@@ -66,7 +61,10 @@
           <dt>NixOS</dt><dd>{h.release} <span class="muted">(state {h.stateVersion})</span></dd>
           {#if h.kernel}<dt>Kernel</dt><dd>{h.kernel}</dd>{/if}
           {#if h.timeZone}<dt>Time zone</dt><dd>{h.timeZone}</dd>{/if}
-          <dt>Editing</dt><dd>{h.managedFile ? 'Managed' : 'Code only'}</dd>
+          <dt>Editing</dt>
+          <dd>
+            {#if h.managedFile}Editable here{:else}Code only <a class="hint" href={machineLink(h.name)} title="This machine does not load its managed.json; the machine page shows how to turn editing on">Turn on editing</a>{/if}
+          </dd>
         </dl>
         <h3>{plural(h.features.length, 'feature')}</h3>
         <div class="chips">
@@ -90,25 +88,33 @@
           <!-- The managed file is the truth for the switch: the model may still be re-evaluating. -->
           {@const fromManaged = fleet.managed[h.name] ? managedValue(h.name, enablePath(n.group, n.name)) === true : !!has && !!h.managedFile && has.files.includes(h.managedFile)}
           {@const handWritten = !!has && has.files.some((f) => isRepoFile(f) && f !== h.managedFile)}
-          <li class:off={!has}>
+          {@const setHere = !!has && !!h.managedFile && has.files.includes(h.managedFile)}
+          {@const byDefault = !!has && !handWritten && !fromManaged && !setHere}
+          <!-- Switched here since the last evaluation: the switch is the truth until the new one lands. -->
+          {@const waiting = fleet.pending.includes(h.name) && !!h.managedFile && !handWritten && !byDefault && fromManaged !== !!has}
+          <li class:off={!has && !waiting}>
             <div class="row-main">
               <a class="host" href={machineLink(h.name, 'services')}>{h.name}</a>
-              {#if has}
-                <div class="chips">{#each has.files as f (f)}{@render fileChip(f)}{/each}</div>
+              {#if waiting}
+                <span class="pending small"><span class="dot busy"></span>{fromManaged ? 'Turning on' : 'Turning off'}; re-evaluating…</span>
+              {:else if has}
+                <span class="src-line"><SourceTag source={sourceOf(has.files, h.managedFile)} /></span>
               {:else}
                 <span class="muted small">Not enabled</span>
               {/if}
             </div>
-            {#if h.managedFile && !handWritten}
+            {#if byDefault}
+              <span class="muted small side" title="NixOS or a flake input turns it on">On by default</span>
+            {:else if h.managedFile && !handWritten}
               <Switch
-                checked={fromManaged}
-                busy={busy === h.name}
+                checked={waiting ? fromManaged : fromManaged || setHere}
+                busy={busy === h.name || (waiting && fleet.computing)}
                 label="{n.name} on {h.name}"
                 onchange={(on) => run(h.name, () => toggleFeature(h.name, n.group, n.name, on))} />
             {:else if handWritten}
-              <span class="muted small" title="Turn it off in the file that enables it">In code</span>
+              <span class="muted small side" title="Enabled in a hand-written file: change it there">Change in code</span>
             {:else}
-              <span class="muted small" title="This machine does not load a managed file">Code only</span>
+              <a class="muted small side" href={machineLink(h.name)} title="This machine does not load its managed.json: turn on editing from its page">Code only</a>
             {/if}
           </li>
         {/each}
@@ -164,7 +170,7 @@
           <li>
             <div class="row-main">
               <span class="host-line"><a class="host" href={machineLink(ref.host, 'packages')}>{ref.host}</a><span class="mono small muted">{ref.version}</span></span>
-              <div class="chips">{#each ref.files as f (f)}{@render fileChip(f)}{/each}</div>
+              <span class="src-line"><SourceTag source={sourceOf(ref.files, h?.managedFile ?? null)} /></span>
             </div>
             {#if managed}
               <button class="small" disabled={busy === ref.host} onclick={() => run(ref.host, () => removePackageByName(ref.host, name))}>Remove</button>
@@ -181,7 +187,7 @@
     {:else if node.kind === 'user'}
       {#each node.hosts as { host, user } (host)}
         <section class="block">
-          <h3><a class="host" href={machineLink(host, 'users')}>{host}</a>{#if user.description}<span class="muted"> · {user.description}</span>{/if}</h3>
+          <h3><a class="host" href={machineLink(host, 'users')}>{host}</a>{#if user.description}<span class="muted">{' · '}{user.description}</span>{/if}</h3>
           {#if user.groups.length}<div class="chips">{#each user.groups as g (g)}<span class="chip">{g}</span>{/each}</div>{/if}
           {#if user.home}
             <p class="small muted sub">home-manager: {plural(user.home.programs.length, 'program')}, {plural(user.home.packages.length, 'package')}</p>
@@ -338,6 +344,28 @@
   }
   .rows li.off .host {
     color: var(--fg-muted);
+  }
+  .src-line {
+    display: flex;
+    min-width: 0;
+  }
+  .pending {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--accent);
+  }
+  .side {
+    flex: none;
+    text-decoration: none;
+  }
+  a.side:hover {
+    color: var(--fg-strong);
+    text-decoration: underline;
+  }
+  .hint {
+    margin-left: 6px;
+    font-size: var(--fs-sm);
   }
   .row-main {
     display: flex;

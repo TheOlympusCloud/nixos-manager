@@ -1,280 +1,194 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import ChangesPanel from '../components/ChangesPanel.svelte'
   import ChecksPanel from '../components/ChecksPanel.svelte'
-  import DiffView from '../components/DiffView.svelte'
+  import DiffView, { fileAnchor } from '../components/DiffView.svelte'
   import Icon from '../components/Icon.svelte'
   import JobLog from '../components/JobLog.svelte'
-  import { api, type HostDiff } from '../lib/api'
-  import { waitJob } from '../lib/fleet.svelte'
-  import { firstLine } from '../lib/format'
-  import { diffParts, diffSummary, splitDiffs } from '../lib/matrix'
-  import { codeLink, machineLink } from '../lib/router.svelte'
+  import MachineImpact from '../components/MachineImpact.svelte'
+  import { api, type Commit } from '../lib/api'
+  import { plural } from '../lib/format'
+  import type { SettingChange } from '../lib/impact'
+  import { fetchModelDiff, managedFiles, managedSettings, type ModelDiff } from '../lib/modeldiff'
+  import { parsePatch, type PatchFile } from '../lib/patch'
+  import { link } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
+  import { ago } from '../lib/util'
 
-  // ---- what changes on each machine ----
-  let diffs = $state<HostDiff[] | null>(null)
-  let diffError = $state('')
-  let headError = $state('')
-  let computing = $state(false)
   let alive = true
-  let seq = 0
+  onMount(() => () => (alive = false))
 
-  async function loadDiffs() {
+  // ---- what changes on each machine (working copy against the last commit) ----
+  let diff = $state<ModelDiff | null>(null)
+  let diffError = $state('')
+  let computing = $state(false)
+  let seq = 0
+  async function loadDiff() {
     const mine = ++seq
     try {
-      const r = await api.modelDiff()
+      const r = await fetchModelDiff(undefined, () => (computing = true), () => alive && mine === seq)
       if (mine !== seq) return
-      if (r.state === 'computing') {
-        computing = true
-        await Promise.all(r.jobs.map(waitJob))
-        if (alive && mine === seq) loadDiffs()
-        return
-      }
-      diffs = r.hosts ?? []
-      diffError = r.error ?? ''
-      headError = r.headError ?? ''
-      computing = false
+      if (r) ((diff = r), (diffError = ''))
     } catch (e) {
       if (mine === seq) diffError = e instanceof Error ? e.message : String(e)
-      computing = false
+    }
+    if (mine === seq) computing = false
+  }
+
+  // ---- the files: staged and unstaged changes in one list ----
+  let files = $state<(PatchFile & { tag?: string })[] | null>(null)
+  let filesError = $state('')
+  let fseq = 0
+  async function loadFiles() {
+    const mine = ++fseq
+    try {
+      const [st, wt] = await Promise.all([api.diff(true), api.diff(false)])
+      if (mine !== fseq) return
+      const a = parsePatch(st)
+      const b = parsePatch(wt)
+      const both = new Set(a.filter((f) => b.some((g) => g.path === f.path)).map((f) => f.path))
+      const tagged = [...a.map((f) => ({ ...f, tag: both.has(f.path) ? 'Staged part' : undefined })), ...b.map((f) => ({ ...f, tag: both.has(f.path) ? 'Unstaged part' : undefined }))]
+      files = tagged.sort((x, y) => x.path.localeCompare(y.path))
+      filesError = ''
+    } catch (e) {
+      if (mine === fseq) filesError = e instanceof Error ? e.message : String(e)
     }
   }
-  onMount(() => () => (alive = false))
-  // Any change to the working copy or HEAD (save, edit by clicking, commit, pull) refreshes the comparison.
+
+  // Options set here, read from the changed managed.json files (the model does not list options).
+  let settings = $state<Record<string, SettingChange[]>>({})
+  async function loadSettings() {
+    const files = app.status?.files ?? []
+    const paths = managedFiles(files.map((f) => f.path))
+    const isNew = (f: (typeof files)[number]) => f.staged === 'A' || f.staged === '?' || (!f.staged && f.unstaged === '?')
+    const absent = { before: files.filter(isNew).map((f) => f.path), after: files.filter((f) => (f.unstaged || f.staged) === 'D').map((f) => f.path) }
+    settings = paths.length ? await managedSettings(paths, 'HEAD', null, absent) : {}
+  }
+
+  let last = $state<Commit | null>(null)
+  // Any change to the working copy or HEAD (save, edit by clicking, commit, pull) refreshes both, once.
   let timer: ReturnType<typeof setTimeout> | undefined
   $effect(() => {
     void app.status
-    clearTimeout(timer)
-    timer = setTimeout(loadDiffs, diffs ? 300 : 0)
+    void app.logVersion
+    untrack(() => {
+      clearTimeout(timer)
+      timer = setTimeout(
+        () => {
+          loadDiff()
+          loadFiles()
+          loadSettings()
+          if (!app.status?.files.length) api.log({ limit: 1 }).then((c) => (last = c[0] ?? null), () => (last = null))
+        },
+        diff ? 250 : 0,
+      )
+    })
+    return () => clearTimeout(timer)
   })
 
-  const split = $derived(splitDiffs(diffs ?? []))
-  const statusLabel: Record<string, string> = { added: 'New', removed: 'Removed', changed: 'Changed', unchanged: 'Unchanged', error: 'Does not evaluate' }
-  const chipName = (label: string, s: string) => (label === 'Features' ? s.replace(/^[a-z]+\./, '') : s)
-
-  // ---- the file diff or job log next to the lists ----
+  // ---- the side: commit or checks; a check's log replaces the changes until closed ----
   let side = $state<'commit' | 'checks'>('commit')
-  $effect(() => {
-    if (app.inspect?.kind === 'job') side = 'checks'
-  })
-  let text = $state<string | null>(null)
-  let textError = $state('')
-  async function loadText() {
+  const job = $derived.by(() => {
     const i = app.inspect
-    if (i?.kind === 'job') return
-    text = null
-    textError = ''
-    try {
-      text = await api.diff(i?.staged ?? false, i?.path)
-    } catch (e) {
-      textError = e instanceof Error ? e.message : String(e)
-    }
-  }
-  $effect(() => {
-    void app.inspect
-    void app.status
-    loadText()
+    if (i?.kind !== 'job') return null
+    const j = app.jobs.find((x) => x.id === i.id)
+    return !j || j.kind === 'check' ? i.id : null
   })
-  const files = $derived(app.status?.files.length ?? 0)
+  $effect(() => {
+    if (job) untrack(() => (side = 'checks'))
+  })
+
+  let doc = $state<HTMLElement>()
+  // A file picked in the list scrolls the combined diff to it.
+  $effect(() => {
+    const i = app.inspect
+    if (i?.kind !== 'diff' || !i.path || !files) return
+    const path = i.path
+    untrack(async () => {
+      await tick()
+      const el = doc?.querySelector<HTMLElement>('#' + CSS.escape(fileAnchor(path)))
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      el.classList.add('flash')
+      setTimeout(() => el.classList.remove('flash'), 900)
+    })
+  })
+
+  const count = $derived(app.status?.files.length ?? 0)
+  const staged = $derived(app.status?.files.filter((f) => f.staged).length ?? 0)
+  const adds = $derived((files ?? []).reduce((n, f) => n + f.adds, 0))
+  const dels = $derived((files ?? []).reduce((n, f) => n + f.dels, 0))
 </script>
 
 <div class="cv">
-  <div class="top">
-    <div class="page-head">
-      <h1>Changes</h1>
-      <span class="sub">What the working copy changes compared with the last commit, then the files to review, check and commit.</span>
+  <aside class="side">
+    <div class="side-tabs" role="tablist" aria-label="Commit or checks">
+      <button role="tab" aria-selected={side === 'commit'} class:on={side === 'commit'} onclick={() => (side = 'commit')}>Commit {#if count}<span class="n num">{count}</span>{/if}</button>
+      <button role="tab" aria-selected={side === 'checks'} class:on={side === 'checks'} onclick={() => (side = 'checks')}>Checks</button>
     </div>
+    <div class="side-body" hidden={side !== 'commit'}><ChangesPanel /></div>
+    <div class="side-body" hidden={side !== 'checks'}><ChecksPanel visible={side === 'checks'} /></div>
+  </aside>
 
-    <section aria-labelledby="hd-title">
-      <h2 id="hd-title" class="section-title">
-        On the machines
-        {#if computing}<span class="badge busy"><span class="dot busy"></span>Evaluating both versions…</span>{/if}
-      </h2>
-      {#if headError}
-        <div class="card head-error" role="alert">
-          <p><strong>The last commit does not evaluate</strong>, so every machine is compared with nothing and shows as new.</p>
-          <pre class="errpre">{headError}</pre>
-        </div>
-      {/if}
-      {#if diffError && !diffs?.length}
-        <p class="error-text">{diffError}</p>
-      {:else if diffs === null}
-        <div class="hd-grid">{#each [0, 1, 2] as i (i)}<div class="card hd skel-card"><span class="skel" style:width="40%"></span><span class="skel" style:width="80%"></span></div>{/each}</div>
-      {:else}
-        {#if diffError}<p class="error-text small">The working copy does not evaluate: {firstLine(diffError)}</p>{/if}
-        {#if split.changed.length}
-          <div class="hd-grid">
-            {#each split.changed as d (d.host)}
-              <article class="card hd st-{d.status}">
-                <header>
-                  <a class="host" href={machineLink(d.host)}>{d.host}</a>
-                  <span class="badge {d.status === 'error' ? 'err' : d.status === 'added' ? 'ok' : ''}">{statusLabel[d.status]}</span>
-                  {#if d.status !== 'error'}<span class="summary muted small">{diffSummary(d)}</span>{/if}
-                </header>
-                {#if d.error}
-                  <pre class="errpre">{d.error}</pre>
-                {/if}
-                {#each diffParts(d) as part (part.label)}
-                  <div class="part">
-                    <span class="p-label">{part.label}</span>
-                    <div class="chips">
-                      {#each part.added as a (a)}<span class="chip add" class:mono={part.label === 'Packages'} title={a}><Icon name="plus" size={11} />{chipName(part.label, a)}</span>{/each}
-                      {#each part.removed as r (r)}<span class="chip del" class:mono={part.label === 'Packages'} title={r}><Icon name="minus" size={11} />{chipName(part.label, r)}</span>{/each}
-                    </div>
-                  </div>
-                {/each}
-              </article>
-            {/each}
-          </div>
-        {:else}
-          <p class="calm"><Icon name="tick" size={15} />No machine changes: {files ? 'the changed files do not change what any machine runs.' : 'the working copy matches the last commit.'}</p>
-        {/if}
-        {#if split.unchanged.length && split.changed.length}
-          <p class="unchanged muted small">Unchanged: {split.unchanged.map((d) => d.host).join(', ')}</p>
-        {/if}
-      {/if}
-    </section>
-  </div>
-
-  <div class="bench">
-    <aside class="side">
-      <div class="side-tabs" role="tablist" aria-label="Commit or checks">
-        <button role="tab" aria-selected={side === 'commit'} class:on={side === 'commit'} onclick={() => (side = 'commit')}>Commit {#if files}<span class="n num">{files}</span>{/if}</button>
-        <button role="tab" aria-selected={side === 'checks'} class:on={side === 'checks'} onclick={() => (side = 'checks')}>Checks</button>
+  <section class="pane" aria-label="Changes">
+    {#if job}
+      <div class="log-bar">
+        <button class="ghost" onclick={() => (app.inspect = null)}><Icon name="left" size={14} />Back to the changes</button>
       </div>
-      <div class="side-body" hidden={side !== 'commit'}><ChangesPanel /></div>
-      <div class="side-body" hidden={side !== 'checks'}><ChecksPanel visible={side === 'checks'} /></div>
-    </aside>
-    <section class="pane" aria-label="Details">
-      {#if app.inspect?.kind === 'job'}
-        {#key app.inspect.id}<JobLog jobId={app.inspect.id} />{/key}
-      {:else}
-        {@const i = app.inspect}
-        <div class="view-bar">
-          <strong>{i?.path ?? 'All files'}</strong>
-          <span class="muted small what">{i?.staged ? 'staged, against the last commit' : 'working copy, against what is staged'}</span>
-          {#if i?.path}<button class="link" onclick={() => (app.inspect = null)}>Show all files</button>{/if}
-          {#if i?.path}<a class="btn" href={codeLink(i.path)}><Icon name="code" size={14} />Open in Code</a>{/if}
-          <button class="icon" aria-label="Refresh the diff" title="Refresh" onclick={loadText}><Icon name="refresh" size={15} /></button>
-        </div>
-        <div class="diff-body">
-          {#if textError}
-            <p class="error-text pad">{textError}</p>
-          {:else if text === null}
-            <div class="pad">{#each [0, 1, 2, 3] as k (k)}<span class="skel" style:width="{70 - k * 12}%" style:margin-bottom="10px"></span>{/each}</div>
+      <div class="log">{#key job}<JobLog jobId={job} />{/key}</div>
+    {:else}
+      <div class="doc" bind:this={doc}>
+        <header class="doc-head">
+          <h1>Changes</h1>
+          <p class="sub num">
+            {#if count}
+              {plural(count, 'changed file')}, {staged} staged{#if files}<span class="sep">·</span><span class="a">+{adds}</span>&nbsp;<span class="r">−{dels}</span>&nbsp;lines{/if}
+            {:else}
+              The working copy matches the last commit.
+            {/if}
+          </p>
+        </header>
+
+        <section class="block" aria-labelledby="ch-machines">
+          <h2 id="ch-machines">On the machines</h2>
+          {#if !count}
+            <p class="calm"><Icon name="tick" size={15} />No machine changes.</p>
+          {:else if diffError && !diff}
+            <p class="error-text">{diffError}</p>
           {:else}
-            <DiffView {text} />
+            <MachineImpact {diff} {computing} {settings} quiet="The changed files do not change what any machine runs." />
           {/if}
-        </div>
-      {/if}
-    </section>
-  </div>
+        </section>
+
+        <section class="block" aria-labelledby="ch-files">
+          <h2 id="ch-files">Files</h2>
+          {#if filesError}
+            <p class="error-text">{filesError}</p>
+          {:else if files === null}
+            <div class="skel-files" aria-hidden="true">{#each [0, 1, 2] as k (k)}<span class="skel" style:width="{72 - k * 14}%"></span>{/each}</div>
+          {:else if !files.length}
+            <div class="clean">
+              <p>No file differs from the last commit.</p>
+              {#if last}
+                <p class="muted small">
+                  Last commit: <a href={link('history', [], { rev: last.sha })}>{last.subject}</a> · {last.short} · {ago(last.date)}
+                </p>
+              {/if}
+            </div>
+          {:else}
+            <DiffView {files} />
+          {/if}
+        </section>
+      </div>
+    {/if}
+  </section>
 </div>
 
 <style>
   .cv {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: auto;
-  }
-  .top {
-    flex: none;
-    max-height: 42vh;
-    padding: var(--s5) var(--s5) var(--s4);
-    overflow: auto;
-    border-bottom: 1px solid var(--border);
-  }
-  .section-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .hd-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: var(--s3);
-  }
-  .hd {
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    padding: 12px 14px;
-  }
-  .hd.st-error {
-    border-color: color-mix(in srgb, var(--red) 30%, var(--border));
-  }
-  .hd header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
-  .host {
-    color: var(--fg-strong);
-    font-size: var(--fs-lg);
-    font-weight: 600;
-    text-decoration: none;
-  }
-  .host:hover {
-    color: var(--accent);
-  }
-  .summary {
-    flex-basis: 100%;
-  }
-  .part {
-    display: grid;
-    grid-template-columns: 72px 1fr;
-    gap: 8px;
-  }
-  .p-label {
-    padding-top: 2px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .head-error {
-    display: grid;
-    gap: 8px;
-    margin-bottom: 12px;
-    padding: 12px 14px;
-    border-color: color-mix(in srgb, var(--red) 45%, transparent);
-  }
-  .head-error p {
-    margin: 0;
-  }
-  .errpre {
-    margin: 0;
-    max-height: 120px;
-    padding: 8px;
-    overflow: auto;
-    color: color-mix(in srgb, var(--red) 70%, var(--fg-strong));
-    font: 11.5px/1.5 var(--mono);
-    white-space: pre-wrap;
-    background: var(--bg-deep);
-    border-radius: var(--r);
-  }
-  .skel-card {
-    gap: 14px;
-    min-height: 90px;
-  }
-  .calm {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--fg);
-  }
-  .calm :global(svg) {
-    color: var(--green);
-  }
-  .unchanged {
-    margin-top: var(--s3);
-  }
-  .bench {
-    display: grid;
-    flex: 1;
     grid-template-columns: 340px 1fr;
-    min-height: 300px;
+    height: 100%;
   }
   .side {
     display: flex;
@@ -285,17 +199,22 @@
   }
   .side-tabs {
     display: flex;
+    flex: none;
     gap: 4px;
-    padding: 8px 8px 0;
+    padding: 6px 8px 0;
     border-bottom: 1px solid var(--border);
   }
   .side-tabs button {
-    height: 34px;
+    height: 36px;
     color: var(--fg-muted);
     background: none;
     border: 0;
     border-bottom: 2px solid transparent;
     border-radius: 0;
+  }
+  .side-tabs button:hover:not(:disabled) {
+    color: var(--fg-strong);
+    background: none;
   }
   .side-tabs button.on {
     color: var(--fg-strong);
@@ -321,26 +240,86 @@
     min-width: 0;
     min-height: 0;
   }
-  .pane .view-bar {
-    flex-wrap: nowrap;
-  }
-  .pane .view-bar strong {
-    flex: none;
-  }
-  .what {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .diff-body {
+  .doc {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    background: var(--bg-deep);
+    padding: var(--s5) var(--s5) var(--s6);
   }
-  .pad {
+  .doc-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
+    max-width: 1180px;
+    margin-bottom: var(--s4);
+  }
+  .doc-head h1 {
+    font-size: var(--fs-xl);
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--fg-muted);
+  }
+  .sep {
+    margin: 0 6px;
+  }
+  .a {
+    color: var(--green);
+  }
+  .r {
+    color: var(--red);
+  }
+  .block {
+    max-width: 1180px;
+  }
+  .block + .block {
+    margin-top: var(--s5);
+  }
+  .block h2 {
+    margin-bottom: 10px;
+    font-size: var(--fs-lg);
+  }
+  .block :global(.diff) {
+    padding: 0;
+  }
+  .skel-files {
+    display: grid;
+    gap: 12px;
     padding: 16px;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .calm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .calm :global(svg) {
+    color: var(--green);
+  }
+  .clean {
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .log-bar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    min-height: 40px;
+    padding: 4px 8px;
+    background: var(--bg-side);
+    border-bottom: 1px solid var(--border);
+  }
+  .log {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
   }
 </style>

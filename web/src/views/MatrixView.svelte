@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import Icon from '../components/Icon.svelte'
   import ModelGate from '../components/ModelGate.svelte'
   import type { Feature, FeatureGroup } from '../lib/api'
@@ -8,7 +8,7 @@
   import { plural } from '../lib/format'
   import { isRepoFile } from '../lib/graph'
   import { featureMatrix, groupLabel, packageMatrix, type FeatCell, type PkgCell } from '../lib/matrix'
-  import { link, machineLink } from '../lib/router.svelte'
+  import { link, machineLink, route } from '../lib/router.svelte'
 
   /** Packages × machines or features × machines, with editing in the cells of managed machines. */
   let { kind }: { kind: 'packages' | 'services' } = $props()
@@ -19,7 +19,12 @@
     for (const h of hosts) if (h.managedFile && !fleet.managed[h.name]) loadManaged(h.name)
   })
 
-  let filter = $state('')
+  let filter = $state(route.query.q ?? '')
+  // The palette and other views link here with ?q=<name>.
+  $effect(() => {
+    const q = route.query.q
+    if (q !== undefined) untrack(() => (filter = q))
+  })
   let hideDefaults = $state(true)
   let onlyDiff = $state(false)
   // shortcut: renders the first PAGE rows and pages by button; virtualise if fleets reach thousands of rows.
@@ -39,17 +44,18 @@
   )
   const total = $derived(kind === 'packages' ? pkgRows.length : featRows.length)
 
-  let busy = $state('')
-  async function run(key: string, fn: () => Promise<unknown>) {
-    busy = key
-    try {
-      await fn()
-    } finally {
-      busy = ''
-    }
+  // Cells edited since the model was evaluated: shown as pending until the new evaluation lands.
+  let pending = $state<Record<string, 'on' | 'off'>>({})
+  $effect(() => {
+    void fleet.model
+    if (!fleet.computing) untrack(() => (pending = {}))
+  })
+  async function run(key: string, to: 'on' | 'off', fn: () => Promise<unknown>) {
+    pending[key] = to
+    if ((await fn()) === false) delete pending[key]
   }
   const source = (c: PkgCell | FeatCell) => (c.managed ? 'managed' : c.files.some(isRepoFile) ? 'repo' : 'default')
-  const sourceTitle = (c: PkgCell | FeatCell) => (c.managed ? 'Set by clicking (managed.json)' : c.files.filter(isRepoFile).join(', ') || 'NixOS default')
+  const sourceTitle = (c: PkgCell | FeatCell) => (c.managed ? 'Set here (managed.json)' : c.files.some(isRepoFile) ? `In code · ${c.files.filter(isRepoFile).join(', ')}` : 'Default (NixOS or a flake input)')
 </script>
 
 <div class="page">
@@ -64,16 +70,16 @@
         </span>
         <span class="spacer"></span>
         <span class="legend muted small">
-          <span class="lg"><span class="sw managed"></span>Set by clicking</span>
-          <span class="lg"><span class="sw repo"></span>Hand-written</span>
-          {#if kind === 'packages'}<span class="lg"><span class="sw default"></span>NixOS default</span>{/if}
+          <span class="lg"><span class="sw managed"></span>Set here</span>
+          <span class="lg"><span class="sw repo"></span>In code</span>
+          {#if kind === 'packages'}<span class="lg"><span class="sw default"></span>Default</span>{/if}
         </span>
       </div>
 
       <div class="toolbar">
         <input class="search" type="search" placeholder={kind === 'packages' ? 'Filter packages' : 'Filter services and programs'} aria-label="Filter rows" data-search bind:value={filter} />
         {#if kind === 'packages'}
-          <label class="toggle"><input type="checkbox" bind:checked={hideDefaults} />Hide NixOS defaults</label>
+          <label class="toggle"><input type="checkbox" bind:checked={hideDefaults} />Hide defaults</label>
         {/if}
         <label class="toggle"><input type="checkbox" bind:checked={onlyDiff} />Only where machines differ</label>
         <span class="spacer"></span>
@@ -86,7 +92,10 @@
             <tr>
               <th class="corner">{kind === 'packages' ? 'Package' : 'Feature'}</th>
               {#each hosts as h (h.name)}
-                <th class="col"><a href={machineLink(h.name, kind)} title={h.managedFile ? `${h.name} (managed)` : `${h.name} (code only)`}>{h.name}</a></th>
+                <th class="col">
+                  <a href={machineLink(h.name, kind)} title={h.managedFile ? `${h.name} · Editable here` : `${h.name} · Code only: change it in code`}>{h.name}</a>
+                  {#if !h.managedFile}<span class="code-only">Code only</span>{/if}
+                </th>
               {/each}
               <th class="n-col">Machines</th>
             </tr>
@@ -99,17 +108,21 @@
                   {#each r.cells as c, i (hosts[i].name)}
                     {@const h = hosts[i]}
                     <td class="cell">
-                      {#if c}
+                      {#if c && pending[r.name + h.name]}
+                        <span class="has pending" title="Removing from {h.name}; the machine is evaluated again">
+                          <span class="spinner" aria-hidden="true"></span><span class="ver mono">{c.version}</span>
+                        </span>
+                      {:else if c}
                         <span class="has {source(c)}" title={sourceTitle(c)}>
                           <span class="ver mono">{c.version}</span>
                           {#if c.managed}
-                            <button class="cell-btn" aria-label="Remove {r.name} from {h.name}" title="Remove from {h.name}" disabled={busy === r.name + h.name} onclick={() => run(r.name + h.name, () => removePackageByName(h.name, r.name))}>
+                            <button class="cell-btn" aria-label="Remove {r.name} from {h.name}" title="Remove from {h.name}" onclick={() => run(r.name + h.name, 'off', () => removePackageByName(h.name, r.name))}>
                               <Icon name="x" size={12} />
                             </button>
                           {/if}
                         </span>
                       {:else if h.managedFile}
-                        <button class="cell-add" aria-label="Add {r.name} to {h.name}" title="Add to {h.name}" onclick={() => openPackageSearch(r.name, [h.name])}><Icon name="plus" size={13} /></button>
+                        <button class="cell-add" aria-label="Add {r.name} to {h.name}" title="Add to {h.name}…" onclick={() => openPackageSearch(r.name, [h.name])}><Icon name="plus" size={13} /></button>
                       {/if}
                     </td>
                   {/each}
@@ -127,20 +140,29 @@
                     {@const h = hosts[i]}
                     {@const key = r.key + h.name}
                     <td class="cell">
-                      {#if c && (!c.managed || !h.managedFile || c.files.some((f) => isRepoFile(f) && f !== h.managedFile))}
+                      {#if pending[key]}
+                        <span class="tick pending g-{r.group}" role="status" title="Turning {pending[key]} on {h.name}; the machine is evaluated again">
+                          <span class="spinner" aria-hidden="true"></span><span class="sr-only">Turning {r.name} {pending[key]} on {h.name}</span>
+                        </span>
+                      {:else if c && (!c.managed || !h.managedFile || c.files.some((f) => isRepoFile(f) && f !== h.managedFile))}
                         <span class="tick {source(c)} g-{r.group}" title="{h.name}: {sourceTitle(c)}"><Icon name="tick" size={13} /></span>
                       {:else if c}
-                        <button class="tick managed g-{r.group} toggle-btn" aria-pressed="true" aria-label="Turn {r.name} off on {h.name}" title="On (set by clicking); click to turn off" disabled={busy === key} onclick={() => run(key, () => toggleFeature(h.name, r.group, r.name, false))}>
+                        <button class="tick managed g-{r.group} toggle-btn" aria-pressed="true" aria-label="Turn off {r.name} on {h.name}" title="On (set here); click to turn off" onclick={() => run(key, 'off', () => toggleFeature(h.name, r.group, r.name, false))}>
                           <Icon name="tick" size={13} />
                         </button>
                       {:else if h.managedFile}
-                        <button class="cell-add" aria-pressed="false" aria-label="Turn {r.name} on on {h.name}" title="Turn on on {h.name}" disabled={busy === key} onclick={() => run(key, () => toggleFeature(h.name, r.group, r.name, true))}>
+                        <button class="cell-add" aria-pressed="false" aria-label="Turn on {r.name} on {h.name}" title="Turn on for {h.name}" onclick={() => run(key, 'on', () => toggleFeature(h.name, r.group, r.name, true))}>
                           <Icon name="plus" size={13} />
                         </button>
                       {/if}
                     </td>
                   {/each}
-                  <td class="n num"><a href={link('options', [r.cells.findIndex(Boolean) >= 0 ? hosts[r.cells.findIndex(Boolean)].name : hosts[0].name], { q: r.key + '.' })} title="Options of {r.key}">{r.count}/{hosts.length}</a></td>
+                  <td class="n num">
+                    <span class="count">{r.count}/{hosts.length}</span>
+                    <a class="opts" href={link('options', [r.cells.findIndex(Boolean) >= 0 ? hosts[r.cells.findIndex(Boolean)].name : hosts[0].name], { q: r.key + '.' })} title="Configure {r.name}" aria-label="Configure the options of {r.name}">
+                      <Icon name="sliders" size={13} />
+                    </a>
+                  </td>
                 </tr>
               {/each}
             {/if}
@@ -368,18 +390,47 @@
   }
   .n,
   .n-col {
-    width: 90px;
+    width: 110px;
+    white-space: nowrap;
     padding-right: 14px;
     color: var(--fg-muted);
     font-size: var(--fs-sm);
     text-align: right;
   }
-  .n a {
-    color: inherit;
-    text-decoration: none;
+  .n .opts {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 6px;
+    color: var(--fg-faint);
+    vertical-align: middle;
+    border-radius: var(--r-sm);
   }
-  .n a:hover {
+  tr:hover .opts {
+    color: var(--fg-muted);
+  }
+  .n .opts:hover {
     color: var(--accent);
+    background: var(--bg-hover);
+  }
+  .code-only {
+    margin-left: 6px;
+    color: var(--fg-faint);
+    font-size: var(--fs-xs);
+    font-weight: 400;
+  }
+  .has.pending {
+    opacity: 0.7;
+    border: 1px dashed var(--line-strong);
+  }
+  .tick.pending {
+    background: none;
+    border-style: dashed;
+  }
+  .tick.pending .spinner,
+  .has.pending .spinner {
+    margin: 0;
   }
   .none {
     padding: 18px 12px;

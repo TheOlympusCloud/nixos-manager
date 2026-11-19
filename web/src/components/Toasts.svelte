@@ -3,19 +3,22 @@
   import { dismiss, toasts } from '../lib/ui.svelte'
   import Icon from './Icon.svelte'
 
-  const icon = { ok: 'tick', error: 'alert', info: 'info' } as const
+  const icon = { ok: 'tick', error: 'alert', info: 'info', busy: 'refresh' } as const
 </script>
 
 <div class="toasts" aria-live="polite">
   {#each toasts as t (t.id)}
     <div class="toast {t.kind}" role={t.kind === 'error' ? 'alert' : 'status'} transition:fly={{ y: 12, duration: 180 }}>
-      <span class="ico"><Icon name={icon[t.kind]} size={15} /></span>
+      <span class="ico">{#if t.kind === 'busy'}<span class="spin" aria-hidden="true"></span>{:else}<Icon name={icon[t.kind]} size={15} />{/if}</span>
       <div class="body">
         {#if t.title}<strong>{t.title}</strong>{/if}
         <pre>{t.text}</pre>
-        {#if t.action}
-          {@const a = t.action}
-          <button class="link act" onclick={() => (a.run(), dismiss(t.id))}>{a.label}</button>
+        {#if t.actions.length}
+          <div class="acts">
+            {#each t.actions as a (a.label)}
+              <button class="link act" onclick={() => (a.run(), dismiss(t.id))}>{a.label}</button>
+            {/each}
+          </div>
         {/if}
       </div>
       <button class="icon" aria-label="Dismiss" onclick={() => dismiss(t.id)}><Icon name="x" size={14} /></button>
@@ -65,6 +68,14 @@
   .error {
     border-color: color-mix(in srgb, var(--red) 35%, var(--line));
   }
+  .spin {
+    width: 12px;
+    height: 12px;
+    border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
   .body {
     display: grid;
     flex: 1;
@@ -87,9 +98,12 @@
     font-family: var(--mono);
     font-size: 12px;
   }
-  .act {
-    justify-self: start;
+  .acts {
+    display: flex;
+    gap: 14px;
     margin-top: 4px;
+  }
+  .act {
     font-weight: 500;
   }
 </style>

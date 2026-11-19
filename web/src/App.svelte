@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import CommandPalette, { togglePalette } from './components/CommandPalette.svelte'
   import Dialog from './components/Dialog.svelte'
   import Icon from './components/Icon.svelte'
   import Login from './components/Login.svelte'
@@ -8,10 +9,14 @@
   import Toasts from './components/Toasts.svelte'
   import TopBar from './components/TopBar.svelte'
   import { pkgSearch } from './lib/dialogs.svelte'
+  import { fleet } from './lib/fleet.svelte'
+  import { loadInsights } from './lib/health.svelte'
+  import { preloadLayout } from './lib/layout'
   import { go, route, type View } from './lib/router.svelte'
   import { activeTab, app, fileTabs, formatTab, init, refresh, saveTab, syncOpenTabs } from './lib/state.svelte'
   import ChangesView from './views/ChangesView.svelte'
-  import FleetView from './views/FleetView.svelte'
+  import HealthView from './views/HealthView.svelte'
+  import InputsView from './views/InputsView.svelte'
   import MachinePage from './views/MachinePage.svelte'
   import MachinesView from './views/MachinesView.svelte'
   import MatrixView from './views/MatrixView.svelte'
@@ -26,7 +31,8 @@
     if (route.view === 'fleet') visited.fleet = true
     if (route.view === 'code') visited.code = true
   })
-  // CodeMirror and the history viewers load only when first needed.
+  // The graph (Svelte Flow), CodeMirror and the history viewers load only when first needed.
+  const loadFleet = () => import('./views/FleetView.svelte')
   const loadCode = () => import('./views/CodeWorkspace.svelte')
   const loadHistory = () => import('./views/HistoryView.svelte')
   // The intro plays before login (and again at #/intro); its WebGL scene loads on demand inside it.
@@ -40,6 +46,15 @@
   })
   const leaveIntro = () => go('#/fleet')
 
+  // Once logged in, start the graph layout engine (a 1.4 MB worker) while the model evaluates.
+  $effect(() => {
+    if (app.info) preloadLayout()
+  })
+  // Every new evaluation brings new findings.
+  $effect(() => {
+    if (app.info && fleet.model?.tree) loadInsights()
+  })
+
   let collapsed = $state(localStorage.getItem('nixmgr.rail') ? localStorage.getItem('nixmgr.rail') === 'collapsed' : innerWidth < 1200)
 
   // Files may change behind our back (API clients, git on the server); catch up when the window regains focus.
@@ -51,13 +66,18 @@
     syncOpenTabs()
   }
 
-  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', o: 'options', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
+  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', o: 'options', a: 'health', i: 'inputs', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
   let pendingG = 0
 
   function onKey(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k' && app.info && !app.needLogin) {
+      e.preventDefault() // in the editor and in text fields too: the palette works everywhere
+      togglePalette()
+      return
+    }
     if (e.defaultPrevented) return // the editor already handled it
     const t = activeTab()
-    const mod = e.ctrlKey || e.metaKey
     if (route.view === 'code' && mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
       e.preventDefault() // never the browser's "save page" dialog
       if (t?.kind === 'file') saveTab(t)
@@ -98,7 +118,11 @@
     <div class="main">
       <TopBar />
       <main class="content">
-        {#if visited.fleet}<div class="keep" hidden={route.view !== 'fleet'}><FleetView active={route.view === 'fleet'} /></div>{/if}
+        {#if visited.fleet}
+          <div class="keep" hidden={route.view !== 'fleet'}>
+            {#await loadFleet() then { default: FleetView }}<FleetView active={route.view === 'fleet'} />{/await}
+          </div>
+        {/if}
         {#if visited.code}
           <div class="keep" hidden={route.view !== 'code'}>
             {#await loadCode() then { default: CodeWorkspace }}<CodeWorkspace active={route.view === 'code'} />{/await}
@@ -114,6 +138,10 @@
           {#key route.view}<MatrixView kind={route.view} />{/key}
         {:else if route.view === 'options'}
           <OptionsView />
+        {:else if route.view === 'health'}
+          <HealthView />
+        {:else if route.view === 'inputs'}
+          <InputsView />
         {:else if route.view === 'changes'}
           <ChangesView />
         {:else if route.view === 'history'}
@@ -141,6 +169,7 @@
 {/if}
 {#if app.needLogin && (app.info || loginOpen)}<Login dismiss={app.info ? undefined : () => (loginOpen = false)} />{/if}
 {#if pkgSearch.open && !app.needLogin}<PackageSearch />{/if}
+{#if app.info && !app.needLogin}<CommandPalette />{/if}
 <Dialog />
 <Toasts />
 

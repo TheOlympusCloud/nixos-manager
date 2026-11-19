@@ -1,3 +1,4 @@
+import { age } from './format'
 export const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
 export const dirname = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 
@@ -19,16 +20,11 @@ export function minimalChange(a: string, b: string): { from: number; to: number;
 /** Is `path` the same as, or inside, `prefix`? */
 export const isWithin = (path: string, prefix: string) => path === prefix || path.startsWith(prefix + '/')
 
+/** An ISO date → the console's age format ("3 d ago"); unparsable text comes back as is. */
 export function ago(iso: string | undefined, now = Date.now()): string {
   if (!iso) return ''
   const t = Date.parse(iso)
-  if (Number.isNaN(t)) return iso
-  const s = Math.round((now - t) / 1000)
-  if (s < 60) return 'just now'
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
-  if (s < 86400 * 30) return `${Math.floor(s / 86400)} d ago`
-  return new Date(t).toLocaleDateString()
+  return Number.isNaN(t) ? iso : age(t / 1000, now)
 }
 
 /** Copy text; falls back to execCommand because the Clipboard API needs HTTPS outside localhost. */

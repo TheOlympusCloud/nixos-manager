@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest'
+import type { HostDiff } from './api'
+import { impactGroups, impactLine, nixValue, revDistance, settingChanges, splitImpact, withSettings } from './impact'
+
+const changed: HostDiff = {
+  host: 'ws',
+  status: 'changed',
+  versionsChanged: [
+    { name: 'curl', from: '8.16.0', to: '8.17.0' },
+    { name: 'firefox', from: '145.0', to: '146.0' },
+  ],
+  packagesAdded: ['vlc'],
+  packagesRemoved: ['nano', 'vim', 'htop'],
+  featuresAdded: ['services.jellyfin'],
+  portsAdded: ['tcp/8096'],
+}
+
+describe('impact', () => {
+  it('says what changes on a machine in one line', () => {
+    expect(impactLine(changed)).toBe('curl 8.16.0 → 8.17.0 and 1 more updated · vlc installed · 3 packages removed · jellyfin turned on · port tcp/8096 opened')
+    expect(impactLine({ host: 'x', status: 'changed', versionsChanged: [{ name: 'git', from: '1', to: '2' }] })).toBe('git 1 → 2')
+    expect(impactLine({ host: 'x', status: 'changed', usersAdded: ['alice', 'bob'] })).toBe('user alice and bob added')
+    expect(impactLine({ host: 'n', status: 'added', packagesAdded: ['a', 'b'], featuresAdded: ['services.x'] })).toBe('New machine · 2 packages · 1 service or program')
+    expect(impactLine({ host: 'x', status: 'unchanged' })).toBe('No change')
+    expect(impactLine({ host: 'x', status: 'error', error: 'boom' })).toBe('Does not evaluate')
+  })
+
+  it('groups the details and drops empty groups', () => {
+    const g = impactGroups(changed)
+    expect(g.map((x) => x.label)).toEqual(['Updated', 'Installed', 'Removed', 'Turned on', 'Ports'])
+    expect(g[0].items[1]).toEqual({ text: 'firefox 145.0 → 146.0', kind: 'up' })
+    expect(g[3].items[0]).toEqual({ text: 'jellyfin', title: 'services.jellyfin', kind: 'add' })
+  })
+
+  it('keeps broken and unchanged machines apart from the changes', () => {
+    const s = splitImpact([{ host: 'z', status: 'unchanged' }, changed, { host: 'b', status: 'error' }, { host: 'n', status: 'added' }, { host: 'r', status: 'removed' }])
+    expect(s.changed.map((d) => d.host)).toEqual(['n', 'ws', 'r'])
+    expect(s.broken.map((d) => d.host)).toEqual(['b'])
+    expect(s.unchanged.map((d) => d.host)).toEqual(['z'])
+  })
+
+  it('measures how far an input moved', () => {
+    expect(revDistance({ name: 'n', status: 'updated', fromDate: 0, toDate: 9 * 86400 })).toBe('')
+    expect(revDistance({ name: 'n', status: 'updated', fromDate: 100, toDate: 100 + 9 * 86400 })).toBe('9 days newer')
+    expect(revDistance({ name: 'n', status: 'updated', fromDate: 100 + 86400, toDate: 100 })).toBe('1 day older')
+  })
+})
+
+describe('settings set here', () => {
+  it('lists the leaf settings that change, lists as leaves', () => {
+    const before = { services: { openssh: { settings: { PasswordAuthentication: true } } }, nix: { gc: { automatic: true } } }
+    const after = { services: { openssh: { settings: { PasswordAuthentication: false } }, fail2ban: { enable: true } }, users: { pablo: { keys: ['a', 'b'] } } }
+    expect(settingChanges(before, after)).toEqual([
+      { path: ['nix', 'gc', 'automatic'], from: true, to: undefined },
+      { path: ['services', 'fail2ban', 'enable'], from: undefined, to: true },
+      { path: ['services', 'openssh', 'settings', 'PasswordAuthentication'], from: true, to: false },
+      { path: ['users', 'pablo', 'keys'], from: undefined, to: ['a', 'b'] },
+    ])
+    expect(settingChanges({ a: [1] }, { a: [1] })).toEqual([])
+    expect(settingChanges(undefined, {})).toEqual([])
+  })
+
+  it('turns an unchanged machine with new settings into a change, in few words', () => {
+    const [d] = withSettings([{ host: 'ws', status: 'unchanged' }], { ws: [{ path: ['services', 'fail2ban', 'enable'], to: true }] })
+    expect(d.status).toBe('changed')
+    expect(impactLine(d)).toBe('fail2ban turned on')
+    expect(impactGroups(d)[0]).toEqual({ label: 'Settings', items: [{ text: 'services.fail2ban.enable = true', title: 'Was not set here', kind: 'up' }] })
+    const [e] = withSettings([{ host: 'ws', status: 'changed' }], { ws: [{ path: ['a', 'b'], from: 1 }, { path: ['nix', 'gc', 'dates'], to: 'weekly' }] })
+    expect(impactLine(e)).toBe('2 settings changed')
+    expect(impactGroups(e)[0].items.map((i) => i.text)).toEqual(['a.b reset', 'nix.gc.dates = "weekly"'])
+    expect(withSettings([{ host: 'x', status: 'error' }], { x: [{ path: ['a'], to: 1 }] })[0].status).toBe('error')
+  })
+
+  it('shows values the way Nix writes them, shortened', () => {
+    expect(nixValue(['a', 'b'])).toBe('[ "a" "b" ]')
+    expect(nixValue('x'.repeat(60))).toHaveLength(48)
+  })
+})

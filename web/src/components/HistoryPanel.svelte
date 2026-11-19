@@ -5,14 +5,17 @@
   import { ago, basename } from '../lib/util'
   import Icon from './Icon.svelte'
 
-  /** Repository history, plus the history of `path` when one is picked. Views open through `onopen`. */
-  let { path, onopen, current = '' }: { path: string; onopen: (tab: ViewTab) => void; current?: string } = $props()
+  /** Repository history, plus the history of `path` when one is picked. Views open through `onopen`; `onload` gets the commits. */
+  let { path, onopen, current = '', onload }: { path: string; onopen: (tab: ViewTab) => void; current?: string; onload?: (commits: Commit[]) => void } = $props()
 
   let repoLog = $state<Commit[] | null>(null)
   let fileLog = $state<Commit[] | null>(null)
   $effect(() => {
     void app.logVersion
-    api.log().then((c) => (repoLog = c), report)
+    api.log().then((c) => {
+      repoLog = c
+      onload?.(c)
+    }, report)
   })
 
   $effect(() => {
@@ -23,12 +26,13 @@
   })
 
   const showCommit = (c: Commit) => onopen({ kind: 'commit', id: 'commit:' + c.sha, title: `${c.short} ${c.subject}`, rev: c.sha })
+  const mine = (c: Commit) => app.info?.author.startsWith(c.author)
   const showVersion = (c: Commit, kind: 'version' | 'compare') =>
     onopen({ kind, id: `${kind}:${c.sha}:${path}`, title: `${basename(path)} @ ${c.short}${kind === 'compare' ? ' ↔ now' : ''}`, path, rev: c.sha, short: c.short })
 </script>
 
 {#snippet meta(c: Commit)}
-  <span class="dir">{c.short} · {c.author} · <time datetime={c.date} title={new Date(c.date).toLocaleString()}>{ago(c.date)}</time></span>
+  <span class="dir"><span class="mono">{c.short}</span> · {mine(c) ? 'you' : c.author} · <time datetime={c.date} title={new Date(c.date).toLocaleString()}>{ago(c.date)}</time></span>
 {/snippet}
 
 <section class="panel" aria-label="History">
@@ -53,9 +57,9 @@
                   <span class="name">{c.subject}</span>
                   {@render meta(c)}
                 </button>
-                <span class="item-tools">
-                  <button class="small-btn" onclick={() => showVersion(c, 'compare')} aria-label="Compare {c.short} with current">Compare</button>
-                  <button class="small-btn" onclick={() => restoreVersion(path, c.sha, c.short)} aria-label="Restore {path} from {c.short}">Restore</button>
+                <span class="row-tools">
+                  <button class="small" onclick={() => showVersion(c, 'compare')} aria-label="Compare {path} at {c.short} with now" title="Side by side with the current file">Compare</button>
+                  <button class="small" onclick={() => restoreVersion(path, c.sha, c.short)} aria-label="Restore {path} from {c.short}" title="Put this version back in the working copy">Restore</button>
                 </span>
               </li>
             {:else}
@@ -80,7 +84,7 @@
               </button>
             </li>
           {:else}
-            <li class="empty">No commits yet.</li>
+            <li class="empty">No commits yet. Commit from Changes and they appear here.</li>
           {/each}
         {/if}
       </ul>
@@ -115,8 +119,19 @@
     text-transform: none;
     letter-spacing: normal;
   }
-  .small-btn {
-    padding: 1px 6px;
-    font-size: 11px;
+  .row-tools {
+    display: flex;
+    flex: none;
+    gap: 4px;
+  }
+  .row-tools button {
+    height: 22px;
+    padding: 0 7px;
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
+    background: none;
+  }
+  .row-tools button:hover:not(:disabled) {
+    color: var(--fg-strong);
   }
 </style>

@@ -60,6 +60,8 @@
     filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
     grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
     more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+    activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+    merge: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>',
     // A six-armed snowflake: the fleet mark.
     mark: '<path d="M12 2v20M3.34 7l17.32 10M3.34 17 20.66 7"/><path d="m9.5 3.5 2.5 2 2.5-2M9.5 20.5l2.5-2 2.5 2M3.1 10.4l3.03-1.2-.5-3.15M20.9 13.6l-3.03 1.2.5 3.15M3.1 13.6l3.03 1.2-.5 3.15M20.9 10.4l-3.03-1.2.5-3.15"/>',
   }

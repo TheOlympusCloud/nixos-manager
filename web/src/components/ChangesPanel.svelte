@@ -1,35 +1,46 @@
 <script lang="ts">
   import { ApiError, api, type StatusFile } from '../lib/api'
+  import { draft } from '../lib/repo.svelte'
+  import { go, link } from '../lib/router.svelte'
   import { act, app, checkStaged, refreshStatus } from '../lib/state.svelte'
   import { confirmBox, report, toast } from '../lib/ui.svelte'
   import { basename, dirname } from '../lib/util'
   import Icon from './Icon.svelte'
 
-  let message = $state('')
   let committing = $state(false)
   let commitError = $state('')
 
   const files = $derived(app.status?.files ?? [])
   const staged = $derived(files.filter((f) => f.staged))
-  const unstaged = $derived(files.filter((f) => f.unstaged))
+  const allStaged = $derived(files.length > 0 && files.every((f) => f.staged && !f.unstaged))
   const checked = $derived(!!app.status?.staged_checked)
   const stagedJob = $derived(app.jobs.find((j) => j.kind === 'check' && j.tree === app.status?.staged_tree))
-  const canCommit = $derived(checked && staged.length > 0 && !!message.trim() && !committing)
+  const checking = $derived(stagedJob?.state === 'queued' || stagedJob?.state === 'running')
+  const hasMessage = $derived(!!draft.message.trim())
+  const canCommit = $derived(checked && staged.length > 0 && hasMessage && !committing)
   const commitHint = $derived(
-    !staged.length ? 'Stage changes to commit.' : !checked ? 'Staged changes need a passing check.' : !message.trim() ? 'Write a commit message.' : '',
+    !staged.length ? 'Tick the files to commit.' : !checked ? 'The staged files need a passing check.' : !hasMessage ? 'Write a commit message.' : '',
   )
-  const targetsHint = $derived(app.selectedTargets.length ? `flake check + ${app.selectedTargets.length} target(s)` : 'flake check only')
+  const targetsHint = $derived(app.selectedTargets.length ? `flake check and ${app.selectedTargets.length} dry build${app.selectedTargets.length === 1 ? '' : 's'}` : 'flake check')
 
-  function showDiff(f: StatusFile, isStaged: boolean) {
-    app.inspect = { kind: 'diff', staged: isStaged, path: f.path }
+  /** Plain words for git's status letters. */
+  const words: Record<string, string> = { '?': 'New', A: 'New', M: 'Edited', D: 'Deleted', R: 'Renamed' }
+  const word = (f: StatusFile) => words[f.unstaged || f.staged] ?? 'Changed'
+  const classes: Record<string, string> = { '?': 'new', A: 'new', D: 'del', R: 'ren' }
+  const cls = (f: StatusFile) => classes[f.unstaged || f.staged] ?? 'mod'
+
+  function toggle(f: StatusFile) {
+    const full = !!f.staged && !f.unstaged
+    act(() => (full ? api.unstage([f.path]) : api.stage([f.path])))
   }
-  const shown = (f: StatusFile, isStaged: boolean) => app.inspect?.kind === 'diff' && app.inspect.staged === isStaged && app.inspect.path === f.path
+  const toggleAll = () => act(() => (allStaged ? api.unstage([]) : api.stage([])))
+  const show = (f: StatusFile) => (app.inspect = { kind: 'diff', staged: false, path: f.path })
 
   async function discard(paths: string[]) {
-    const what = paths.length === 1 ? paths[0] : `all ${paths.length} changed files`
+    const what = paths.length === 1 ? paths[0] : `all ${paths.length} files with unstaged changes`
     const ok = await confirmBox({
       title: 'Discard changes',
-      message: `Discard unstaged changes in ${what}? Untracked files are deleted. This cannot be undone.`,
+      message: `Discard the unstaged changes in ${what}? New files are deleted. This cannot be undone.`,
       ok: 'Discard',
       danger: true,
     })
@@ -39,8 +50,8 @@
   async function commit(force: boolean) {
     if (force) {
       const ok = await confirmBox({
-        title: 'Commit without checks',
-        message: 'The staged changes have no passing check. Commit them anyway?',
+        title: 'Commit without checks?',
+        message: 'The staged files have no passing check, so the machines could get a configuration that does not build. Commit them anyway?',
         ok: 'Commit without checks',
         danger: true,
       })
@@ -48,10 +59,11 @@
     }
     committing = true
     commitError = ''
+    const msg = draft.message.trim()
     try {
-      const { sha } = await api.commit(message.trim(), force)
-      message = ''
-      toast(`Committed ${sha.slice(0, 8)}`, 'ok')
+      const { sha } = await api.commit(msg, force)
+      draft.message = ''
+      toast(`${sha.slice(0, 7)} · ${msg.split('\n')[0]}`, 'ok', 'Committed', { label: 'View in History', run: () => go(link('history', [], { rev: sha })) })
       app.logVersion++
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return
@@ -64,144 +76,131 @@
   }
 </script>
 
-{#snippet fileRow(f: StatusFile, isStaged: boolean)}
-  {@const letter = isStaged ? f.staged : f.unstaged}
-  {@const p = f.path.replace(/\/$/, '')}
-  <li class="item" class:selected={shown(f, isStaged)}>
-    <button class="item-main" aria-current={shown(f, isStaged) || undefined} title={f.from ? `${f.from} → ${f.path}` : f.path} onclick={() => showDiff(f, isStaged)}>
-      <span class="name">{basename(p)}</span>
-      <span class="dir">{dirname(p)}</span>
-    </button>
-    <span class="item-tools">
-      {#if isStaged}
-        <button class="icon" title="Unstage" aria-label="Unstage {f.path}" onclick={() => act(() => api.unstage([f.path]))}><Icon name="minus" size={14} /></button>
+<section class="panel" aria-label="Commit">
+  <div class="commit-box">
+    <label for="commit-message" class="label">Commit message</label>
+    <textarea
+      id="commit-message"
+      rows="3"
+      bind:value={draft.message}
+      placeholder="What changes, and why (Ctrl+Enter commits)"
+      onkeydown={(e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canCommit) commit(false)
+      }}></textarea>
+
+    <div class="check-state" role="status">
+      {#if !staged.length}
+        <span class="muted">Nothing staged yet.</span>
+      {:else if checked}
+        <span class="ok"><Icon name="tick" size={13} />The staged files passed the checks.</span>
+      {:else if checking}
+        <span class="busy"><span class="spinner" aria-hidden="true"></span>Checking the staged files…</span>
+        <button class="link" onclick={() => stagedJob && (app.inspect = { kind: 'job', id: stagedJob.id })}>Log</button>
+      {:else if stagedJob?.state === 'failed'}
+        <span class="bad"><Icon name="alert" size={13} />The checks failed.</span>
+        <button class="link" onclick={() => stagedJob && (app.inspect = { kind: 'job', id: stagedJob.id })}>Show the log</button>
       {:else}
-        <button class="icon" title="Discard changes" aria-label="Discard changes in {f.path}" onclick={() => discard([f.path])}><Icon name="undo" size={14} /></button>
-        <button class="icon" title="Stage" aria-label="Stage {f.path}" onclick={() => act(() => api.stage([f.path]))}><Icon name="plus" size={14} /></button>
+        <span class="warn">Not checked yet: run the checks before committing.</span>
       {/if}
-    </span>
-    <span class="letter b-{letter === '?' ? 'u' : letter}">{letter}</span>
-  </li>
-{/snippet}
-
-<section class="panel" aria-label="Changes">
-  <div class="panel-head">
-    <h2>Changes</h2>
-    <div class="tools">
-      <button class="icon" title="Refresh" aria-label="Refresh" onclick={refreshStatus}><Icon name="refresh" /></button>
     </div>
-  </div>
 
-  <div class="scroll">
-    <div class="commit-box">
-      <label for="commit-message" class="label">Commit message</label>
-      <textarea
-        id="commit-message"
-        rows="3"
-        bind:value={message}
-        placeholder="Describe the change (Ctrl+Enter to commit)"
-        onkeydown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canCommit) commit(false)
-        }}></textarea>
-
-      <div class="check-state" class:ok={checked}>
-        {#if !staged.length}
-          <span class="muted">Nothing staged.</span>
-        {:else if checked}
-          <span class="ok-line"><Icon name="tick" size={13} />Staged changes are checked.</span>
-        {:else if stagedJob && (stagedJob.state === 'queued' || stagedJob.state === 'running')}
-          <span>Check {stagedJob.id} is {stagedJob.state}…</span>
-        {:else if stagedJob?.state === 'failed'}
-          <span class="bad">Check {stagedJob.id} failed.</span>
-          <button class="link" onclick={() => (app.inspect = { kind: 'job', id: stagedJob.id })}>Show log</button>
-        {:else}
-          <span class="warn">Staged changes are not checked.</span>
-        {/if}
-      </div>
-
-      <div class="buttons">
-        <button onclick={checkStaged} disabled={!staged.length} title="Runs {targetsHint}; pick targets in the Checks panel">
-          <Icon name="play" size={12} /> Run checks
-        </button>
-        <span class="muted small">{targetsHint}</span>
-      </div>
-      <button class="primary wide" disabled={!canCommit} onclick={() => commit(false)}>{committing ? 'Committing…' : 'Commit'}</button>
-      {#if commitHint}<p class="muted small hint">{commitHint}</p>{/if}
-      {#if commitError}<p class="error small" role="alert">{commitError}</p>{/if}
-      <button class="link small danger-link" disabled={!staged.length || !message.trim() || committing} onclick={() => commit(true)}>
-        Commit without checks…
+    <div class="buttons">
+      <button onclick={checkStaged} disabled={!staged.length || checking} title="Runs {targetsHint} on the staged files; pick dry builds in Checks">
+        <Icon name="play" size={12} />Run checks
       </button>
+      <button class="primary grow" disabled={!canCommit} onclick={() => commit(false)}>{committing ? 'Committing…' : `Commit${staged.length ? ` ${staged.length} file${staged.length === 1 ? '' : 's'}` : ''}`}</button>
     </div>
-
-    <div class="section-head">
-      <h3>Staged <span class="count">{staged.length}</span></h3>
-      <div class="tools">
-        <button class="icon" title="Unstage all" aria-label="Unstage all" disabled={!staged.length} onclick={() => act(() => api.unstage([]))}><Icon name="minus" /></button>
-      </div>
-    </div>
-    <ul class="list">
-      {#each staged as f (f.path)}{@render fileRow(f, true)}{/each}
-    </ul>
-
-    <div class="section-head">
-      <h3>Changes <span class="count">{unstaged.length}</span></h3>
-      <div class="tools">
-        <button class="icon" title="Discard all" aria-label="Discard all changes" disabled={!unstaged.length} onclick={() => discard(unstaged.map((f) => f.path))}><Icon name="undo" /></button>
-        <button class="icon" title="Stage all" aria-label="Stage all" disabled={!unstaged.length} onclick={() => act(() => api.stage([]))}><Icon name="plus" /></button>
-      </div>
-    </div>
-    <ul class="list">
-      {#each unstaged as f (f.path)}{@render fileRow(f, false)}{/each}
-    </ul>
-    {#if !files.length}<p class="empty">No changes in the working copy.</p>{/if}
+    {#if commitHint && files.length}<p class="muted small hint">{commitHint}</p>{/if}
+    {#if commitError}<p class="error small" role="alert">{commitError}</p>{/if}
+    {#if staged.length && hasMessage && !checked && !checking && !committing}
+      <button class="link unchecked" onclick={() => commit(true)}>Commit without checks…</button>
+    {/if}
   </div>
+
+  <div class="files-head">
+    <label class="all" title={allStaged ? 'Unstage everything' : 'Stage everything'}>
+      <input type="checkbox" checked={allStaged} indeterminate={!allStaged && staged.length > 0} disabled={!files.length} onchange={toggleAll} />
+      <span>Files</span>
+      <span class="count num">{files.length}</span>
+    </label>
+    <span class="muted small">{staged.length} staged</span>
+    <span class="spacer"></span>
+    <button class="icon" title="Discard every unstaged change" aria-label="Discard every unstaged change" disabled={!files.some((f) => f.unstaged)} onclick={() => discard(files.filter((f) => f.unstaged).map((f) => f.path))}>
+      <Icon name="undo" size={15} />
+    </button>
+    <button class="icon" title="Refresh" aria-label="Refresh the file list" onclick={refreshStatus}><Icon name="refresh" size={15} /></button>
+  </div>
+
+  <ul class="list files">
+    {#each files as f (f.path)}
+      {@const p = f.path.replace(/\/$/, '')}
+      {@const full = !!f.staged && !f.unstaged}
+      <li class="item">
+        <input type="checkbox" class="stage" checked={full} indeterminate={!!f.staged && !!f.unstaged} aria-label="{full ? 'Unstage' : 'Stage'} {f.path}" onchange={() => toggle(f)} />
+        <button class="item-main" title={f.from ? `${f.from} → ${f.path}` : f.path} onclick={() => show(f)}>
+          <span class="name">{basename(p)}</span>
+          <span class="dir">{dirname(p)}</span>
+        </button>
+        {#if f.unstaged}
+          <span class="item-tools">
+            <button class="icon" title="Discard the unstaged changes" aria-label="Discard changes in {f.path}" onclick={() => discard([f.path])}><Icon name="undo" size={14} /></button>
+          </span>
+        {/if}
+        <span class="word w-{cls(f)}" title={f.staged && f.unstaged ? 'Partly staged' : f.staged ? 'Staged' : 'Not staged'}>{word(f)}</span>
+      </li>
+    {/each}
+  </ul>
+  {#if !files.length}<p class="empty">Nothing to commit: the working copy matches the last commit.</p>{/if}
 </section>
 
 <style>
+  .panel {
+    overflow: auto;
+  }
   .commit-box {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 4px 12px 14px;
+    gap: 8px;
+    padding: 12px 12px 14px;
+    border-bottom: 1px solid var(--border);
   }
   textarea {
     resize: vertical;
-    min-height: 54px;
+    min-height: 62px;
   }
   .check-state {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
-  .check-state.ok {
+  .check-state span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ok {
     color: var(--green);
   }
   .warn {
     color: var(--yellow);
   }
-  .ok-line {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
   .bad {
     color: var(--red);
   }
+  .busy {
+    color: var(--accent);
+  }
   .buttons {
     display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .buttons button {
-    display: inline-flex;
-    align-items: center;
     gap: 6px;
   }
-  .wide {
-    width: 100%;
+  .buttons button {
     height: 32px;
+  }
+  .grow {
+    flex: 1;
   }
   .hint,
   .error {
@@ -211,11 +210,57 @@
     color: var(--red);
     white-space: pre-wrap;
   }
-  .danger-link {
+  .unchecked {
     align-self: flex-start;
+    color: var(--fg-muted);
+    font-size: var(--fs-sm);
+  }
+  .unchecked:hover:not(:disabled) {
     color: var(--red);
   }
-  .small {
-    font-size: 12px;
+  .files-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 6px 0 12px;
+  }
+  .all {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--fg-strong);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .files .item {
+    padding-left: 12px;
+  }
+  .files .item-main {
+    padding-left: 8px;
+  }
+  .stage {
+    flex: none;
+  }
+  .word {
+    --c: var(--yellow);
+    flex: none;
+    min-width: 54px;
+    color: var(--c);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    text-align: right;
+  }
+  .w-new {
+    --c: var(--green);
+  }
+  .w-del {
+    --c: var(--red);
+  }
+  .w-ren {
+    --c: var(--blue);
+  }
+  .empty {
+    line-height: 1.5;
   }
 </style>

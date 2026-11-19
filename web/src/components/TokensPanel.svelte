@@ -102,7 +102,7 @@
             <td>{t.name}</td>
             <td title={t.created}>{ago(t.created)}</td>
             <td title={t.last_used}>{t.last_used ? ago(t.last_used) : 'never'}</td>
-            <td><button class="danger" onclick={() => revoke(t)}>Revoke</button></td>
+            <td class="act"><button class="small revoke" onclick={() => revoke(t)} aria-label="Revoke {t.name}">Revoke</button></td>
           </tr>
         {:else}
           <tr><td colspan="4" class="muted">No tokens yet.</td></tr>
@@ -174,8 +174,18 @@
     font-size: 12px;
     font-weight: 500;
   }
-  td:last-child {
+  td.act {
     text-align: right;
+  }
+  .revoke {
+    color: var(--fg-muted);
+    background: none;
+    border-color: var(--line);
+  }
+  .revoke:hover:not(:disabled) {
+    color: var(--red);
+    background: color-mix(in srgb, var(--red) 10%, transparent);
+    border-color: color-mix(in srgb, var(--red) 40%, transparent);
   }
   .endpoint {
     flex: 1;

@@ -343,28 +343,40 @@ export async function refreshJobs() {
   const finished = app.jobs.filter((j) => isActive(seenStates.get(j.id)) && !isActive(j.state))
   for (const j of app.jobs) seenStates.set(j.id, j.state)
   // Model and search-index jobs report through their own views.
-  for (const j of finished.filter((j) => ['check', 'lock', 'update'].includes(j.kind)))
-    toast(`${jobTitle[j.kind] ?? j.kind} ${j.state}`, j.state === 'passed' ? 'ok' : 'error', undefined, { label: 'Show log', run: () => showJob(j.id) })
+  for (const j of finished.filter((j) => j.kind in jobDone)) {
+    const log = { label: 'Show log', run: () => showJob(j.id, j.kind) }
+    const ok = j.state === 'passed'
+    const more = ok && j.kind === 'update' ? [{ label: 'See what changed', run: () => go('#/inputs') }, log] : log
+    toast(jobDone[j.kind][ok ? 0 : 1], ok ? 'ok' : 'error', undefined, more, 'job:' + j.id)
+  }
   if (finished.length) await Promise.all([refresh(), syncOpenTabs()])
   if (app.jobs.some((j) => isActive(j.state))) jobTimer = setTimeout(refreshJobs, 2000)
 }
 
-const jobTitle: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update' }
-
-/** Show a job's log in the Changes view. */
-export function showJob(id: string) {
-  app.inspect = { kind: 'job', id }
-  go('#/changes')
+const jobRunning: Record<string, string> = { check: 'Running the checks…', lock: 'Locking the flake inputs…', update: 'Updating the flake inputs…' }
+const jobDone: Record<string, [string, string]> = {
+  check: ['Checks passed', 'Checks failed'],
+  lock: ['Flake inputs locked', 'Locking the flake inputs failed'],
+  update: ['Flake inputs updated', 'Updating the flake inputs failed'],
 }
 
-export async function startJob(req: JobRequest) {
+/** Show a job's log: checks in Changes, input updates and locks in Inputs. */
+export function showJob(id: string, kind = 'check') {
+  app.inspect = { kind: 'job', id }
+  go(kind === 'check' ? '#/changes' : '#/inputs')
+}
+
+/** Start a job; one toast follows it from start to finish. Resolves to the job id, '' on failure. */
+export async function startJob(req: JobRequest): Promise<string> {
   try {
     const id = await api.createJob(req)
     app.inspect = { kind: 'job', id }
-    toast(`${jobTitle[req.kind]} started`, 'info', undefined, { label: 'Show log', run: () => showJob(id) })
+    toast(jobRunning[req.kind], 'busy', undefined, { label: 'Show log', run: () => showJob(id, req.kind) }, 'job:' + id)
     await refreshJobs()
+    return id
   } catch (e) {
-    report(e, `Could not start ${req.kind}`)
+    report(e, `Could not start the ${req.kind === 'check' ? 'checks' : req.kind}`)
+    return ''
   }
 }
 

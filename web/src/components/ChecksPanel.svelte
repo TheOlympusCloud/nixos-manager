@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type Job } from '../lib/api'
-  import { app, checkStaged, refreshJobs, startJob } from '../lib/state.svelte'
-  import { promptBox } from '../lib/ui.svelte'
+  import { link } from '../lib/router.svelte'
+  import { app, checkStaged, refreshJobs, showJob as openJob } from '../lib/state.svelte'
   import { ago } from '../lib/util'
   import Icon from './Icon.svelte'
 
@@ -38,33 +38,16 @@
     setSelected(on ? [...app.selectedTargets, attr] : app.selectedTargets.filter((a) => a !== attr))
   }
 
-  async function update() {
-    const inputs = await promptBox({
-      title: 'Update flake inputs',
-      message: 'Input names separated by spaces. Use * to update all inputs.',
-      input: { label: 'Inputs', value: '*' },
-      ok: 'Update',
-    })
-    if (inputs === null) return
-    const list = inputs.split(/[\s,]+/).filter((s) => s && s !== '*')
-    await startJob({ kind: 'update', inputs: list })
-  }
-
-  const showJob = (j: Job) => (app.inspect = { kind: 'job', id: j.id })
+  // Checks show here; input updates and locks open in Inputs.
+  const showJob = (j: Job) => (j.kind === 'check' ? (app.inspect = { kind: 'job', id: j.id }) : openJob(j.id, j.kind))
   // Evaluations and search indexes report in their own views.
   const jobs = $derived(app.jobs.filter((j) => ['check', 'lock', 'update'].includes(j.kind)))
-  const kinds: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update' }
+  const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs' }
   const short = (s?: string) => (s ? s.slice(0, 8) : '')
   const status = $derived(app.status)
 </script>
 
 <section class="panel" aria-label="Checks">
-  <div class="panel-head">
-    <h2>Checks</h2>
-    <div class="tools">
-      <button class="icon" title="Refresh jobs" aria-label="Refresh jobs" onclick={refreshJobs}><Icon name="refresh" /></button>
-    </div>
-  </div>
 
   <div class="scroll">
     <div class="staged" class:ok={status?.staged_checked}>
@@ -78,7 +61,7 @@
     </div>
 
     <div class="section-head">
-      <h3>Targets</h3>
+      <h3>Also dry-build</h3>
       <div class="tools">
         <button class="icon" title="Reload targets" aria-label="Reload targets" disabled={loading} onclick={loadTargets}><Icon name="refresh" /></button>
       </div>
@@ -109,13 +92,13 @@
     <div class="actions">
       <button class="primary" onclick={checkStaged}><Icon name="play" size={12} /> Check staged changes</button>
       <p class="muted small">Runs <code>nix flake check</code>{app.selectedTargets.length ? ` and a dry build of ${app.selectedTargets.length} target(s)` : ''} on a snapshot of the staged changes.</p>
-      <div class="row">
-        <button onclick={() => startJob({ kind: 'lock' })} title="nix flake lock">Lock</button>
-        <button onclick={update} title="nix flake update">Update inputs…</button>
-      </div>
+      <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs<Icon name="right" size={12} /></a>
     </div>
 
-    <div class="section-head"><h3>Jobs</h3></div>
+    <div class="section-head">
+      <h3>Recent jobs</h3>
+      <div class="tools"><button class="icon" title="Refresh jobs" aria-label="Refresh jobs" onclick={refreshJobs}><Icon name="refresh" /></button></div>
+    </div>
     <ul class="list">
       {#each jobs as j (j.id)}
         <li class="item" class:selected={app.inspect?.kind === 'job' && app.inspect.id === j.id}>
@@ -134,7 +117,7 @@
 
 <style>
   .staged {
-    margin: 4px 12px 8px;
+    margin: 12px 12px 8px;
     padding: 8px 10px;
     font-size: 12px;
     color: var(--yellow);
@@ -190,12 +173,15 @@
   .actions .primary {
     height: 32px;
   }
-  .row {
-    display: flex;
-    gap: 6px;
+  .inputs-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    text-decoration: none;
   }
-  .row button {
-    flex: 1;
+  .inputs-link:hover {
+    text-decoration: underline;
   }
   .job {
     gap: 8px;

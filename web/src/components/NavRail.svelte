@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { health } from '../lib/health.svelte'
+  import { serious } from '../lib/insights'
   import { link, route, type View } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
+  import { palette } from './CommandPalette.svelte'
   import Icon, { type IconName } from './Icon.svelte'
 
   let { collapsed = $bindable() }: { collapsed: boolean } = $props()
@@ -11,11 +14,16 @@
     { view: 'packages', label: 'Packages', icon: 'package', key: 'p' },
     { view: 'services', label: 'Services', icon: 'services', key: 's' },
     { view: 'options', label: 'Options', icon: 'sliders', key: 'o' },
+    { view: 'health', label: 'Health', icon: 'activity', key: 'a' },
+    { view: 'inputs', label: 'Inputs', icon: 'input', key: 'i' },
     { view: 'changes', label: 'Changes', icon: 'diff', key: 'c' },
     { view: 'history', label: 'History', icon: 'history', key: 'h' },
     { view: 'code', label: 'Code', icon: 'code', key: 'e' },
   ]
   const changes = $derived(app.status?.files.length ?? 0)
+  const findings = $derived(serious(health.insights))
+  const errors = $derived(findings.some((i) => i.severity === 'error'))
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const running = $derived(app.jobs.some((j) => ['check', 'lock', 'update'].includes(j.kind) && (j.state === 'running' || j.state === 'queued')))
 
   function toggle() {
@@ -29,6 +37,7 @@
     <Icon name={icon} size={18} />
     <span class="label">{label}</span>
     {#if view === 'changes' && changes}<span class="count num" aria-label="{changes} changed files">{changes}</span>{/if}
+    {#if view === 'health' && findings.length}<span class="count num sev" class:err={errors} aria-label="{findings.length} errors and warnings">{findings.length}</span>{/if}
     {#if view === 'changes' && running}<span class="dot busy" aria-label="A check is running"></span>{/if}
   </a>
 {/snippet}
@@ -38,6 +47,11 @@
     <span class="mark"><Icon name="mark" size={18} /></span>
     <span class="label">nixos-manager</span>
   </a>
+  <button class="item find" onclick={() => (palette.open = true)} title={collapsed ? `Search and run (${mac ? '⌘' : 'Ctrl'} K)` : undefined} aria-label="Search and run commands" aria-keyshortcuts={mac ? 'Meta+K' : 'Control+K'}>
+    <Icon name="search" size={18} />
+    <span class="label">Search…</span>
+    <span class="keys" aria-hidden="true"><kbd>{mac ? '⌘' : 'Ctrl'}</kbd><kbd>K</kbd></span>
+  </button>
   <div class="items">
     {#each items as i (i.view)}{@render item(i.view, i.label, i.icon, i.key)}{/each}
   </div>
@@ -148,6 +162,39 @@
     text-align: center;
     background: color-mix(in srgb, var(--accent-strong) 60%, var(--bg-active));
     border-radius: 9px;
+  }
+  .count.sev {
+    color: #1b1406;
+    background: var(--yellow);
+  }
+  .count.sev.err {
+    color: #fff;
+    background: #b4424b;
+  }
+  .find {
+    margin-bottom: var(--s2);
+    color: var(--fg-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+  .find:hover {
+    border-color: var(--line);
+  }
+  .keys {
+    display: inline-flex;
+    gap: 2px;
+    transition: opacity var(--t-fast) var(--ease);
+  }
+  .keys kbd {
+    min-width: 0;
+    padding: 0 4px;
+    color: var(--fg-muted);
+    font-size: 10px;
+    line-height: 16px;
+    background: var(--bg-raised);
+  }
+  .collapsed .keys {
+    opacity: 0;
   }
   .collapsed .count {
     position: absolute;

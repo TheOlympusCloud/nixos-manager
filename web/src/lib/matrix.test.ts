@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { HostDiff } from './api'
-import { diffParts, diffSummary, featureMatrix, packageMatrix, splitDiffs } from './matrix'
+import { featureMatrix, packageMatrix } from './matrix'
 import { testModel } from './testmodel'
 
 const [a, b] = testModel.hosts
@@ -31,32 +30,5 @@ describe('featureMatrix', () => {
     expect(rows[1].count).toBe(2)
     expect(rows[2].cells[0]?.managed).toBe(true)
     expect(rows[0].cells[0]).toBeNull()
-  })
-})
-
-describe('host diffs', () => {
-  const changed: HostDiff = { host: 'a', status: 'changed', packagesAdded: ['firefox', 'vlc'], packagesRemoved: ['nano'], featuresAdded: ['services.jellyfin'], portsRemoved: ['tcp/80'] }
-
-  it('lists only the parts that changed', () => {
-    expect(diffParts(changed).map((p) => p.label)).toEqual(['Packages', 'Features', 'Ports'])
-    expect(diffParts({ host: 'x', status: 'unchanged' })).toEqual([])
-  })
-
-  it('summarises a machine in one line', () => {
-    expect(diffSummary(changed)).toBe('+2 −1 packages · +1 features · −1 ports')
-    expect(diffSummary({ host: 'n', status: 'added', usersAdded: ['pablo'] })).toBe('New machine · +1 users')
-    expect(diffSummary({ host: 'x', status: 'unchanged' })).toBe('No changes')
-    expect(diffSummary({ host: 'x', status: 'error', error: 'boom' })).toBe('Does not evaluate')
-  })
-
-  it('puts changed machines first and sets unchanged ones apart', () => {
-    const { changed: c, unchanged: u } = splitDiffs([
-      { host: 'z', status: 'unchanged' },
-      changed,
-      { host: 'b', status: 'error' },
-      { host: 'n', status: 'added' },
-    ])
-    expect(c.map((d) => d.host)).toEqual(['b', 'n', 'a'])
-    expect(u.map((d) => d.host)).toEqual(['z'])
   })
 })
