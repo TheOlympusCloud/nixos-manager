@@ -81,8 +81,8 @@ ready() {
   fail "$1 never became ready"
 }
 
-# The earlier image: the same server run as root, on a volume that does not start from
-# the image's folder (nocopy), as the earlier image had none.
+# The earlier image: the same server run as root, on a volume that does not take this
+# image's folder, which nixos-manager owns (nocopy); the earlier image's was root's.
 docker volume create "$old" > /dev/null
 start "$old" :nocopy --user 0 --entrypoint /usr/local/bin/nixos-manager
 [ "$(server_uid)" = 0 ] || fail "the old-image stand-in does not run as root"
