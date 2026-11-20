@@ -214,6 +214,7 @@ func TestDiffModelsListsUnitsAndEtc(t *testing.T) {
 		"nix-opts-added.mount":        u("a"),
 		"same.service":                u("a", "Unit/X-Reload-Triggers", "r1"),
 		"old.service":                 u("a"),
+		"kept.service":                u("a", "flag:Unit/X-StopOnRemoval", "no"),
 		"getty@.service":              u("a"),
 		"reload-flag-trigger.service": u("a", "Unit/X-Reload-Triggers", "r1"),
 	}
@@ -259,6 +260,7 @@ func TestDiffModelsListsUnitsAndEtc(t *testing.T) {
 		{Name: "explicit.service", Action: "restart"},
 		{Name: "getty@.service", Action: "restart"},
 		{Name: "journald.service", Action: "keep"},
+		{Name: "kept.service", Action: "keep"}, // removed, but X-StopOnRemoval=false: it keeps running
 		{Name: "new.service", Action: "start"},
 		{Name: "new.target", Action: "start"},
 		{Name: "nginx.service", Action: "restart"},

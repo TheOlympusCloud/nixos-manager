@@ -93,9 +93,10 @@ let
   # Each enabled systemd unit as switch-to-configuration compares it (nixos-26.05,
   # compare_units): a hash of the settings it restarts the unit for, a hash of
   # each setting it only reloads it for, and the settings that decide what it
-  # does with a changed unit. [Install] and the [Unit] keys it ignores are left
-  # out; keys are sorted stably, as their order does not matter but the order of
-  # one key's values does. A disabled unit is masked: it counts as removed.
+  # does with a changed or removed unit. [Install] and the [Unit] keys it
+  # ignores are left out; keys are sorted stably, as their order does not
+  # matter but the order of one key's values does. A disabled unit is masked:
+  # it counts as removed.
   hash = builtins.hashString "sha256";
   unitIgnored = map (k: "Unit/${k}") [
     "Description"
@@ -121,6 +122,7 @@ let
     "Service/X-RestartIfChanged"
     "Unit/RefuseManualStop"
     "Unit/X-OnlyManualStart"
+    "Unit/X-StopOnRemoval"
   ];
   # [ { key = "Section/Key"; value = "..."; } ] in file order, as NixOS writes
   # units: "[Section]" and "Key=value" lines. No escapes or classes in the

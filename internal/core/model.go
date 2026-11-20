@@ -60,7 +60,7 @@ type HostDetail struct {
 // UnitInfo is a systemd unit as switch-to-configuration compares it: a hash of
 // the settings it restarts the unit for, a hash of each setting it only
 // reloads the unit for ("Section/Key"), and the settings that decide what it
-// does with a changed unit, by "Section/Key" (the last value).
+// does with a changed or removed unit, by "Section/Key" (the last value).
 type UnitInfo struct {
 	Hash   string            `json:"hash"`
 	Reload map[string]string `json:"reload"`
@@ -366,9 +366,13 @@ func diffUnits(before, after map[string]UnitInfo) []UnitChange {
 			out = append(out, UnitChange{Name: name, Action: action})
 		}
 	}
-	for name := range before {
+	for name, b := range before {
 		if _, ok := after[name]; !ok {
-			out = append(out, UnitChange{Name: name, Action: "stop"})
+			action := "stop"
+			if !systemdBool(b.Flags["Unit/X-StopOnRemoval"], true) { // removed, but left running
+				action = "keep"
+			}
+			out = append(out, UnitChange{Name: name, Action: action})
 		}
 	}
 	slices.SortFunc(out, func(x, y UnitChange) int { return strings.Compare(x.Name, y.Name) })
