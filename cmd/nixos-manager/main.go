@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // TZ works in an image without zoneinfo: the update schedule is in local time
 
 	"github.com/TheOlympusCloud/nixos-manager/internal/auth"
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
@@ -42,6 +43,7 @@ Environment:
   NIXMGR_LISTEN    address to listen on (default 127.0.0.1:8080)
   NIXMGR_NIX, NIXMGR_NIXFMT, NIXMGR_NIXD   tool commands (default nix, nixfmt, nixd)
   NIXMGR_EVAL_JOBS machines evaluated at once (default 2, or 1 on a single CPU; about 1 GB each)
+  TZ               time zone of the update schedule (default the system's, else UTC)
 `
 
 func main() {
@@ -146,6 +148,9 @@ func run() error {
 	if err := forgejo.Resume(); err != nil { // checks the pushed commits that waited when it stopped
 		return err
 	}
+	if svc.Updates, err = core.OpenUpdates(data, svc); err != nil {
+		return err
+	}
 
 	s := &server.Server{
 		Svc: svc, Auth: a, UI: web.UI,
@@ -162,6 +167,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go notifier.Run(ctx)
+	go svc.Updates.Run(ctx) // after forgejo.Resume: an update's check is reported to Forgejo too
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

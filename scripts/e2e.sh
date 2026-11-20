@@ -2,8 +2,8 @@
 # End-to-end run of the real server against a fresh flake repository and a bare
 # git remote standing in for Forgejo: login, starter flake, lock, check, the
 # commit gate, commit, push, edit, history, a push from elsewhere checked
-# through the webhook, a trial on one machine, and the rollback of a failed
-# deployment.
+# through the webhook, a trial on one machine, the rollback of a failed
+# deployment, and an update of the inputs on a branch, merged with one click.
 #
 # Uses the real nix and nixfmt from PATH (network needed for the flake inputs).
 # E2E_STUB_NIX=1 replaces them with stubs, for machines without Nix.
@@ -45,6 +45,7 @@ case "$*" in
     echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","systemPath":"/nix/store/'"$drv"'-nixos-system-example-26.05","units":{"example.service":{"hash":"'"$drv"'","reload":{},"flags":{}}},"etc":{"example.conf":"'"$drv"'"},"managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"],"checks":{"comin":true,"cominBranches":[{"url":"https://forgejo.example.lan/pablo/nixos-config.git","main":"main","testing":"testing-example"}]}}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
+  *"flake update"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7, "e2e": "updated" }\n' > "$d/flake.lock" ;;
   *"--dry-run"*) printf 'these 3 derivations will be built:\nthese 9 paths will be fetched (1.50 MiB download, 6.00 MiB unpacked):\n' >&2 ;;
 esac
 EOF
@@ -282,6 +283,38 @@ if [ "${E2E_STUB_NIX:-}" != 1 ]; then # the stub cannot evaluate the edit
   echo "$diff" | json '["hosts"][0].get("packagesAdded", [])' | grep -q ripgrep || fail "the diff does not show the new package: $diff"
 fi
 echo "ok   package added by clicking shows up as a change"
+
+# The inputs updated on a branch, checked, and merged with one click; the
+# working copy, with its own changes, is left alone. Stubbed only: with real Nix
+# this would update the starter fleet's real inputs, whatever upstream did that
+# day (the Real Nix tests update a local input instead).
+if [ "${E2E_STUB_NIX:-}" = 1 ]; then
+  status=$(git -C "$repo_dir" status --porcelain)
+  head=$(git -C "$repo_dir" rev-parse HEAD)
+  main=$(git -C "$work/remote.git" rev-parse main)
+  [ "$(api POST /api/updates/schedule -d '{"enabled":true,"day":-1,"hour":4}' | json '["next"]' | cut -c12-16)" != "" ] || fail "the schedule"
+  [ "$(api POST /api/updates/run -d '{}' | json '["update"]["state"]')" = updating ] || fail "update now"
+  for _ in $(seq 600); do
+    up=$(api GET /api/updates)
+    case "$(echo "$up" | json '["update"]["state"]')" in ready | failed | error | current) break ;; esac
+    sleep 0.2
+  done
+  [ "$(echo "$up" | json '["update"]["state"]')" = ready ] || fail "the update: $up"
+  usha=$(echo "$up" | json '["update"]["commit"]')
+  [ "$(git -C "$work/remote.git" rev-parse flake-update)" = "$usha" ] || fail "flake-update is not the update"
+  [ "$(git -C "$work/remote.git" rev-parse "$usha^")" = "$main" ] || fail "the update is not on top of main"
+  [ "$(git -C "$work/remote.git" rev-parse main)" = "$main" ] || fail "the update moved main"
+  [ "$(git -C "$work/remote.git" diff --name-only "$main" "$usha")" = flake.lock ] || fail "the update changes more than flake.lock"
+  [ "$(git -C "$repo_dir" status --porcelain)" = "$status" ] || fail "the update touched the working copy"
+  kill "$pid"; wait "$pid" 2>/dev/null || true
+  start
+  [ "$(api GET /api/updates | json '["update"]["commit"]')" = "$usha" ] || fail "the restart forgot the update"
+  merged=$(api POST /api/updates/merge -d "{\"commit\":\"$usha\"}" | json '["message"]') || fail "merge"
+  [ "$(git -C "$work/remote.git" rev-parse main)" = "$usha" ] || fail "main is not the update: $merged"
+  [ "$(git -C "$repo_dir" rev-parse HEAD)" = "$head" ] || fail "the merge moved a working copy with changes"
+  [ "$(api GET /api/updates | json '["update"]["state"]')" = merged ] || fail "not merged"
+  echo "ok   inputs updated on flake-update, checked, merged into main with one click"
+fi
 
 # Secrets, when sops, age and ssh-to-age are on PATH (CI's Real Nix job): the
 # example machine's key, a value for every machine and one for it alone, its

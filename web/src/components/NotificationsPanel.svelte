@@ -78,8 +78,8 @@
 <section class="card block" aria-labelledby="set-notify">
   <h2 id="set-notify">Notifications</h2>
   <p class="muted">
-    Get a message when a deployment fails or a machine is stuck behind for over an hour, when a machine stops reporting, when the branch comin deploys does not evaluate, and
-    when a NixOS release or a flake input reaches its end of life. Each event is sent once per channel; it is sent again only if it ends and comes back. A channel only
+    Get a message when a deployment fails or a machine is stuck behind for over an hour, when a machine stops reporting, when the branch comin deploys does not evaluate,
+    when a NixOS release or a flake input reaches its end of life, and when a scheduled update of the inputs is ready to merge or fails. Each event is sent once per channel; it is sent again only if it ends and comes back. A channel only
     gets what starts after it was set up: Health shows what is already wrong.
   </p>
   {#if !form}

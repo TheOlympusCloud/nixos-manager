@@ -62,7 +62,7 @@
     if (stick && pre) pre.scrollTop = pre.scrollHeight
   })
 
-  const kinds: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update', model: 'Evaluation', options: 'Option index', packages: 'Package index', system: 'Deployed systems' }
+  const kinds: Record<string, string> = { check: 'Check', lock: 'Flake lock', update: 'Input update', 'update-branch': 'Scheduled update', model: 'Evaluation', options: 'Option index', packages: 'Package index', system: 'Deployed systems' }
   const running = $derived(jobState === 'queued' || jobState === 'running' || jobState === '')
 </script>
 

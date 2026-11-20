@@ -30,7 +30,7 @@ export function summaryLines(s: CheckSummary, commit = false): string[] {
   return lines
 }
 
-const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs' }
+const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs', 'update-branch': 'Scheduled update' }
 
 /** A job's name in lists; a check of a commit names the commit, and the branch it was pushed to. */
 export function jobTitle(j: Job): string {

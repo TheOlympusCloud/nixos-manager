@@ -4,6 +4,7 @@
   import JobLog from '../components/JobLog.svelte'
   import MachineImpact from '../components/MachineImpact.svelte'
   import ModelGate from '../components/ModelGate.svelte'
+  import ScheduledUpdate from '../components/ScheduledUpdate.svelte'
   import { api, type Input } from '../lib/api'
   import { fleet } from '../lib/fleet.svelte'
   import { age, days, plural } from '../lib/format'
@@ -139,6 +140,7 @@
           </table>
         </div>
         <p class="legend muted small">Inputs older than 30 days show in amber, older than 60 days in red: updating brings security fixes and new versions.</p>
+        <ScheduledUpdate />
       {:else}
         <div class="empty-state">
           <h2>No inputs locked</h2>

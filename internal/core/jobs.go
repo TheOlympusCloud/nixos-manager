@@ -84,6 +84,9 @@ func newJobs(repo *Repo) *Jobs {
 //     attribute; or, with Commit, the same for a commit (see CheckCommit);
 //   - "lock": nix flake lock of the working copy;
 //   - "update": nix flake update of Inputs (all when empty) of the working copy.
+//
+// The server's own work adds "update-branch": nix flake update of every input
+// of a commit's tree, whose flake.lock becomes the job's Result (updates.go).
 type JobRequest struct {
 	Kind    string   `json:"kind"`
 	Targets []string `json:"targets,omitempty"`
@@ -114,6 +117,7 @@ type Job struct {
 	started  time.Time
 	finished time.Time
 	summary  *CheckSummary // a check's, once it ran
+	result   []byte        // an update-branch job's new flake.lock
 	out      []byte
 	changed  chan struct{} // closed and replaced on every write
 	done     chan struct{}
@@ -164,6 +168,13 @@ func (j *Job) Read(offset int) ([]byte, bool, <-chan struct{}) {
 		chunk = bytes.Clone(j.out[offset:])
 	}
 	return chunk, j.state == "passed" || j.state == "failed", j.changed
+}
+
+// Result is the new flake.lock of an update-branch job that passed.
+func (j *Job) Result() []byte {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.result
 }
 
 // Done is closed when the job has finished.
@@ -422,13 +433,16 @@ func (js *Jobs) run(job *Job) error {
 	var steps [][]string
 	var after func() error // once every step passed
 	switch job.Req.Kind {
-	case "lock", "update":
+	case "lock", "update", "update-branch":
 		// Nix copies a path: flake whole into the world-readable store, so it gets an
 		// export, never the working copy with .git and stray files. Repo.mu is held
 		// only to export and to copy flake.lock back, not for the whole download.
-		tree, base, err := js.Repo.lockSource(ctx)
-		if err != nil {
-			return err
+		tree, base := job.tree, map[string]string(nil) // update-branch: a commit's tree, nothing written back
+		if job.Req.Kind != "update-branch" {
+			var err error
+			if tree, base, err = js.Repo.lockSource(ctx); err != nil {
+				return err
+			}
 		}
 		src, cleanup, err := js.snapshot(ctx, tree)
 		if err != nil {
@@ -445,6 +459,12 @@ func (js *Jobs) run(job *Job) error {
 			lock, err := os.ReadFile(filepath.Join(src, "flake.lock"))
 			if err != nil {
 				return fmt.Errorf("nix wrote no flake.lock: %v", err)
+			}
+			if job.Req.Kind == "update-branch" {
+				job.mu.Lock()
+				job.result = lock
+				job.mu.Unlock()
+				return nil
 			}
 			return js.Repo.putLock(base, lock)
 		}

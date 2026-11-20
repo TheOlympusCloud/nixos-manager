@@ -23,4 +23,6 @@ Every machine runs comin: it pulls `main` from Forgejo and switches to
 `nixosConfigurations.<its hostname>`. A branch named `testing-<hostname>` is
 deployed to that machine only, with `switch-to-configuration test`, while it is
 on top of `main`: nixos-manager's **Try on** in Changes pushes one, to try a
-change on one machine before `main`.
+change on one machine before `main`. nixos-manager's scheduled update of the inputs
+pushes `flake-update`, which no machine follows: it reaches them only once
+merged into `main`.
