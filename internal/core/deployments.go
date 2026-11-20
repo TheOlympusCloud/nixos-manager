@@ -458,7 +458,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	if d == nil {
 		return ov, nil
 	}
-	follows := d.follows(ctx, model)
+	follows := cominFollows(ctx, d.repo, model)
 	ov.Branch = fleetBranch(follows)
 	ov.SharedToken = d.SharedToken()
 	d.mu.Lock()
@@ -519,7 +519,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 		if m.Reports == nil {
 			m.Reports = []DeployReport{}
 		}
-		if t := tips[b.Testing]; t != "" && m.Target != "" && t != m.Target && d.isAncestor(ctx, m.Target, t) {
+		if t := tips[b.Testing]; t != "" && m.Target != "" && t != m.Target && d.repo.isAncestor(ctx, m.Target, t) {
 			m.Branch, m.Target = b.Testing, t // comin deploys a testing branch that is on top of the main one
 		}
 		if len(m.Reports) > 0 {
@@ -667,7 +667,7 @@ func (d *Deployments) removed(ctx context.Context, model *Model, reports map[str
 		last := reports[h][0]
 		// comin's ref is <remote>/<branch>; older reports have none.
 		fromBranch := last.Ref == "" || last.Ref == branch || strings.HasSuffix(last.Ref, "/"+branch)
-		return !fromBranch || !d.isAncestor(ctx, last.Commit, tip)
+		return !fromBranch || !d.repo.isAncestor(ctx, last.Commit, tip)
 	})
 	slices.Sort(gone)
 	return gone
@@ -708,14 +708,14 @@ func (d *Deployments) Forget(hosts ...string) error {
 	return nil
 }
 
-// follows maps the fleet's machines to the branches their comin follows: those
-// set for the remote this console pushes to, else for its first remote.
-func (d *Deployments) follows(ctx context.Context, model *Model) map[string]CominBranches {
+// cominFollows maps the fleet's machines to the branches their comin follows:
+// those set for the remote this console pushes to, else for its first remote.
+func cominFollows(ctx context.Context, r *Repo, model *Model) map[string]CominBranches {
 	out := map[string]CominBranches{}
 	if model == nil {
 		return out
 	}
-	o, err := ParseRemote(d.repo.Remote(ctx))
+	o, err := ParseRemote(r.Remote(ctx))
 	known := err == nil && o.Kind != "local"
 	for _, h := range model.Hosts {
 		if bs := h.Checks.CominBranches; len(bs) > 0 {
@@ -762,9 +762,4 @@ func (d *Deployments) branchTips(ctx context.Context) (map[string]string, error)
 		}
 	}
 	return tips, nil
-}
-
-func (d *Deployments) isAncestor(ctx context.Context, a, b string) bool {
-	_, err := d.repo.git(ctx, "merge-base", "--is-ancestor", "--end-of-options", a, b)
-	return err == nil
 }

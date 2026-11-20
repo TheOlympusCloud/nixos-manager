@@ -917,6 +917,12 @@ func (r *Repo) clean(ctx context.Context) error {
 	return nil
 }
 
+// isAncestor says whether commit a is b or one of its ancestors.
+func (r *Repo) isAncestor(ctx context.Context, a, b string) bool {
+	_, err := r.git(ctx, "merge-base", "--is-ancestor", "--end-of-options", a, b)
+	return err == nil
+}
+
 // Revert stages the inverse of a commit; the user checks and commits it like any change.
 func (r *Repo) Revert(ctx context.Context, rev string) error {
 	sha, err := r.resolve(ctx, rev)
