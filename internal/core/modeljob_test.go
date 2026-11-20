@@ -562,7 +562,18 @@ func TestWorkingTreeIsCachedUntilAnythingChanges(t *testing.T) {
 	}{
 		{"same size, same mtime", func() {
 			fi, _ := os.Stat(abs("a.nix"))
-			ok(t, os.WriteFile(abs("a.nix"), []byte("bbbb\n"), 0o644))
+			added, _, _ := fileID(fi)
+			// git compares change times in whole seconds: in the second the file was
+			// added, git itself would not see this content. Write until the change
+			// time (the kernel's coarse clock) is in another second.
+			for {
+				ok(t, os.WriteFile(abs("a.nix"), []byte("bbbb\n"), 0o644))
+				now, _ := os.Stat(abs("a.nix"))
+				if c, _, _ := fileID(now); c.Unix() != added.Unix() {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 			ok(t, os.Chtimes(abs("a.nix"), fi.ModTime(), fi.ModTime()))
 		}},
 		{"rename", func() { ok(t, os.Rename(abs("a.nix"), abs("b.nix"))) }},
