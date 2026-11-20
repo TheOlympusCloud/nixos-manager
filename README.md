@@ -509,9 +509,11 @@ builds and commits that leave a machine unchanged. Without it, a machine whose
 configuration a commit does not change looks behind until a commit does change
 it. A systemd timer, `nixos-manager-heartbeat.timer`, sends the heartbeat. The
 hook posts with `curl` to `/api/deployments/report`, does nothing without the
-token file, and never fails a deployment. A comin report that cannot be
-delivered (nixos-manager is down, say) waits in
-`/var/lib/nixos-manager-report/pending.json` and goes with the next heartbeat.
+token file, and never fails a deployment. Reports that cannot be delivered
+(nixos-manager is down, say) wait in order in
+`/var/lib/nixos-manager-report/pending.jsonl` (the newest 20), and the next
+heartbeat or comin report sends them first. A report sent late is dated when
+it arrives, so **Deployed** can be later than the switch itself.
 nixos-manager keeps the last 20 reports per machine in
 `$NIXMGR_DATA/deployments.json`, and what each machine's latest report or
 heartbeat said in `$NIXMGR_DATA/heartbeats.json`. The reports of a machine that is no longer in the
@@ -557,8 +559,10 @@ already wrong is in **Health**. A failed send is tried again a minute later,
 then waiting twice as long each time, up to an hour; Settings shows how the
 last send to each channel went, and **Send a test message** checks a channel
 right away. Nothing is sent in the first 20 minutes after a start, while the
-machines report in. The channels are in `$NIXMGR_DATA/notify.json` (the
-token and password are never shown again once saved), and what was sent in
+machines report in. The channels are in `$NIXMGR_DATA/notify.json`. The ntfy
+token and the SMTP password are never shown again once saved, but the ntfy
+topic and the webhook address are, to whoever is logged in: for ntfy.sh, Slack,
+Discord or Home Assistant those addresses are secrets too. What was sent is in
 `$NIXMGR_DATA/notify-state.json`, so a restart does not send it twice.
 
 ## Binary cache
