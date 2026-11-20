@@ -55,7 +55,7 @@ var toolScope = map[string]auth.Scope{
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
 	"flake_lock": auth.ScopeEdit, "flake_update": auth.ScopeEdit,
 
-	"push": auth.ScopeFull,
+	"push": auth.ScopeFull, "try_on_machine": auth.ScopeFull, "end_trial": auth.ScopeFull,
 }
 
 // server is an MCP server with the tools one token scope allows.
@@ -242,6 +242,19 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		out, err := svc.Push(ctx, false)
 		return map[string]string{"output": out}, err
 	})
+	tool(s, "try_on_machine", "Try changes on one machine before main: the staged changes (or, with nothing staged, the commits not pushed yet) are committed on the testing branch its comin follows (testing-<host> by default), on top of the main branch, and pushed. comin deploys that branch on this machine only, with switch-to-configuration test, so a reboot brings back what main gave it. Needs the main branch checked out and up to date with the remote (pull first), and a run_check that built this machine. The working copy then stays on the testing branch: commit and push there to try more, and watch the machine with deployments. To promote: switch_branch to the main branch, merge_branch the testing branch, run_check, commit, push. To stop: end_trial. Refused when the testing branch holds an earlier trial the main branch does not have, unless replace.", func(ctx context.Context, in struct {
+		Host    string `json:"host"`
+		Message string `json:"message,omitempty" jsonschema:"the commit message for the staged changes"`
+		Replace bool   `json:"replace,omitempty" jsonschema:"drop an earlier trial on the testing branch that the main branch does not have"`
+	}) (core.Trial, error) {
+		return svc.TryOn(ctx, in.Host, in.Message, in.Replace)
+	})
+	tool(s, "end_trial", "Send a machine back to its main branch after a trial: its testing branch on the remote is pointed at the main branch's last commit, which comin then deploys there. The working copy's branches are left as they are.", func(ctx context.Context, in struct {
+		Host string `json:"host"`
+	}) (map[string]string, error) {
+		msg, err := svc.EndTrial(ctx, in.Host)
+		return map[string]string{"message": msg}, err
+	})
 	tool(s, "pull", "Bring the current branch up to date with the remote (fast-forward, or rebase local commits; nothing changes on conflict).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
 		out, err := svc.Pull(ctx)
 		return map[string]string{"output": out}, err
@@ -290,7 +303,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		ov, _ := svc.Deploys.Overview(ctx, m, time.Now()) // deployment findings are extra
 		return map[string][]core.Insight{"insights": core.Insights(m, ov.Machines, svc.Remote(ctx), svc.TipCheck(ctx, ov.Branch), time.Now())}, nil
 	})
-	tool(s, "deployments", "What each machine runs, as comin reports it after deploying: the last commit it deployed (or built and found unchanged) and when, a failure with comin's error, and how many commits it is behind the branch its comin follows (the main branch set in services.comin.remotes, or its testing branch, testing-<host> by default, when that is on top). States: current, behind, failed, unknown (its commit is not in this working copy: pull first), never (has not reported a deployment: the token or the url in modules/common.nix is missing, unless lastSeen shows its heartbeats). silent, whatever the state: no report or heartbeat for more than silentAfter hours (0: never flagged; 168 and behind for machines without heartbeats). system is what it last said it runs, boots and boots next, and whether a reboot is pending; expected is what its commit builds, as comin evaluates it, and drift is manual (it runs a system no deployment made: nixos-rebuild by hand or a rollback) or unfinished (a switch that stopped or failed partway). branch is the main branch most machines follow and commits are its newest. A push is a deploy: call this after pushing to watch the machines catch up.", func(ctx context.Context, _ struct{}) (core.DeployOverview, error) {
+	tool(s, "deployments", "What each machine runs, as comin reports it after deploying: the last commit it deployed (or built and found unchanged) and when, a failure with comin's error, and how many commits it is behind the branch its comin follows (the main branch set in services.comin.remotes, or its testing branch, testing-<host> by default, when that is on top). States: current, behind, failed, unknown (its commit is not in this working copy: pull first), never (has not reported a deployment: the token or the url in modules/common.nix is missing, unless lastSeen shows its heartbeats). silent, whatever the state: no report or heartbeat for more than silentAfter hours (0: never flagged; 168 and behind for machines without heartbeats). system is what it last said it runs, boots and boots next, and whether a reboot is pending; expected is what its commit builds, as comin evaluates it, and drift is manual (it runs a system no deployment made: nixos-rebuild by hand or a rollback) or unfinished (a switch that stopped or failed partway). branch is the main branch most machines follow and commits are its newest. Each machine also names its main and testing branch (try_on_machine pushes to the latest). culprits, for a machine whose deployment failed on its main branch, are the commits since the last one it deployed, newest first: revert_commit with rev the newest culprit and since the machine's commit stages their inverse, which rolls it back. A push is a deploy: call this after pushing to watch the machines catch up.", func(ctx context.Context, _ struct{}) (core.DeployOverview, error) {
 		m, _, _ := svc.Jobs.Model(ctx, "working") // the machines and their comin branches, when an evaluation is at hand
 		return svc.Deploys.Overview(ctx, m, time.Now())
 	})
