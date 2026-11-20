@@ -56,7 +56,10 @@ An MCP server gives automation the same features.
   and `nixfmt`, for the hand-written files.
 - **Command palette** (Ctrl/Cmd+K): jump to any machine, package, service,
   option, file or action.
-- Login for the UI; named, revocable API tokens for MCP clients.
+- Login for the UI, limited against password guessing; named, revocable API
+  tokens for MCP clients and scripts, each read-only, edit without push, or
+  full, with an optional expiry. Every commit names the session or token that
+  made it.
 
 The repository is a normal git repository whose remote is Forgejo. Each machine
 runs [comin](https://github.com/nlewo/comin), pulls from Forgejo and switches
@@ -349,7 +352,9 @@ Tailscale encrypts the traffic, and `tailscale serve` adds HTTPS on the tailnet:
   `services.tailscale.enable = true;` to its configuration and switch, then
   run `tailscale up` once and `tailscale serve --bg 8080`. It is reachable at
   `https://nixos-manager.<tailnet>.ts.net`.
-- **Docker.** Run `tailscale serve --bg 8080` on the host.
+- **Docker.** Run `tailscale serve --bg 8080` on the host, and set
+  `NIXMGR_TRUSTED_PROXIES` in `compose.yaml` (see the login limits under
+  Configuration).
 
 If the LAN is not trusted, listen on loopback only and use it through
 Tailscale: `listen = "127.0.0.1:8080";` without `openFirewall` in the
@@ -447,6 +452,34 @@ code as the web UI, including the check rules for commit and push, which MCP
 clients cannot override. Writes and restores need the `base_hash` from
 `read_file`, so a client never overwrites an edit it has not seen.
 
+### Token scopes
+
+Each token gets a scope when it is created, and optionally an expiry date:
+
+| Scope | What it can do |
+|---|---|
+| Read only | Read files, history, the fleet model, checks, jobs and deployments; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
+| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, and lock or update inputs |
+| Full | Also push, which deploys |
+
+The MCP endpoint offers only the tools of the token's scope. The same token
+works on the HTTP API, on the routes its scope covers:
+
+```sh
+curl -H "Authorization: Bearer <token>" http://<server>:8080/api/deployments
+```
+
+Managing tokens, Settings, the deployment report token and the editor's
+language server need the web login. Only the person logged in to the web UI
+can commit or push without a passing check. Tokens created before scopes
+existed are full tokens, as before; an expired token stays listed, refused,
+until you revoke it.
+
+Every commit made through the console ends with a trailer that says how it
+arrived: `Via: web session 3fa2c1d9` (the same label as the `login` line in the
+service log) or `Via: token ci (K3J9QW2M4X1A)`, the token's name and id. A
+commit message may not bring its own `Via` trailer.
+
 ## Configuration
 
 | Variable | Meaning |
@@ -457,9 +490,23 @@ clients cannot override. Writes and restores need the `base_hash` from
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
+| `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
 
 Sessions last 7 days and are kept in memory, so a restart logs you out.
+
+Logins are limited before the password is checked: 10 attempts per 10
+minutes from one address, and 50 per 10 minutes from all addresses together.
+More get `429 Too Many Requests` with `Retry-After`; successful logins do not
+count. A browser that has logged in before keeps a cookie that gives it its own
+limit of 10, outside the shared one, so someone guessing from elsewhere cannot
+lock you out of a browser you already use. Behind a proxy on the same machine
+(`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
+to `X-Forwarded-For`. With Docker, a proxy on the host reaches the container
+from the Docker gateway rather than loopback: set `NIXMGR_TRUSTED_PROXIES` to
+that address (the `remote=` of the `login` lines in the log), or every proxied
+login shares one address's limit. List only proxies there, since anything in
+that list can claim any client address. The counts are kept in memory.
 
 ## Visual editing on an existing repository
 

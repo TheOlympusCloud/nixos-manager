@@ -91,6 +91,10 @@ func run() error {
 		}
 		hash = strings.TrimSpace(string(b))
 	}
+	proxies, err := server.ParseTrustedProxies(os.Getenv("NIXMGR_TRUSTED_PROXIES"))
+	if err != nil {
+		return fmt.Errorf("NIXMGR_TRUSTED_PROXIES: %w", err)
+	}
 	data := env("NIXMGR_DATA", "/var/lib/nixos-manager")
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		return err
@@ -116,10 +120,11 @@ func run() error {
 
 	s := &server.Server{
 		Svc: svc, Auth: a, UI: web.UI,
-		MCP:  mcpserver.Handler(mcpserver.New(svc, version)),
+		MCP:  mcpserver.Handler(svc, version),
 		Nixd: strings.Fields(env("NIXMGR_NIXD", "nixd")),
 
-		Forgejo: &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE")},
+		Forgejo:        &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE")},
+		TrustedProxies: proxies,
 	}
 	// No write timeout: job streams, the editor socket and MCP calls are long-lived.
 	hs := &http.Server{Addr: env("NIXMGR_LISTEN", "127.0.0.1:8080"), Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}

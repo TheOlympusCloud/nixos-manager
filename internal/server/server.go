@@ -5,27 +5,35 @@ package server
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 
 	"github.com/TheOlympusCloud/nixos-manager/internal/auth"
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
 )
 
 const (
-	cookieName  = "nixmgr_session"
-	maxBodySize = 32 << 20
+	cookieName    = "nixmgr_session"
+	browserCookie = "nixmgr_browser" // marks a browser that logged in before, for the login limits
+	maxBodySize   = 32 << 20
 )
 
 type Server struct {
@@ -37,14 +45,60 @@ type Server struct {
 
 	Forgejo *core.Forgejo // Settings → Forgejo and the push webhook; nil turns them off
 
+	// TrustedProxies are reverse proxies, besides loopback, whose X-Forwarded-For
+	// names the client for the login limits (e.g. the Docker gateway).
+	TrustedProxies []netip.Prefix
+
 	lspSlots chan struct{}
 	gz       sync.Map // static path -> gzipped bytes
 }
 
 // Handler wires every route. Everything except the login call, the static UI
-// and /mcp (which has its own token check) needs a session.
+// and the machines' and Forgejo's own calls needs the web UI login or an API
+// token whose scope covers the route.
 func (s *Server) Handler() http.Handler {
 	s.lspSlots = make(chan struct{}, maxNixd)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/login", s.login)
+	// Machines report what comin deployed with the fleet report token, without a session.
+	mux.HandleFunc("POST /api/deployments/report", s.deployReport)
+	mux.HandleFunc("POST /api/hooks/forgejo", s.forgejoHook) // signed by Forgejo, no session
+	mux.Handle("/api/", s.requireAuth(s.apiMux()))
+	if s.MCP != nil {
+		// The token's id binds each MCP session to the token that opened it.
+		mux.Handle("/mcp", mcpauth.RequireBearerToken(s.mcpToken, &mcpauth.RequireBearerTokenOptions{AllowMissingExpiration: true})(s.MCP))
+	}
+	mux.Handle("/", s.static())
+	return headers(http.NewCrossOriginProtection().Handler(jsonOnly(mux)))
+}
+
+// tokenRoutes are the API routes an API token may call, with the scope each
+// needs. Every other route (tokens, Settings, the report token, the editor's
+// language server) needs the web UI login.
+var tokenRoutes = map[string]auth.Scope{
+	"/api/": auth.ScopeRead, // no such route: 404
+
+	"GET /api/info": auth.ScopeRead, "GET /api/tree": auth.ScopeRead, "GET /api/file": auth.ScopeRead,
+	"POST /api/format": auth.ScopeRead, "GET /api/status": auth.ScopeRead, "GET /api/diff": auth.ScopeRead,
+	"GET /api/log": auth.ScopeRead, "GET /api/commit": auth.ScopeRead, "GET /api/file-at": auth.ScopeRead,
+	"GET /api/branches": auth.ScopeRead, "GET /api/hosts/{host}/managed": auth.ScopeRead,
+	"GET /api/search/packages": auth.ScopeRead, "GET /api/search/options": auth.ScopeRead,
+	"POST /api/search/refresh": auth.ScopeRead, "GET /api/insights": auth.ScopeRead,
+	"GET /api/fleet/values": auth.ScopeRead, "GET /api/model": auth.ScopeRead, "POST /api/model/refresh": auth.ScopeRead,
+	"GET /api/model/diff": auth.ScopeRead, "GET /api/targets": auth.ScopeRead, "GET /api/jobs": auth.ScopeRead,
+	"GET /api/jobs/{id}": auth.ScopeRead, "GET /api/jobs/{id}/events": auth.ScopeRead, "GET /api/deployments": auth.ScopeRead,
+
+	"PUT /api/file": auth.ScopeEdit, "POST /api/mkdir": auth.ScopeEdit, "POST /api/move": auth.ScopeEdit,
+	"POST /api/delete": auth.ScopeEdit, "POST /api/stage": auth.ScopeEdit, "POST /api/unstage": auth.ScopeEdit,
+	"POST /api/discard": auth.ScopeEdit, "POST /api/commit": auth.ScopeEdit, "POST /api/restore": auth.ScopeEdit,
+	"POST /api/branches": auth.ScopeEdit, "POST /api/switch": auth.ScopeEdit, "POST /api/revert": auth.ScopeEdit,
+	"POST /api/merge": auth.ScopeEdit, "POST /api/pull": auth.ScopeEdit, "POST /api/hosts/{host}/packages": auth.ScopeEdit,
+	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
+
+	"POST /api/push": auth.ScopeFull, // a push is a deploy
+}
+
+func (s *Server) apiMux() *http.ServeMux {
 	api := http.NewServeMux()
 	api.HandleFunc("POST /api/logout", s.logout)
 	api.HandleFunc("GET /api/info", get(s.info))
@@ -259,12 +313,19 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/tokens", get(func(r *http.Request) (any, error) {
 		return map[string]any{"tokens": s.Auth.Tokens()}, nil
 	}))
-	api.HandleFunc("POST /api/tokens", post(func(r *http.Request, in struct{ Name string }) (any, error) {
-		t, secret, err := s.Auth.CreateToken(in.Name)
+	api.HandleFunc("POST /api/tokens", post(func(r *http.Request, in struct {
+		Name    string
+		Scope   auth.Scope
+		Expires time.Time // zero: never
+	}) (any, error) {
+		t, secret, err := s.Auth.CreateToken(in.Name, in.Scope, in.Expires)
 		if err != nil {
 			return nil, &core.Error{Kind: core.ErrInvalid, Msg: err.Error()}
 		}
-		return map[string]any{"id": t.ID, "name": t.Name, "token": secret}, nil
+		return struct {
+			auth.TokenInfo
+			Token string `json:"token"`
+		}{t, secret}, nil
 	}))
 	api.HandleFunc("DELETE /api/tokens/{id}", post(func(r *http.Request, _ struct{}) (any, error) {
 		if err := s.Auth.RevokeToken(r.PathValue("id")); errors.Is(err, auth.ErrNoToken) {
@@ -279,18 +340,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API route")
 	})
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/login", s.login)
-	// Machines report what comin deployed with the fleet report token, without a session.
-	mux.HandleFunc("POST /api/deployments/report", s.deployReport)
-	mux.HandleFunc("POST /api/hooks/forgejo", s.forgejoHook) // signed by Forgejo, no session
-	mux.Handle("/api/", s.requireSession(api))
-	if s.MCP != nil {
-		mux.Handle("/mcp", s.requireToken(s.MCP))
-	}
-	mux.Handle("/", s.static())
-	return headers(http.NewCrossOriginProtection().Handler(jsonOnly(mux)))
+	return api
 }
 
 func headers(h http.Handler) http.Handler {
@@ -317,27 +367,50 @@ func jsonOnly(h http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireSession(h http.Handler) http.Handler {
+// requireAuth lets in an API token on the routes its scope covers, or else
+// the web UI's session, and tells the service who is asking. A request that
+// carries a token is judged by the token alone.
+func (s *Server) requireAuth(api *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h := r.Header.Get("Authorization"); h != "" {
+			secret, ok := strings.CutPrefix(h, "Bearer ")
+			t, valid := s.Auth.VerifyToken(strings.TrimSpace(secret))
+			if !ok || !valid {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="nixos-manager"`)
+				writeError(w, http.StatusUnauthorized, "a valid API token is required (create one on the Tokens page)")
+				return
+			}
+			_, pattern := api.Handler(r)
+			need, listed := tokenRoutes[pattern]
+			if !listed {
+				writeError(w, http.StatusForbidden, "API tokens cannot use this route; it needs the web UI login")
+				return
+			}
+			if !t.Scope.Allows(need) {
+				writeError(w, http.StatusForbidden, fmt.Sprintf("this token's scope is %s; this route needs %s", t.Scope, need))
+				return
+			}
+			api.ServeHTTP(w, r.WithContext(core.WithCaller(r.Context(), core.Caller{Via: t.Via()})))
+			return
+		}
 		c, err := r.Cookie(cookieName)
 		if err != nil || !s.Auth.Session(c.Value) {
 			writeError(w, http.StatusUnauthorized, "log in first")
 			return
 		}
-		h.ServeHTTP(w, r)
+		via := "web session " + auth.SessionLabel(c.Value)
+		api.ServeHTTP(w, r.WithContext(core.WithCaller(r.Context(), core.Caller{Via: via, Person: true})))
 	})
 }
 
-func (s *Server) requireToken(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if _, valid := s.Auth.VerifyToken(strings.TrimSpace(secret)); !ok || !valid {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="nixos-manager"`)
-			writeError(w, http.StatusUnauthorized, "a valid API token is required (create one on the Tokens page)")
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
+// mcpToken checks the bearer token of an MCP request; the MCP server picks
+// its tools by the scope and names the token in commits.
+func (s *Server) mcpToken(_ context.Context, secret string, _ *http.Request) (*mcpauth.TokenInfo, error) {
+	t, ok := s.Auth.VerifyToken(secret)
+	if !ok {
+		return nil, fmt.Errorf("%w: a valid API token is required (create one on the Tokens page)", mcpauth.ErrInvalidToken)
+	}
+	return &mcpauth.TokenInfo{Scopes: []string{string(t.Scope)}, Expiration: t.Expires, UserID: t.ID, Extra: map[string]any{"via": t.Via()}}, nil
 }
 
 func secure(r *http.Request) bool {
@@ -350,15 +423,77 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	id, err := s.Auth.Login(in.Password)
+	source, known := "ip "+s.clientIP(r), false
+	if c, err := r.Cookie(browserCookie); err == nil {
+		if id, ok := s.Auth.CheckKnownBrowser(c.Value); ok {
+			source, known = "browser "+id, true
+		}
+	}
+	id, err := s.Auth.Login(in.Password, source, known)
+	var limited *auth.LimitError
+	if errors.As(err, &limited) { // not logged: refusals cost nothing and would flood the journal
+		w.Header().Set("Retry-After", strconv.Itoa(int((limited.Wait+time.Second-1)/time.Second)))
+		writeError(w, http.StatusTooManyRequests, limited.Error())
+		return
+	}
 	if err != nil {
-		slog.Warn("failed login", "remote", r.RemoteAddr)
+		slog.Warn("failed login", "remote", r.RemoteAddr, "source", source)
 		writeError(w, http.StatusUnauthorized, "wrong password")
 		return
 	}
+	slog.Info("login", "session", auth.SessionLabel(id), "remote", r.RemoteAddr, "source", source)
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: id, Path: "/", HttpOnly: true, Secure: secure(r),
 		SameSite: http.SameSiteStrictMode, MaxAge: int(auth.SessionTTL / time.Second)})
+	http.SetCookie(w, &http.Cookie{Name: browserCookie, Value: s.Auth.KnownBrowser(), Path: "/api/login", HttpOnly: true,
+		Secure: secure(r), SameSite: http.SameSiteStrictMode, MaxAge: 400 * 24 * 3600})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// clientIP is the address the login limits count by: the peer, or behind a
+// proxy on this machine (tailscale serve, Caddy, nginx) or a trusted one, the
+// address the proxy appended to X-Forwarded-For. IPv6 counts by /64, which one
+// host can fill.
+func (s *Server) clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip, perr := netip.ParseAddr(host)
+	if err != nil || perr != nil {
+		return r.RemoteAddr
+	}
+	proxy := ip.IsLoopback() || slices.ContainsFunc(s.TrustedProxies, func(p netip.Prefix) bool { return p.Contains(ip.Unmap()) })
+	if xff := r.Header.Values("X-Forwarded-For"); proxy && len(xff) > 0 {
+		last := xff[len(xff)-1]
+		if fwd, err := netip.ParseAddr(strings.TrimSpace(last[strings.LastIndex(last, ",")+1:])); err == nil {
+			ip = fwd
+		}
+	}
+	if ip = ip.Unmap(); ip.Is6() {
+		p, _ := ip.Prefix(64)
+		return p.String()
+	}
+	return ip.String()
+}
+
+// ParseTrustedProxies reads NIXMGR_TRUSTED_PROXIES: addresses or CIDR ranges,
+// separated by commas or spaces.
+func ParseTrustedProxies(list string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.FieldsFunc(list, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		p, err := netip.ParsePrefix(f)
+		if !strings.Contains(f, "/") {
+			var a netip.Addr
+			if a, err = netip.ParseAddr(f); err == nil {
+				p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%q is not an address or CIDR range", f)
+		}
+		if p != p.Masked() {
+			return nil, fmt.Errorf("%q has host bits set; did you mean %s?", f, p.Masked())
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -584,6 +719,7 @@ func respond(w http.ResponseWriter, out any, err error) {
 			core.ErrInvalid: http.StatusBadRequest, core.ErrNothingStaged: http.StatusBadRequest,
 			core.ErrNotFound: http.StatusNotFound, core.ErrExists: http.StatusConflict, core.ErrConflict: http.StatusConflict,
 			core.ErrNotChecked: http.StatusPreconditionFailed, core.ErrSyntax: http.StatusUnprocessableEntity,
+			core.ErrForbidden: http.StatusForbidden,
 		} {
 			if errors.Is(err, kind) {
 				code = c
