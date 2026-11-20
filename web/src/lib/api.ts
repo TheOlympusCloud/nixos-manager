@@ -14,6 +14,21 @@ export type Status = {
   files: StatusFile[]
   staged_tree: string
   staged_checked: boolean
+  /** The check the staged tree passed: the tree of what is pushed it compared with ('' for none), and the machines it built. */
+  staged_check?: CheckPass
+}
+export type CheckPass = { base: string; built: string[] }
+/** What a check verified; Nix's figures come from a dry run before the builds. */
+export type CheckSummary = {
+  base: string
+  changed: string[]
+  built: string[]
+  failed?: string[]
+  reboot?: string[]
+  toBuild: number
+  toFetch: number
+  download?: string
+  unpacked?: string
 }
 export type Commit = { sha: string; short: string; author: string; email: string; date: string; subject: string }
 export type CommitDetail = { sha: string; author: string; email: string; date: string; message: string; diff: string }
@@ -27,6 +42,7 @@ export type Job = {
   tree?: string
   started?: string
   finished?: string
+  summary?: CheckSummary
   output?: string
 }
 export type JobRequest =

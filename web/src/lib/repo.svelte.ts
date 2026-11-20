@@ -24,12 +24,12 @@ export async function pullOrPush(kind: 'pull' | 'push') {
     try {
       out = await api[kind]()
     } catch (e) {
-      // 412: the commit to push was never checked as a whole.
+      // 412: the commit to push was never checked as a whole, or not against what is pushed now; the server says which.
       if (!(kind === 'push' && e instanceof ApiError && e.status === 412)) throw e
+      const why = e.message.charAt(0).toUpperCase() + e.message.slice(1)
       const force = await confirmBox({
         title: 'Push an unchecked commit?',
-        message:
-          'The commit at the tip of this branch has not passed a check as a whole. Run the checks with nothing staged or changed to check it, or push it anyway: the machines will deploy it unchecked.',
+        message: `${why}. Pushed anyway, it deploys unchecked: a machine it changes may fail to build it.`,
         ok: 'Push unchecked',
         danger: true,
       })

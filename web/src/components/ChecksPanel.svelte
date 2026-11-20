@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type Job } from '../lib/api'
   import { link } from '../lib/router.svelte'
+  import { builtText } from '../lib/checks'
   import { app, checkStaged, refreshJobs, showJob as openJob } from '../lib/state.svelte'
   import { ago } from '../lib/util'
   import Icon from './Icon.svelte'
@@ -54,7 +55,7 @@
       {#if status && !status.files.some((f) => f.staged)}
         <span class="muted">Nothing staged. Checks run on the staged changes.</span>
       {:else if status?.staged_checked}
-        Staged tree <code>{short(status.staged_tree)}</code> passed a check.
+        Staged tree <code>{short(status.staged_tree)}</code> passed: flake check, and {status.staged_check ? builtText(status.staged_check) : 'the machines it changes built'}.
       {:else if status}
         Staged tree <code>{short(status.staged_tree)}</code> is <strong>not checked</strong>.
       {/if}
@@ -91,7 +92,10 @@
 
     <div class="actions">
       <button class="primary" onclick={checkStaged}><Icon name="play" size={12} /> Check staged changes</button>
-      <p class="muted small">Runs <code>nix flake check</code>{app.selectedTargets.length ? ` and a dry build of ${app.selectedTargets.length} target(s)` : ''} on a snapshot of the staged changes.</p>
+      <p class="muted small">
+        Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with what is pushed (every machine
+        while nothing is){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
+      </p>
       <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs<Icon name="right" size={12} /></a>
     </div>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type Job } from '../lib/api'
+  import { summaryLines } from '../lib/checks'
   import { refreshJobs } from '../lib/state.svelte'
   import { report } from '../lib/ui.svelte'
   import { stripAnsi } from '../lib/util'
@@ -38,6 +39,7 @@
     es.addEventListener('done', (e) => {
       es.close()
       jobState = JSON.parse(e.data).state
+      api.job(jobId).then((j) => (job = j), report) // a check's summary comes with the end
       refreshJobs()
     })
     es.addEventListener('error', () => {
@@ -70,9 +72,14 @@
       <strong>{kinds[job?.kind ?? ''] ?? 'Job'} {jobId}</strong>
       <span class="state s-{jobState || 'queued'}" role="status">{jobState || 'connecting'}{running ? '…' : ''}</span>
     </div>
-    {#if job?.targets?.length}<div class="muted small">targets: {job.targets.join(', ')}</div>{/if}
+    {#if job?.targets?.length}<div class="muted small">also dry-built: {job.targets.join(', ')}</div>{/if}
     {#if job?.tree}<div class="muted small">tree <span class="mono">{job.tree.slice(0, 12)}</span></div>{/if}
   </div>
+{/if}
+{#if job?.summary}
+  <ul class="summary" aria-label="What the check verified">
+    {#each summaryLines(job.summary) as line (line)}<li>{line}</li>{/each}
+  </ul>
 {/if}
 <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scrollable log must be reachable by keyboard) -->
 <pre
@@ -104,6 +111,12 @@
   }
   .s-queued {
     color: var(--fg-muted);
+  }
+  .summary {
+    margin: 0;
+    padding: 8px 14px 8px 30px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
   }
   .log {
     flex: 1;
