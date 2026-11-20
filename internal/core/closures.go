@@ -11,10 +11,20 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const keepClosures = 256 // pairs of systems remembered; the oldest are forgotten first
+
+// closureRetry is how long a failed comparison is not run again; a variable for tests.
+var closureRetry = 10 * time.Minute
+
+// closureEntry is a remembered comparison: its result, or when it failed.
+type closureEntry struct {
+	diff   *ClosureDiff
+	failed time.Time
+}
 
 // ClosureDiff is what changes between two built systems.
 type ClosureDiff struct {
@@ -46,30 +56,63 @@ func (js *Jobs) AddClosures(ctx context.Context, head, work *Model, ds []HostDif
 		return out
 	}
 	before, after := paths(head), paths(work)
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 4) // a few machines at once: a nixpkgs update changes all of them
 	for i, d := range ds {
 		from, to := before[d.Host], after[d.Host]
 		if d.Status != "changed" || from == "" || to == "" || from == to || !storeHas(from) || !storeHas(to) {
 			continue
 		}
-		c, err := js.closureDiff(ctx, from, to)
-		if err != nil {
-			slog.Warn("cannot compare the built systems of a machine", "host", d.Host, "err", err)
-			continue
-		}
-		ds[i].Closure = c
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			c, err := js.closureDiff(ctx, from, to)
+			if err != nil {
+				slog.Warn("cannot compare the built systems of a machine", "host", d.Host, "err", err)
+			}
+			ds[i].Closure = c // each goroutine writes only its own machine
+		})
 	}
+	wg.Wait()
 }
 
-// closureDiff compares two systems in the store; two store paths never change,
-// so the result is kept.
+// closureDiff compares two systems in the store. Two store paths never change,
+// so the result is kept; a failure is kept for closureRetry and then returns
+// nil without an error, as it was logged when it happened.
 func (js *Jobs) closureDiff(ctx context.Context, from, to string) (*ClosureDiff, error) {
 	key := from + " " + to
 	js.mu.Lock()
-	c := js.closures[key]
+	e, ok := js.closures[key]
 	js.mu.Unlock()
-	if c != nil {
-		return c, nil
+	if ok && (e.diff != nil || time.Since(e.failed) < closureRetry) {
+		return e.diff, nil
 	}
+	c, err := js.compareSystems(ctx, from, to)
+	if err != nil && ctx.Err() != nil { // the request went away: nothing to remember
+		return nil, err
+	}
+	e = closureEntry{diff: c}
+	if err != nil {
+		e.failed = time.Now()
+	}
+	js.mu.Lock()
+	if js.closures == nil {
+		js.closures = map[string]closureEntry{}
+	}
+	if _, ok := js.closures[key]; !ok {
+		js.closureOrder = append(js.closureOrder, key)
+	}
+	js.closures[key] = e
+	for len(js.closureOrder) > keepClosures {
+		delete(js.closures, js.closureOrder[0])
+		js.closureOrder = js.closureOrder[1:]
+	}
+	js.mu.Unlock()
+	return c, err
+}
+
+// compareSystems runs nix store diff-closures and nix path-info on two systems.
+func (js *Jobs) compareSystems(ctx context.Context, from, to string) (*ClosureDiff, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	out, err := js.nixOutput(ctx, "store", "diff-closures", from, to)
@@ -81,23 +124,10 @@ func (js *Jobs) closureDiff(ctx context.Context, from, to string) (*ClosureDiff,
 		return nil, err
 	}
 	size := parseClosureSizes(sizes)
-	c = &ClosureDiff{SizeFrom: size[from], SizeTo: size[to], Changes: parseDiffClosures(out)}
+	c := &ClosureDiff{SizeFrom: size[from], SizeTo: size[to], Changes: parseDiffClosures(out)}
 	if c.SizeFrom == 0 || c.SizeTo == 0 {
 		return nil, fmt.Errorf("nix path-info printed no closure size: %.200q", sizes)
 	}
-	js.mu.Lock()
-	if js.closures == nil {
-		js.closures = map[string]*ClosureDiff{}
-	}
-	if _, ok := js.closures[key]; !ok {
-		js.closureOrder = append(js.closureOrder, key)
-	}
-	js.closures[key] = c
-	for len(js.closureOrder) > keepClosures {
-		delete(js.closures, js.closureOrder[0])
-		js.closureOrder = js.closureOrder[1:]
-	}
-	js.mu.Unlock()
 	return c, nil
 }
 

@@ -58,7 +58,7 @@ type Jobs struct {
 	systemQueue  chan *Job
 	systems      map[string]SystemEval // by commit/host
 	systemOrder  []string
-	closures     map[string]*ClosureDiff // by "from to" system paths
+	closures     map[string]closureEntry // by "from to" system paths
 	closureOrder []string
 	models       map[string]*Model // by git tree
 	retry        *Model            // replaced by Evaluate again: the next evaluation of its tree keeps what evaluated

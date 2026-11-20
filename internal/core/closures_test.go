@@ -106,12 +106,42 @@ func TestAddClosuresOnlyForSystemsInTheStore(t *testing.T) {
 		t.Fatalf("closure from a path outside the store: %+v", ds[0].Closure)
 	}
 
-	// nix fails: the diff simply has no closure.
-	js.Nix = script(t, "nix", "#!/bin/sh\nexit 1\n")
+	// Several changed machines are compared at once, each with its own result.
+	for _, c := range []byte{'d', 'f'} {
+		built[sys(c, "web")], built[sys(c, "db")] = true, true
+	}
+	ds = []HostDiff{{Host: "db", Status: "changed"}, {Host: "web", Status: "changed"}}
+	js.AddClosures(context.Background(), &Model{Hosts: []Host{h("db", sys('d', "db")), h("web", sys('d', "web"))}},
+		&Model{Hosts: []Host{h("db", sys('f', "db")), h("web", sys('f', "web"))}}, ds)
+	if ds[0].Closure == nil || ds[1].Closure == nil || ds[0].Closure.SizeFrom != int64(len(sys('d', "db")))*1000 || ds[1].Closure.SizeTo != int64(len(sys('f', "web")))*1000 {
+		t.Fatalf("two machines at once: %+v %+v", ds[0].Closure, ds[1].Closure)
+	}
+
+	// nix fails: the diff has no closure, and the failure is remembered for a
+	// while instead of being run again on every request.
+	js.Nix = script(t, "nix", "#!/bin/sh\necho \"$*\" >> \"$NIXMGR_CALLS\"\nexit 1\n")
 	built[sys('c', "web")] = true
-	ds = []HostDiff{{Host: "web", Status: "changed"}}
-	js.AddClosures(context.Background(), &Model{Hosts: []Host{h("web", sys('c', "web"))}}, work, ds)
-	if ds[0].Closure != nil {
-		t.Fatalf("closure although nix failed: %+v", ds[0].Closure)
+	runs := func() int {
+		b, _ := os.ReadFile(calls)
+		return strings.Count(string(b), "diff-closures")
+	}
+	before := runs()
+	failing := &Model{Hosts: []Host{h("web", sys('c', "web"))}}
+	for range 2 {
+		ds = []HostDiff{{Host: "web", Status: "changed"}}
+		js.AddClosures(context.Background(), failing, work, ds)
+		if ds[0].Closure != nil {
+			t.Fatalf("closure although nix failed: %+v", ds[0].Closure)
+		}
+	}
+	if n := runs() - before; n != 1 {
+		t.Fatalf("a failed comparison ran %d times in a row", n)
+	}
+	retry := closureRetry
+	closureRetry = 0
+	t.Cleanup(func() { closureRetry = retry })
+	js.AddClosures(context.Background(), failing, work, []HostDiff{{Host: "web", Status: "changed"}})
+	if n := runs() - before; n != 2 {
+		t.Fatalf("after the retry wait: %d runs", n)
 	}
 }
