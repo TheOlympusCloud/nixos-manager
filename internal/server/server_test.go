@@ -408,6 +408,37 @@ func TestLSPBridgeAnswersConfiguration(t *testing.T) {
 	}
 }
 
+// Without a pinned export (here nix is missing) nixd gets nothing to evaluate:
+// it never falls back to the working copy itself.
+func TestLSPWithoutPinnedFlakeOnlyFormats(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	e.svc.Jobs.Nix = filepath.Join(t.TempDir(), "missing-nix")
+	t.Setenv("FAKE_NIXD", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	u, _ := http.NewRequest("GET", e.srv.URL, nil)
+	hdr := http.Header{"Cookie": {cookieHeader(e.client.Jar.Cookies(u.URL))}}
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(e.srv.URL, "http")+"/api/lsp", &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	c.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`))
+	for {
+		_, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := string(msg); strings.Contains(s, "test/config") {
+			if strings.Contains(s, "getFlake") || !strings.Contains(s, "nixfmt") {
+				t.Fatalf("config reply: %s", s)
+			}
+			return
+		}
+	}
+}
+
 func TestLSPProcessEndsWithTheSocket(t *testing.T) {
 	e := newEnv(t)
 	e.login(t)
