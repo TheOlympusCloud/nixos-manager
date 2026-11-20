@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  # Every branch push, so a pull request's commits are checked before it opens.
+  # shortcut: pull requests from forks are not checked; add pull_request if the repo takes them.
+  push:
+    branches: ["**"]
+  # Nightly on main: flake.nix follows nixos-26.05 without a lock, so a change there shows up here.
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash # with pipefail, so `cmd | tee` fails when cmd does
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: End-to-end, Nix stubbed
+        run: E2E_STUB_NIX=1 scripts/e2e.sh
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # The starter fleet's report-deployment.sh is a fragment: go test checks it as the
+      # module assembles it (TestReportDeploymentScript).
+      - run: shellcheck scripts/*.sh scripts/dev/fake-nix
+
+  nix:
+    # The only place the lab runs real Nix: the module, the templates, the package build,
+    # and the whole app against a real starter flake.
+    name: Real Nix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - uses: cachix/install-nix-action@v31
+      - name: Tests that need real Nix
+        run: |
+          NIXMGR_NIX_TESTS=1 go test -timeout 45m ./templates ./nix ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
+            { scripts/ci-annotate.sh "Real Nix tests" "$RUNNER_TEMP/tests.log"; exit 1; }
+      - name: End-to-end with real Nix
+        if: ${{ !cancelled() }}
+        run: |
+          nix shell github:NixOS/nixpkgs/nixos-26.05#nixfmt --command scripts/e2e.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log" ||
+            { scripts/ci-annotate.sh "End-to-end with real Nix" "$RUNNER_TEMP/e2e.log"; exit 1; }
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build, then run as the unprivileged user
+        run: |
+          scripts/docker-smoke.sh 2>&1 | tee "$RUNNER_TEMP/smoke.log" ||
+            { scripts/ci-annotate.sh "Docker image" "$RUNNER_TEMP/smoke.log"; exit 1; }

@@ -491,6 +491,13 @@ go test -race ./...
 go build ./cmd/nixos-manager
 ```
 
+CI (`.github/workflows/ci.yml`) runs all of this on every branch push and
+nightly on `main`: Go, web, the stubbed end-to-end run and ShellCheck, the tests
+and the end-to-end run below with real Nix, and `scripts/docker-smoke.sh`, which
+builds the Docker image and checks that it runs as its own user (an earlier
+image's volume included) with real Nix inside. When a Nix or Docker step fails,
+the end of its output is repeated as an annotation on the run's page.
+
 `scripts/e2e.sh` runs the real server against a fresh flake and a bare git
 remote: login, lock, check, commit gate, commit, push, edit, history and
 restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
