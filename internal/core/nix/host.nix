@@ -122,18 +122,19 @@ let
     "Unit/RefuseManualStop"
     "Unit/X-OnlyManualStart"
   ];
-  # [ { key = "Section/Key"; value = "..."; } ] in file order.
+  # [ { key = "Section/Key"; value = "..."; } ] in file order, as NixOS writes
+  # units: "[Section]" and "Key=value" lines. No escapes or classes in the
+  # regex: Nix's regex engine differs between versions.
   unitEntries =
     text:
     (builtins.foldl' (
       acc: line:
       let
-        section = builtins.match "[[:space:]]*\\[(.*)\\][[:space:]]*" line;
-        kv = builtins.match "[[:space:]]*([^=#;[:space:]]+)[[:space:]]*=(.*)" line;
+        kv = builtins.match "([^=]+)=(.*)" line;
       in
-      if section != null then
-        acc // { section = builtins.head section; }
-      else if kv == null || acc.section == "Install" then
+      if lib.hasPrefix "[" line && lib.hasSuffix "]" line then
+        acc // { section = builtins.substring 1 (builtins.stringLength line - 2) line; }
+      else if kv == null || lib.hasPrefix "#" line || lib.hasPrefix ";" line || acc.section == "Install" then
         acc
       else
         acc
