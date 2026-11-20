@@ -56,7 +56,10 @@ An MCP server gives automation the same features.
   and `nixfmt`, for the hand-written files.
 - **Command palette** (Ctrl/Cmd+K): jump to any machine, package, service,
   option, file or action.
-- Login for the UI; named, revocable API tokens for MCP clients.
+- Login for the UI, limited against password guessing; named, revocable API
+  tokens for MCP clients and scripts, each read-only, edit without push, or
+  full, with an optional expiry. Every commit names the session or token that
+  made it.
 
 The repository is a normal git repository whose remote is Forgejo. Each machine
 runs [comin](https://github.com/nlewo/comin), pulls from Forgejo and switches
@@ -446,6 +449,34 @@ tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 code as the web UI, including the check rules for commit and push, which MCP
 clients cannot override. Writes and restores need the `base_hash` from
 `read_file`, so a client never overwrites an edit it has not seen.
+
+### Token scopes
+
+Each token gets a scope when it is created, and optionally an expiry date:
+
+| Scope | What it can do |
+|---|---|
+| Read only | Read files, history, the fleet model, checks, jobs and deployments |
+| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, and lock or update inputs |
+| Full | Also push, which deploys |
+
+The MCP endpoint offers only the tools of the token's scope. The same token
+works on the HTTP API, on the routes its scope covers:
+
+```sh
+curl -H "Authorization: Bearer <token>" http://<server>:8080/api/deployments
+```
+
+Managing tokens, Settings, the deployment report token and the editor's
+language server need the web login. Only the person logged in to the web UI
+can commit or push without a passing check. Tokens created before scopes
+existed are full tokens, as before; an expired token stays listed, refused,
+until you revoke it.
+
+Every commit made through the console ends with a trailer that says how it
+arrived: `Via: web session 3fa2c1d9` (the same label as the `login` line in the
+service log) or `Via: token ci (K3J9QW2M4X1A)`, the token's name and id. A
+commit message may not bring its own `Via` trailer.
 
 ## Configuration
 

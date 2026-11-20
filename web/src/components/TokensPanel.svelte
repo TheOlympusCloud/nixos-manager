@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type Token } from '../lib/api'
+  import { api, type Token, type TokenScope } from '../lib/api'
+  import { expiresAt, expiry, lifetimes, scopes } from '../lib/tokens'
   import { confirmBox } from '../lib/ui.svelte'
   import { ago, copyText } from '../lib/util'
 
   let tokens = $state<Token[] | null>(null)
   let name = $state('')
-  let created = $state<{ id: string; name: string; token: string } | null>(null)
+  let scope = $state<TokenScope>('read')
+  let days = $state(0)
+  let created = $state<(Token & { token: string }) | null>(null)
   let busy = $state(false)
   let copied = $state('')
   // Shown inside the dialog: toasts would sit behind the modal backdrop.
@@ -37,7 +40,7 @@
     busy = true
     error = ''
     try {
-      created = await api.createToken(name.trim())
+      created = await api.createToken(name.trim(), scope, expiresAt(days))
       name = ''
       await load()
     } catch (err) {
@@ -70,19 +73,34 @@
 
 <section class="tokens" aria-labelledby="tokens-title">
   <h2 id="tokens-title">API tokens</h2>
-  <p class="muted">Tokens let scripts and MCP clients use the MCP endpoint. Each token has full access to the repository.</p>
+  <p class="muted">
+    Tokens let scripts and MCP clients use the MCP endpoint and the <code>/api/</code> routes (<code>Authorization: Bearer &lt;token&gt;</code>). Give each the least
+    access it needs: only a full token can push, which deploys. Commits made with a token name it in a <code>Via:</code> line.
+  </p>
 
   <form class="row" onsubmit={create}>
     <label for="token-name" class="label">New token name</label>
     <input id="token-name" bind:value={name} placeholder="e.g. backup-script" autocomplete="off" spellcheck="false" />
+    <label for="token-scope" class="sr-only">Access</label>
+    <select id="token-scope" bind:value={scope} aria-describedby="token-scope-hint">
+      {#each scopes as s (s.value)}<option value={s.value}>{s.label}</option>{/each}
+    </select>
+    <label for="token-days" class="sr-only">Expires</label>
+    <select id="token-days" bind:value={days}>
+      {#each lifetimes as l (l.days)}<option value={l.days}>{l.label}</option>{/each}
+    </select>
     <button class="primary" type="submit" disabled={!name.trim() || busy}>Create</button>
   </form>
+  <p class="muted hint" id="token-scope-hint">{scopes.find((s) => s.value === scope)?.hint}</p>
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 
   {#if created}
     <div class="secret" role="status">
-      <p><strong>Token "{created.name}" created.</strong> Copy it now; it is not shown again.</p>
+      <p>
+        <strong>Token "{created.name}" created</strong> ({scopes.find((s) => s.value === created?.scope)?.label.toLowerCase()}, expires {expiry(created.expires)}). Copy
+        it now; it is not shown again.
+      </p>
       <div class="row">
         <input aria-label="New token secret" readonly value={created.token} onfocus={(e) => e.currentTarget.select()} />
         <button onclick={() => created && copy(created.token, 'token')}>{copied === 'token' ? 'Copied' : 'Copy'}</button>
@@ -92,20 +110,23 @@
   {/if}
 
   <table>
-    <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <thead><tr><th>Name</th><th>Access</th><th>Created</th><th>Expires</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>
       {#if tokens === null}
-        <tr><td colspan="4" class="muted">Loading…</td></tr>
+        <tr><td colspan="6" class="muted">Loading…</td></tr>
       {:else}
         {#each tokens as t (t.id)}
+          {@const exp = expiry(t.expires)}
           <tr>
             <td>{t.name}</td>
+            <td>{scopes.find((s) => s.value === t.scope)?.label ?? t.scope}</td>
             <td title={t.created}>{ago(t.created)}</td>
+            <td title={t.expires} class:expired={exp === 'expired'}>{exp}</td>
             <td title={t.last_used}>{t.last_used ? ago(t.last_used) : 'never'}</td>
             <td class="act"><button class="small revoke" onclick={() => revoke(t)} aria-label="Revoke {t.name}">Revoke</button></td>
           </tr>
         {:else}
-          <tr><td colspan="4" class="muted">No tokens yet.</td></tr>
+          <tr><td colspan="6" class="muted">No tokens yet.</td></tr>
         {/each}
       {/if}
     </tbody>
@@ -142,8 +163,26 @@
     flex: 1;
     min-width: 0;
   }
-  .error {
+  form.row {
+    max-width: 820px;
+  }
+  form.row .label {
+    white-space: nowrap;
+  }
+  form.row input {
+    min-width: 140px;
+  }
+  form.row select {
+    flex: none;
+    width: auto;
+  }
+  .error,
+  .expired {
     color: var(--red);
+  }
+  .hint {
+    margin-top: 4px;
+    font-size: 12px;
   }
   .secret {
     margin: 12px 0;
