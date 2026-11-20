@@ -232,8 +232,9 @@ type HostDiff struct {
 }
 
 // UnitChange is what switching to the new system does to a unit that runs:
-// restart, reload, start (new), stop (removed or disabled), or keep (changed,
-// but it keeps running the old version until it is restarted or the machine reboots).
+// restart, reload, stop (removed or disabled), or keep (changed, but it keeps
+// running the old version until it is restarted or the machine reboots); or
+// start, for a new unit, started if a running target wants it.
 type UnitChange struct {
 	Name   string `json:"name"`
 	Action string `json:"action"`
