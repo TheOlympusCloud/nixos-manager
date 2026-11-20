@@ -151,7 +151,8 @@ func (r *Repo) headTree(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-// Model returns the evaluated fleet at "working" (the working copy) or "head".
+// Model returns the evaluated fleet at "working" (the working copy), "head",
+// "pushed" (what a push of the current branch lands on) or "rev:<commit>".
 // When it is not computed yet it returns the job computing it instead.
 func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 	var tree string
@@ -161,10 +162,14 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 		tree, err = js.Repo.WorkingTree(ctx)
 	case "head":
 		tree, err = js.Repo.headTree(ctx)
+	case "pushed":
+		js.Repo.mu.Lock()
+		tree, err = js.Repo.pushBase(ctx)
+		js.Repo.mu.Unlock()
 	default:
 		rev, ok := strings.CutPrefix(at, "rev:")
 		if !ok {
-			return nil, nil, errorf(ErrInvalid, "unknown model %q (want working, head or rev:<commit>)", at)
+			return nil, nil, errorf(ErrInvalid, "unknown model %q (want working, head, pushed or rev:<commit>)", at)
 		}
 		var sha string
 		if sha, err = js.Repo.resolve(ctx, rev); err == nil {
@@ -351,10 +356,18 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 		}
 		start(func() {
 			fmt.Fprintf(job, "Evaluating %s…\n", n)
+			var out struct { // host.nix returns the detail next to the model's fields
+				Host
+				HostDetail
+			}
+			out.Name = n
 			h := Host{Name: n}
-			if err := js.evalJSON(ctx, src, n, nixExpr("host.nix"), &h); err != nil {
-				h = Host{Name: n, Error: err.Error()}
+			if err := js.evalJSON(ctx, src, n, nixExpr("host.nix"), &out); err != nil {
+				h.Error = err.Error()
 				fmt.Fprintf(job, "%s: %v\n", n, err)
+			} else {
+				h = out.Host
+				h.Detail = &out.HostDetail
 			}
 			hosts[i] = normalizeHost(h)
 		})

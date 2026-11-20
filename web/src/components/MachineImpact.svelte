@@ -8,21 +8,33 @@
 
   /**
    * What a change does to each machine and to the flake inputs.
-   * `commit`: the diff is one commit against its parent; otherwise the working copy against the last commit.
+   * `commit`: the diff is one commit against its parent; `push`: the last commit against what is pushed;
+   * otherwise the working copy against the last commit.
    */
   let {
     diff,
     computing = false,
     commit = false,
+    push = false,
     quiet = '',
     settings = {},
-  }: { diff: ModelDiff | null; computing?: boolean; commit?: boolean; quiet?: string; settings?: Record<string, SettingChange[]> } = $props()
+  }: { diff: ModelDiff | null; computing?: boolean; commit?: boolean; push?: boolean; quiet?: string; settings?: Record<string, SettingChange[]> } = $props()
 
   const split = $derived(splitImpact(withSettings(diff?.hosts ?? [], settings)))
   const inputs = $derived(diff?.inputs ?? [])
   let open = $state<Record<string, boolean>>({})
   const isOpen = (host: string) => open[host] ?? split.changed.length <= 2
   const dot: Record<string, string> = { added: 'add', changed: 'chg', removed: 'del' }
+  // A nixpkgs update moves hundreds of dependencies: long groups show their start until asked.
+  const SHOWN = 40
+  let all = $state<Record<string, boolean>>({})
+  const said = $derived(
+    push
+      ? { headBroken: 'What is pushed does not evaluate', broken: 'The commit to push does not evaluate', base: 'what is pushed', calm: 'Pushing changes nothing any machine runs.' }
+      : commit
+        ? { headBroken: 'The commit before this one does not evaluate', broken: 'This commit does not evaluate', base: 'the commit before it', calm: 'This commit changes nothing any machine runs.' }
+        : { headBroken: 'The last commit does not evaluate', broken: 'The working copy does not evaluate', base: 'the last commit', calm: 'Nothing any machine runs changes.' },
+  )
 </script>
 
 <div class="impact" aria-busy={computing}>
@@ -36,7 +48,7 @@
       <div class="notice" role="alert">
         <Icon name="alert" size={15} />
         <div>
-          <p><strong>{commit ? 'The commit before this one does not evaluate' : 'The last commit does not evaluate'}</strong>, so every machine is compared with nothing.</p>
+          <p><strong>{said.headBroken}</strong>, so every machine is compared with nothing.</p>
           <p class="err-line mono">{firstLine(diff.headError)}</p>
         </div>
       </div>
@@ -46,12 +58,9 @@
       <div class="notice" role="alert">
         <Icon name="alert" size={15} />
         <div>
-          <p>
-            <strong>{commit ? 'This commit does not evaluate' : 'The working copy does not evaluate'}</strong>, so it cannot be compared with
-            {commit ? 'the commit before it' : 'the last commit'}.
-          </p>
+          <p><strong>{said.broken}</strong>, so it cannot be compared with {said.base}.</p>
           <p class="err-line mono">{firstLine(diff.error)}</p>
-          {#if file && !commit}<a class="fix-link" href={codeLink(file)}><Icon name="code" size={13} />Open {file}</a>{/if}
+          {#if file && !commit && !push}<a class="fix-link" href={codeLink(file)}><Icon name="code" size={13} />Open {file}</a>{/if}
         </div>
       </div>
     {:else}
@@ -82,7 +91,8 @@
           {#each split.changed as d (d.host)}
             {@const groups = impactGroups(d)}
             <li class="row machine" class:open={isOpen(d.host)}>
-              <button class="head" aria-expanded={isOpen(d.host)} onclick={() => (open[d.host] = !isOpen(d.host))} disabled={!groups.length}>
+              <!-- type=button: in the push dialog this sits in a form, where a button would push -->
+              <button type="button" class="head" aria-expanded={isOpen(d.host)} onclick={() => (open[d.host] = !isOpen(d.host))} disabled={!groups.length}>
                 <span class="mark {dot[d.status]}"><Icon name="server" size={13} /></span>
                 <span class="name">{d.host}</span>
                 <span class="line" title={impactLine(d)}>{impactLine(d)}</span>
@@ -91,19 +101,24 @@
               {#if isOpen(d.host) && groups.length}
                 <div class="details">
                   {#each groups as g (g.label)}
+                    {@const key = d.host + '\n' + g.label}
                     <span class="g-label">{g.label}</span>
                     <div class="chips">
-                      {#each g.items as it (it.text)}<span class="chip mono k-{it.kind}" title={it.title}>{it.text}</span>{/each}
+                      {#each all[key] ? g.items : g.items.slice(0, SHOWN) as it (it.text)}<span class="chip mono k-{it.kind}" title={it.title}>{it.text}</span>{/each}
+                      {#if g.items.length > SHOWN && !all[key]}<button type="button" class="chip" onclick={() => (all[key] = true)}>{g.items.length - SHOWN} more</button>{/if}
                     </div>
                   {/each}
-                  <a class="open-machine" href={machineLink(d.host)}>Open {d.host}</a>
+                  {#if d.status === 'changed' && !d.closure}
+                    <p class="hint">Size and dependency versions show once this server has built both systems; a check builds the machines it changes.</p>
+                  {/if}
+                  {#if !push}<a class="open-machine" href={machineLink(d.host)}>Open {d.host}</a>{/if}
                 </div>
               {/if}
             </li>
           {/each}
         </ul>
       {:else if !inputs.length}
-        <p class="calm"><Icon name="tick" size={15} />{quiet || (commit ? 'This commit changes nothing any machine runs.' : 'Nothing any machine runs changes.')}</p>
+        <p class="calm"><Icon name="tick" size={15} />{quiet || said.calm}</p>
       {/if}
 
       {#if split.broken.length || (split.unchanged.length && split.changed.length)}
@@ -256,10 +271,21 @@
   .k-del {
     --c: var(--red);
   }
-  .open-machine {
+  .open-machine,
+  .hint {
     grid-column: 2;
     justify-self: start;
     font-size: var(--fs-sm);
+  }
+  .hint {
+    margin: 0;
+    color: var(--fg-muted);
+  }
+  @media (max-width: 640px) {
+    .open-machine,
+    .hint {
+      grid-column: 1;
+    }
   }
   .notice {
     display: flex;

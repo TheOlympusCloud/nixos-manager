@@ -26,7 +26,7 @@
   async function loadDiff() {
     const mine = ++seq
     try {
-      const r = await fetchModelDiff(undefined, () => (computing = true), () => alive && mine === seq)
+      const r = await fetchModelDiff({}, () => (computing = true), () => alive && mine === seq)
       if (mine !== seq) return
       if (r) ((diff = r), (diffError = ''))
     } catch (e) {

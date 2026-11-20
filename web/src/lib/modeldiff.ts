@@ -1,4 +1,4 @@
-// The model comparison (working copy or one commit), waiting while either side evaluates.
+// The model comparison (working copy, one commit or what a push changes), waiting while either side evaluates.
 import { api, type ModelDiffReply } from './api'
 import { waitJob } from './fleet.svelte'
 import { settingChanges, type SettingChange } from './impact'
@@ -6,9 +6,9 @@ import { settingChanges, type SettingChange } from './impact'
 export type ModelDiff = Extract<ModelDiffReply, { state: 'ready' }>
 
 /** Resolves with the comparison, or null when the caller lost interest (`alive` turned false). */
-export async function fetchModelDiff(rev: string | undefined, onComputing: () => void, alive: () => boolean): Promise<ModelDiff | null> {
+export async function fetchModelDiff(which: Parameters<typeof api.modelDiff>[0], onComputing: () => void, alive: () => boolean): Promise<ModelDiff | null> {
   for (let tries = 0; tries < 6 && alive(); tries++) {
-    const r = await api.modelDiff(rev)
+    const r = await api.modelDiff(which)
     if (r.state === 'ready') return alive() ? r : null
     onComputing()
     const states = await Promise.all(r.jobs.map(waitJob))

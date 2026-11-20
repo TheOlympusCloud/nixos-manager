@@ -53,7 +53,7 @@
   onMount(() => () => (alive = false))
   async function loadDiff() {
     const mine = ++seq
-    const r = await fetchModelDiff(undefined, () => (computing = true), () => alive && mine === seq).catch(() => null)
+    const r = await fetchModelDiff({}, () => (computing = true), () => alive && mine === seq).catch(() => null)
     if (mine !== seq) return
     computing = false
     if (r) diff = r

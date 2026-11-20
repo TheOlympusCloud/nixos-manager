@@ -94,6 +94,16 @@ describe('errorMessage', () => {
   })
 })
 
+describe('modelDiff', () => {
+  it('asks for the working copy, one commit or what a push changes', async () => {
+    const fetch = mockFetch(200, '{"state":"ready"}')
+    await api.modelDiff()
+    await api.modelDiff({ rev: 'abc' })
+    await api.modelDiff({ against: 'pushed' })
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual(['/api/model/diff', '/api/model/diff?rev=abc', '/api/model/diff?against=pushed'])
+  })
+})
+
 describe('withQuery', () => {
   it('encodes values and skips empty ones', () => {
     expect(withQuery('/api/diff', { staged: true, path: 'hosts/a b.nix' })).toBe('/api/diff?staged=true&path=hosts%2Fa+b.nix')

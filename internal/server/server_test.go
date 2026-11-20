@@ -632,6 +632,33 @@ func TestDiffOfOneCommit(t *testing.T) {
 	}
 }
 
+// The push dialog: what the commit to push changes against what is pushed.
+// Nothing is pushed yet here, so every machine of the commit is new.
+func TestDiffAgainstWhatIsPushed(t *testing.T) {
+	e := fleetEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	if err := e.svc.Stage(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Commit(ctx, "first", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Write("hosts/extra.nix", "{ }\n", ""); err != nil { // not committed: not pushed by a push
+		t.Fatal(err)
+	}
+	var diff struct {
+		Hosts []core.HostDiff
+	}
+	e.ready(t, "/api/model/diff?against=pushed", &diff)
+	if len(diff.Hosts) != 4 || diff.Hosts[3].Host != "workstation" || diff.Hosts[3].Status != "added" || diff.Hosts[3].Closure != nil {
+		t.Fatalf("diff against nothing pushed %+v", diff)
+	}
+	if code := e.do(t, "GET", "/api/model/diff?against=tomorrow", nil, nil); code != 400 {
+		t.Fatalf("unknown comparison: %d", code)
+	}
+}
+
 func TestInsightsOverHTTP(t *testing.T) {
 	e := fleetEnv(t)
 	e.login(t)

@@ -1,7 +1,9 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,6 +80,17 @@ func TestModelOfAFleet(t *testing.T) {
 	}
 	if !strings.HasSuffix(ws.Toplevel, "-nixos-system-workstation-26.05.drv") || ws.Boot == "" || m.Hosts[0].Boot != "" {
 		t.Fatalf("system derivation and boot: %q %q, homeserver (a container) %q", ws.Toplevel, ws.Boot, m.Hosts[0].Boot)
+	}
+	// The diff's detail is decoded but left out of the model every view polls.
+	if d := ws.Detail; d == nil || d.SystemPath != "/nix/store/9fw2-nixos-system-workstation-26.05" ||
+		d.Units["dhcpcd.service"].Flags["Service/X-RestartIfChanged"] != "false" || d.Etc["hosts"] != "9d2e" {
+		t.Fatalf("workstation detail %+v", ws.Detail)
+	}
+	if d := m.Hosts[2].Detail; d == nil || d.Units != nil || d.Etc != nil {
+		t.Fatalf("pi, evaluated without units or /etc: unknown, not empty: %+v", d)
+	}
+	if b, _ := json.Marshal(ws); bytes.Contains(b, []byte("dhcpcd")) || bytes.Contains(b, []byte("systemPath")) {
+		t.Fatalf("the model's JSON carries the detail: %s", b)
 	}
 	if ws.ManagedPackages["vscode"] != "vscode" || m.Hosts[2].ManagedPackages == nil {
 		t.Fatalf("managed package names %+v / %+v", ws.ManagedPackages, m.Hosts[2].ManagedPackages)
@@ -450,6 +463,43 @@ func TestChangeDetectionWithRealNix(t *testing.T) {
 	if ex := byHost(edit(`boot.kernelParams = [ "quiet" ];`))["example"]; ex.Status != "changed" || !ex.Reboot {
 		t.Fatalf("kernel parameters need a reboot: %+v", ex)
 	}
+
+	// Units and /etc, as switch-to-configuration and the etc builder see them.
+	demo := func(v string) string {
+		return `systemd.services.nixmgr-restart = { wantedBy = [ "multi-user.target" ]; script = "sleep ` + v + `"; };
+  systemd.services.nixmgr-keep = { restartIfChanged = false; script = "sleep ` + v + `"; };
+  systemd.services.nixmgr-reload = { reloadTriggers = [ "` + v + `" ]; script = "sleep 1"; };
+  systemd.services.nixmgr-quiet = { description = "quiet ` + v + `"; script = "sleep 1"; };
+  systemd.services.nixmgr-` + v + ` = { script = "sleep 1"; };
+  environment.etc."nixmgr-text".text = "` + v + `";
+  environment.etc."nixmgr-file".source = ./demo.conf;`
+	}
+	def := fileText(t, s.Repo, "hosts/example/default.nix")
+	write(t, s.Repo, "hosts/example/demo.conf", "same\n")
+	write(t, s.Repo, "hosts/example/default.nix", strings.Replace(def, "system.stateVersion", demo("old")+"\n  system.stateVersion", 1))
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "demo units", true))
+	before := model("head")
+	write(t, s.Repo, "hosts/example/default.nix", strings.Replace(def, "system.stateVersion", demo("new")+"\n  system.stateVersion", 1))
+	write(t, s.Repo, "hosts/example/other.txt", "another file of the flake\n") // moves the flake's own store path
+	ex := byHost(DiffModels(before, model("working")))["example"]
+	units := map[string]string{}
+	for _, u := range ex.Units {
+		units[u.Name] = u.Action
+	}
+	want := map[string]string{"nixmgr-restart.service": "restart", "nixmgr-keep.service": "keep", "nixmgr-reload.service": "reload",
+		"nixmgr-old.service": "stop", "nixmgr-new.service": "start"}
+	if !reflect.DeepEqual(units, want) {
+		t.Fatalf("units: got %v, want %v (a changed description alone restarts nothing)", units, want)
+	}
+	if !reflect.DeepEqual(ex.Etc, []EtcChange{{Path: "/etc/nixmgr-text", Status: "changed"}}) {
+		t.Fatalf("/etc: %+v (a file of the flake that did not change must not show)", ex.Etc)
+	}
+	for _, h := range before.Hosts {
+		if h.Detail == nil || !strings.Contains(h.Detail.SystemPath, "-nixos-system-"+h.Name) || len(h.Detail.Units) < 20 || h.Detail.Etc["hosts"] == "" {
+			t.Fatalf("%s: detail %+v", h.Name, h.Detail)
+		}
+	}
 }
 
 // settle waits until the files are older than the racy window, so the next
@@ -512,7 +562,18 @@ func TestWorkingTreeIsCachedUntilAnythingChanges(t *testing.T) {
 	}{
 		{"same size, same mtime", func() {
 			fi, _ := os.Stat(abs("a.nix"))
-			ok(t, os.WriteFile(abs("a.nix"), []byte("bbbb\n"), 0o644))
+			added, _, _ := fileID(fi)
+			// git compares change times in whole seconds: in the second the file was
+			// added, git itself would not see this content. Write until the change
+			// time (the kernel's coarse clock) is in another second.
+			for {
+				ok(t, os.WriteFile(abs("a.nix"), []byte("bbbb\n"), 0o644))
+				now, _ := os.Stat(abs("a.nix"))
+				if c, _, _ := fileID(now); c.Unix() != added.Unix() {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 			ok(t, os.Chtimes(abs("a.nix"), fi.ModTime(), fi.ModTime()))
 		}},
 		{"rename", func() { ok(t, os.Rename(abs("a.nix"), abs("b.nix"))) }},
@@ -558,5 +619,34 @@ func TestRecentChangesAreNotCached(t *testing.T) {
 	must[string](t)(r.WorkingTree(ctx))
 	if _, hit := cachedTree(t, r); hit {
 		t.Fatal("a tree with a file changed just now was cached")
+	}
+}
+
+// The push dialog compares what is pushed with the commit to push: the model
+// of origin's copy of the branch, else of origin's default branch, else none.
+func TestModelOfWhatIsPushed(t *testing.T) {
+	ctx := context.Background()
+	r, _ := remotePair(t)
+	s := NewService(r)
+	nix, _ := filepath.Abs("../../scripts/dev/fake-nix")
+	fixtures, _ := filepath.Abs("testdata/fleet")
+	s.Jobs.Nix = nix
+	t.Setenv("NIXMGR_FAKE_FIXTURES", fixtures)
+	pushed := strings.TrimSpace(gitOut(t, r.Dir, "rev-parse", "origin/main^{tree}"))
+	write(t, r, "b.nix", "2\n")
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "local", true))
+	if m := readyModel(t, s, "pushed"); m.Tree != pushed {
+		t.Fatalf("pushed model of tree %q, want %q", m.Tree, pushed)
+	}
+	// A new branch is deployed on top of the default branch.
+	ok(t, s.Repo.CreateBranch(ctx, "testing-web", ""))
+	if m := readyModel(t, s, "pushed"); m.Tree != pushed {
+		t.Fatalf("new branch: pushed model of tree %q, want %q", m.Tree, pushed)
+	}
+	// Nothing pushed: every machine is new.
+	alone := NewService(newRepo(t))
+	if m := readyModel(t, alone, "pushed"); m.Tree != "" || len(m.Hosts) != 0 {
+		t.Fatalf("no remote: %+v", m)
 	}
 }

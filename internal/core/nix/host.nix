@@ -90,6 +90,89 @@ let
   managed = try (config.nixosManager.managedFile or null) null;
   # attribute -> package name for managed.json packages (one bad entry does not hide the others)
   managedPackages = lib.mapAttrs (_: n: try n "") (try (config.nixosManager.packageNames or { }) { });
+  # Each enabled systemd unit as switch-to-configuration compares it (nixos-26.05,
+  # compare_units): a hash of the settings it restarts the unit for, a hash of
+  # each setting it only reloads it for, and the settings that decide what it
+  # does with a changed or removed unit. [Install] and the [Unit] keys it
+  # ignores are left out; keys are sorted stably, as their order does not
+  # matter but the order of one key's values does. A disabled unit is masked:
+  # it counts as removed.
+  hash = builtins.hashString "sha256";
+  unitIgnored = map (k: "Unit/${k}") [
+    "Description"
+    "Documentation"
+    "OnFailure"
+    "OnSuccess"
+    "OnFailureJobMode"
+    "IgnoreOnIsolate"
+    "StopWhenUnneeded"
+    "RefuseManualStart"
+    "RefuseManualStop"
+    "AllowIsolate"
+    "CollectMode"
+    "SourcePath"
+  ];
+  reloadKeys = [
+    "Unit/X-Reload-Triggers"
+    "Service/ExecReload"
+    "Mount/Options"
+  ];
+  flagKeys = [
+    "Service/X-ReloadIfChanged"
+    "Service/X-RestartIfChanged"
+    "Unit/RefuseManualStop"
+    "Unit/X-OnlyManualStart"
+    "Unit/X-StopOnRemoval"
+  ];
+  # [ { key = "Section/Key"; value = "..."; } ] in file order, as NixOS writes
+  # units: "[Section]" and "Key=value" lines. No escapes or classes in the
+  # regex: Nix's regex engine differs between versions.
+  unitEntries =
+    text:
+    (builtins.foldl' (
+      acc: line:
+      let
+        kv = builtins.match "([^=]+)=(.*)" line;
+      in
+      if lib.hasPrefix "[" line && lib.hasSuffix "]" line then
+        acc // { section = builtins.substring 1 (builtins.stringLength line - 2) line; }
+      else if kv == null || lib.hasPrefix "#" line || lib.hasPrefix ";" line || acc.section == "Install" then
+        acc
+      else
+        acc
+        // {
+          entries = acc.entries ++ [
+            {
+              key = "${acc.section}/${builtins.head kv}";
+              value = builtins.elemAt kv 1;
+            }
+          ];
+        }
+    ) { section = ""; entries = [ ]; } (lib.splitString "\n" text)).entries;
+  entriesText = es: lib.concatMapStrings (e: "${e.key}=${e.value}\n") (builtins.sort (a: b: a.key < b.key) es);
+  unitInfo =
+    u:
+    let
+      # Only hashed: without the store paths' context, its keys can name attributes.
+      entries = unitEntries (builtins.unsafeDiscardStringContext (if u.text or null == null then "" else u.text));
+      with' = keys: lib.filter (e: builtins.elem e.key keys) entries;
+    in
+    {
+      hash = hash (entriesText (lib.filter (e: !(builtins.elem e.key (unitIgnored ++ reloadKeys))) entries));
+      reload = lib.genAttrs (lib.filter (k: with' [ k ] != [ ]) reloadKeys) (k: hash (entriesText (with' [ k ])));
+      # listToAttrs keeps the first of a name: reversed, the last value wins.
+      flags = builtins.listToAttrs (map (e: lib.nameValuePair e.key e.value) (lib.reverseList (with' flagKeys)));
+    };
+  units = lib.mapAttrs (_: unitInfo) (lib.filterAttrs (_: u: u.enable or true) config.systemd.units);
+  # Each enabled /etc entry by target: a hash of the file it links to, its mode
+  # and owner. "${source}" copies a path in the flake to the store by content,
+  # as the etc builder does, so editing another file does not change it.
+  # /etc/systemd/system is listed as units.
+  etc = lib.mapAttrs' (
+    _: e:
+    lib.nameValuePair (builtins.unsafeDiscardStringContext e.target) (hash "${e.source}\n${e.mode}\n${e.user}\n${e.group}")
+  ) (lib.filterAttrs (_: e: e.enable && e.target != "systemd/system") config.environment.etc);
+
   files = lib.filter (f: f != "nixos") (
     lib.unique (
       lib.concatMap (p: p.files) packages
@@ -139,6 +222,11 @@ in
       ]
     else
       "";
+  systemPath = config.system.build.toplevel.outPath;
+  # null when they cannot be read: the diff then lists no unit or /etc file.
+  # deepSeq: tryEval alone would not catch an error inside them.
+  units = try (builtins.deepSeq units units) null;
+  etc = try (builtins.deepSeq etc etc) null;
   managedFile = if managed == null then null else rel managed;
   inherit managedPackages;
   checks = {

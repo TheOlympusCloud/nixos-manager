@@ -45,6 +45,26 @@ type Host struct {
 	Files           []string          `json:"files"`
 	Checks          Checks            `json:"checks"`
 	Error           string            `json:"error,omitempty"`
+	// What the per-machine diff compares beyond the fleet views; left out of
+	// the model's JSON, which every view polls. nil: not evaluated.
+	Detail *HostDetail `json:"-"`
+}
+
+// HostDetail is the system of one machine as a switch to it sees it.
+type HostDetail struct {
+	SystemPath string              `json:"systemPath"` // system.build.toplevel's output path
+	Units      map[string]UnitInfo `json:"units"`      // enabled systemd units by name; nil: could not be read
+	Etc        map[string]string   `json:"etc"`        // /etc entries by target: a hash of what each links to; nil: could not be read
+}
+
+// UnitInfo is a systemd unit as switch-to-configuration compares it: a hash of
+// the settings it restarts the unit for, a hash of each setting it only
+// reloads the unit for ("Section/Key"), and the settings that decide what it
+// does with a changed or removed unit, by "Section/Key" (the last value).
+type UnitInfo struct {
+	Hash   string            `json:"hash"`
+	Reload map[string]string `json:"reload"`
+	Flags  map[string]string `json:"flags"`
 }
 
 // Checks are the security and maintenance facts the fleet insights look at.
@@ -204,6 +224,25 @@ type HostDiff struct {
 	Kernel          *VersionChange  `json:"kernel,omitempty"`
 	// Reboot: the kernel, initrd or kernel parameters change, which only a reboot applies.
 	Reboot bool `json:"reboot,omitempty"`
+	// What a switch does to each changed unit if it runs, and the /etc files that change.
+	Units []UnitChange `json:"units,omitempty"`
+	Etc   []EtcChange  `json:"etc,omitempty"`
+	// Every dependency and the size, when this server has built both systems.
+	Closure *ClosureDiff `json:"closure,omitempty"`
+}
+
+// UnitChange is what switching to the new system does to a unit that runs:
+// restart, reload, stop (removed or disabled), or keep (changed, but it keeps
+// running the old version until it is restarted or the machine reboots); or
+// start, for a new unit, started if a running target wants it.
+type UnitChange struct {
+	Name   string `json:"name"`
+	Action string `json:"action"`
+}
+
+type EtcChange struct {
+	Path   string `json:"path"`
+	Status string `json:"status"` // added, removed, changed
 }
 
 type VersionChange struct {
@@ -284,6 +323,9 @@ func DiffModels(head, working *Model) []HostDiff {
 		d.UsersAdded, d.UsersRemoved = setDiff(names(b.Users, user), names(a.Users, user))
 		d.PortsAdded, d.PortsRemoved = setDiff(portNames(b.Ports), portNames(a.Ports))
 		d.VersionsChanged = versionChanges(b.Packages, a.Packages)
+		if inBefore && b.Error == "" && b.Detail != nil && a.Detail != nil {
+			d.Units, d.Etc = diffUnits(b.Detail.Units, a.Detail.Units), diffEtc(b.Detail.Etc, a.Detail.Etc)
+		}
 		if inBefore && b.Error == "" && a.Boot != "" { // a machine that boots its own kernel, known before and after
 			d.Reboot = a.Boot != b.Boot
 			if b.Kernel != nil && a.Kernel != nil && *b.Kernel != *a.Kernel {
@@ -304,6 +346,110 @@ func DiffModels(head, working *Model) []HostDiff {
 		}
 		out = append(out, d)
 	}
+	return out
+}
+
+// diffUnits says what switch-to-configuration (nixos-26.05) does to each unit
+// that changes, if it runs. Units in neither map are unknown: nil.
+func diffUnits(before, after map[string]UnitInfo) []UnitChange {
+	if before == nil || after == nil {
+		return nil
+	}
+	var out []UnitChange
+	for name, a := range after {
+		b, ok := before[name]
+		action := "start" // started with the target that wants it
+		if ok {
+			action = unitAction(name, b, a)
+		}
+		if action != "" {
+			out = append(out, UnitChange{Name: name, Action: action})
+		}
+	}
+	for name, b := range before {
+		if _, ok := after[name]; !ok {
+			action := "stop"
+			if !systemdBool(b.Flags["Unit/X-StopOnRemoval"], true) { // removed, but left running
+				action = "keep"
+			}
+			out = append(out, UnitChange{Name: name, Action: action})
+		}
+	}
+	slices.SortFunc(out, func(x, y UnitChange) int { return strings.Compare(x.Name, y.Name) })
+	return out
+}
+
+// unitAction is what a switch does to a unit in both systems, "" for nothing
+// to show: compare_units, then handle_modified_unit of switch-to-configuration-ng.
+func unitAction(name string, b, a UnitInfo) string {
+	// Targets are started again whatever changed; path and slice settings
+	// apply on daemon-reload.
+	if strings.HasSuffix(name, ".target") || strings.HasSuffix(name, ".path") || strings.HasSuffix(name, ".slice") {
+		return ""
+	}
+	restart := b.Hash != a.Hash
+	reload := false
+	for _, k := range []string{"Unit/X-Reload-Triggers", "Service/ExecReload", "Mount/Options"} {
+		was, inB := b.Reload[k]
+		now, inA := a.Reload[k]
+		switch {
+		case inA && (!inB || was != now):
+			reload = true
+			if !inB && k == "Mount/Options" { // a new key outside [Unit] and [Service]
+				restart = true
+			}
+		case inB && !inA && k == "Mount/Options": // removing the others changes nothing that runs
+			restart = true
+		}
+	}
+	switch {
+	case !restart && reload:
+		return "reload"
+	case !restart:
+		return ""
+	case strings.HasSuffix(name, ".mount"):
+		if name == "-.mount" || name == "nix.mount" { // never unmounted under the running system
+			return "reload"
+		}
+		return "restart"
+	case strings.HasSuffix(name, ".socket"):
+		return "keep"
+	case systemdBool(a.Flags["Service/X-ReloadIfChanged"], false):
+		return "reload"
+	case !systemdBool(a.Flags["Service/X-RestartIfChanged"], true) || systemdBool(a.Flags["Unit/RefuseManualStop"], false) ||
+		systemdBool(a.Flags["Unit/X-OnlyManualStart"], false):
+		return "keep"
+	}
+	return "restart"
+}
+
+// systemdBool reads a unit's boolean as switch-to-configuration does; "" is unset.
+func systemdBool(v string, def bool) bool {
+	if v == "" {
+		return def
+	}
+	return slices.Contains([]string{"1", "yes", "true", "on"}, v)
+}
+
+// diffEtc lists the /etc files whose content, mode or owner changes.
+func diffEtc(before, after map[string]string) []EtcChange {
+	if before == nil || after == nil {
+		return nil
+	}
+	var out []EtcChange
+	for target, a := range after {
+		if b, ok := before[target]; !ok {
+			out = append(out, EtcChange{Path: "/etc/" + target, Status: "added"})
+		} else if b != a {
+			out = append(out, EtcChange{Path: "/etc/" + target, Status: "changed"})
+		}
+	}
+	for target := range before {
+		if _, ok := after[target]; !ok {
+			out = append(out, EtcChange{Path: "/etc/" + target, Status: "removed"})
+		}
+	}
+	slices.SortFunc(out, func(x, y EtcChange) int { return strings.Compare(x.Path, y.Path) })
 	return out
 }
 

@@ -32,7 +32,7 @@
       },
       (e) => (error = e instanceof Error ? e.message : String(e)),
     )
-    fetchModelDiff(rev, () => (computing = true), () => alive).then(
+    fetchModelDiff({ rev }, () => (computing = true), () => alive).then(
       (r) => ((diff = r), (computing = false)),
       (e) => ((impactError = e instanceof Error ? e.message : String(e)), (computing = false)),
     )

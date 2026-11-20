@@ -1,3 +1,4 @@
+import type { Component } from 'svelte'
 import { ApiError } from './api'
 
 // Toasts, the status-line message and the single modal dialog.
@@ -69,6 +70,10 @@ export type DialogSpec = {
   danger?: boolean
   /** When set the dialog asks for a value. */
   input?: { label: string; value: string }
+  /** Shown under the message, e.g. what a push changes on each machine. */
+  body?: Component
+  /** Wider, for a body that lists things. */
+  wide?: boolean
 }
 export const dialog = $state<{ spec: DialogSpec | null; resolve: (v: string | null) => void }>({
   spec: null,

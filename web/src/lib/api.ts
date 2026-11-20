@@ -115,8 +115,19 @@ export type HostDiff = {
   kernel?: VersionChange
   /** The kernel, its modules, the initrd or the kernel parameters change: only a reboot applies them. */
   reboot?: boolean
+  /** What switching does to each changed unit, if it runs. */
+  units?: UnitChange[]
+  etc?: EtcChange[]
+  /** Only when the server has built both systems. */
+  closure?: ClosureDiff
 }
 export type VersionChange = { name: string; from: string; to: string }
+/** keep: changed, but switching leaves it running the old version until it is restarted or the machine reboots. */
+export type UnitChange = { name: string; action: 'restart' | 'reload' | 'start' | 'stop' | 'keep' }
+export type EtcChange = { path: string; status: 'added' | 'removed' | 'changed' }
+/** One line of nix store diff-closures: versions before and after ("" or absent: not there), size change in bytes. */
+export type ClosureChange = { name: string; from?: string; to?: string; delta?: number }
+export type ClosureDiff = { sizeFrom: number; sizeTo: number; changes: ClosureChange[] }
 /** A flake input added, removed or moved to another revision; compareUrl for GitHub inputs. */
 export type InputChange = {
   name: string
@@ -267,7 +278,8 @@ export const api = {
   // These answer 202 while a job computes the result; the body's `state` says which.
   model: () => get<ModelReply>('/api/model', { at: 'working' }),
   /** The last commit against the working copy, or with rev: that commit against its parent. */
-  modelDiff: (rev?: string) => get<ModelDiffReply>('/api/model/diff', rev ? { rev } : {}),
+  /** The working copy against the last commit; with rev that commit against its parent; against pushed: the last commit against what is pushed. */
+  modelDiff: (which: { rev?: string; against?: 'pushed' } = {}) => get<ModelDiffReply>('/api/model/diff', which),
   insights: () => get<InsightsReply>('/api/insights'),
   /** Effective values of options (full names, quoted segments allowed) on all machines, or the given ones. */
   optionValues: (names: string[], hosts: string[] = []) =>

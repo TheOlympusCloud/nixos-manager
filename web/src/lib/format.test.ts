@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { age, days } from './format'
+import { age, bytes, days, signedBytes } from './format'
 
 describe('age', () => {
   const now = Date.parse('2026-11-19T12:00:00Z')
@@ -16,5 +16,18 @@ describe('age', () => {
   it('counts whole days', () => {
     expect(days(now / 1000 - 31 * 86400 - 5, now)).toBe(31)
     expect(days(now / 1000 + 100, now)).toBe(0)
+  })
+})
+
+describe('bytes', () => {
+  it('shows sizes in binary units, as Nix does', () => {
+    expect(bytes(0)).toBe('0 B')
+    expect(bytes(1023)).toBe('1023 B')
+    expect(bytes(1536)).toBe('1.5 KiB')
+    expect(bytes(18.4 * 1024 * 1024)).toBe('18.4 MiB')
+    expect(bytes(1.27 * 1024 ** 3)).toBe('1.27 GiB')
+    expect(signedBytes(19293798)).toBe('+18.4 MiB')
+    expect(signedBytes(-12288)).toBe('−12.0 KiB')
+    expect(signedBytes(0)).toBe('0 B')
   })
 })
