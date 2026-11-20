@@ -118,9 +118,10 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
    - Size: every machine is a full NixOS evaluation, so memory goes first.
      4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
      holds a few nixpkgs revisions and their builds. More cores make checks
-     faster. Two machines are evaluated at once; with memory to spare, raise
-     that (about 1 GB each) with
-     `services.nixos-manager.extraEnvironment.NIXMGR_EVAL_JOBS = "4";`.
+     faster. The fleet views evaluate two machines at once (about 1 GB
+     each), and a check can run next to them. On a tight container set
+     `services.nixos-manager.extraEnvironment.NIXMGR_EVAL_JOBS = "1";`, or
+     raise it when memory is to spare.
 
 3. **Configure it.** `ssh root@<address>`, then write `/etc/nixos/flake.nix`:
 
@@ -535,7 +536,7 @@ commit message may not bring its own `Via` trailer.
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
 | `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
-| `NIXMGR_EVAL_JOBS` | Machines evaluated at once for the fleet views (default 2, or 1 on a single CPU). Each is a whole NixOS evaluation, about 1 GB of memory. **Evaluate again** after a failure re-evaluates only the machines that failed |
+| `NIXMGR_EVAL_JOBS` | Machines evaluated at once for the fleet views (default 2, or 1 on a single CPU). Each is a whole NixOS evaluation, about 1 GB of memory, and a check can run at the same time. **Evaluate again** after a failure re-evaluates only the machines that failed |
 
 Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
 a keyed hash of each one, never the session itself. Changing the password ends
