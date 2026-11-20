@@ -47,23 +47,25 @@ type Jobs struct {
 	// keeps none.
 	GCRoots string
 
-	mu          sync.Mutex
-	jobs        []*Job // oldest first
-	nextID      int
-	passed      map[string]CheckPass // by tree
-	passedOrder []string             // the passed trees, oldest first
-	checksPath  string               // "" keeps them in memory only
-	queue       chan *Job            // every kind but check and system
-	checkQueue  chan *Job
-	systemQueue chan *Job
-	systems     map[string]SystemEval // by commit/host
-	systemOrder []string
-	models      map[string]*Model // by git tree
-	retry       *Model            // replaced by Evaluate again: the next evaluation of its tree keeps what evaluated
-	modelOrder  []string
-	indexes     map[string]any   // search indexes by key
-	indexErrs   map[string]error // why the last build of an index failed
-	valuesOrder []string         // option value results, oldest first
+	mu           sync.Mutex
+	jobs         []*Job // oldest first
+	nextID       int
+	passed       map[string]CheckPass // by tree
+	passedOrder  []string             // the passed trees, oldest first
+	checksPath   string               // "" keeps them in memory only
+	queue        chan *Job            // every kind but check and system
+	checkQueue   chan *Job
+	systemQueue  chan *Job
+	systems      map[string]SystemEval // by commit/host
+	systemOrder  []string
+	closures     map[string]*ClosureDiff // by "from to" system paths
+	closureOrder []string
+	models       map[string]*Model // by git tree
+	retry        *Model            // replaced by Evaluate again: the next evaluation of its tree keeps what evaluated
+	modelOrder   []string
+	indexes      map[string]any   // search indexes by key
+	indexErrs    map[string]error // why the last build of an index failed
+	valuesOrder  []string         // option value results, oldest first
 }
 
 func newJobs(repo *Repo) *Jobs {

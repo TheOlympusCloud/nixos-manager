@@ -8,6 +8,36 @@
  "kernel": "6.12.58",
  "toplevel": "/nix/store/f8w2lc-nixos-system-workstation-26.05.drv",
  "boot": "[\"/nix/store/0rgk-linux-6.12.58.drv\",\"/nix/store/3dkx-linux-6.12.58-modules.drv\",\"/nix/store/b5yh-initrd-linux-6.12.58.drv\",[\"quiet\"]]",
+ "systemPath": "/nix/store/9fw2-nixos-system-workstation-26.05",
+ "units": {
+  "sshd.service": {
+   "hash": "5f1c",
+   "reload": {},
+   "flags": {}
+  },
+  "NetworkManager.service": {
+   "hash": "a3e0",
+   "reload": {},
+   "flags": {}
+  },
+  "dhcpcd.service": {
+   "hash": "77b1",
+   "reload": {},
+   "flags": {
+    "Service/X-RestartIfChanged": "false"
+   }
+  },
+  "multi-user.target": {
+   "hash": "c0d4",
+   "reload": {},
+   "flags": {}
+  }
+ },
+ "etc": {
+  "hosts": "9d2e",
+  "ssh/sshd_config": "41aa",
+  "nix/nix.conf": "e8c3"
+ },
  "managedFile": "hosts/workstation/managed.json",
  "packages": [
   {

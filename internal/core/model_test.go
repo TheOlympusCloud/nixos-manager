@@ -2,6 +2,7 @@ package core
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -173,5 +174,125 @@ func TestDiffModelsSeesEveryChangeOfTheSystem(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("diff\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// What switch-to-configuration does to each changed unit, if it runs, and
+// which /etc files change: from the evaluated units and /etc entries.
+func TestDiffModelsListsUnitsAndEtc(t *testing.T) {
+	u := func(hash string, kv ...string) UnitInfo {
+		i := UnitInfo{Hash: hash, Reload: map[string]string{}, Flags: map[string]string{}}
+		for n := 0; n < len(kv); n += 2 {
+			if strings.HasPrefix(kv[n], "flag:") {
+				i.Flags[strings.TrimPrefix(kv[n], "flag:")] = kv[n+1]
+			} else {
+				i.Reload[kv[n]] = kv[n+1]
+			}
+		}
+		return i
+	}
+	before := map[string]UnitInfo{
+		"nginx.service":               u("a"),
+		"phpfpm.service":              u("a"),
+		"dhcpcd.service":              u("a"),
+		"journald.service":            u("a"),
+		"explicit.service":            u("a"),
+		"data.mount":                  u("a"),
+		"-.mount":                     u("a"),
+		"nix.mount":                   u("a"),
+		"sshd.socket":                 u("a"),
+		"multi-user.target":           u("a"),
+		"machine.slice":               u("a"),
+		"watch.path":                  u("a"),
+		"caddy.service":               u("a", "Unit/X-Reload-Triggers", "r1"),
+		"trigger-added.service":       u("a"),
+		"trigger-removed.service":     u("a", "Unit/X-Reload-Triggers", "r1"),
+		"execreload-removed.service":  u("a", "Service/ExecReload", "e1"),
+		"execreload-changed.service":  u("a", "Service/ExecReload", "e1"),
+		"opts.mount":                  u("a", "Mount/Options", "o1"),
+		"opts-added.mount":            u("a"),
+		"nix-opts-added.mount":        u("a"),
+		"same.service":                u("a", "Unit/X-Reload-Triggers", "r1"),
+		"old.service":                 u("a"),
+		"getty@.service":              u("a"),
+		"reload-flag-trigger.service": u("a", "Unit/X-Reload-Triggers", "r1"),
+	}
+	after := map[string]UnitInfo{
+		"nginx.service":               u("b"),
+		"phpfpm.service":              u("b", "flag:Service/X-ReloadIfChanged", "true"),
+		"dhcpcd.service":              u("b", "flag:Service/X-RestartIfChanged", "false"),
+		"journald.service":            u("b", "flag:Unit/RefuseManualStop", "yes"),
+		"explicit.service":            u("b", "flag:Service/X-RestartIfChanged", "on", "flag:Unit/X-OnlyManualStart", "0"),
+		"data.mount":                  u("b"),
+		"-.mount":                     u("b"),
+		"nix.mount":                   u("b"),
+		"sshd.socket":                 u("b"),
+		"multi-user.target":           u("b"),
+		"machine.slice":               u("b"),
+		"watch.path":                  u("b"),
+		"caddy.service":               u("a", "Unit/X-Reload-Triggers", "r2"),
+		"trigger-added.service":       u("a", "Unit/X-Reload-Triggers", "r1"),
+		"trigger-removed.service":     u("a"),
+		"execreload-removed.service":  u("a"),
+		"execreload-changed.service":  u("a", "Service/ExecReload", "e2"),
+		"opts.mount":                  u("a", "Mount/Options", "o2"),
+		"opts-added.mount":            u("a", "Mount/Options", "o1"),
+		"nix-opts-added.mount":        u("a", "Mount/Options", "o1"),
+		"same.service":                u("a", "Unit/X-Reload-Triggers", "r1"),
+		"new.service":                 u("a"),
+		"new.target":                  u("a"),
+		"getty@.service":              u("b"),
+		"reload-flag-trigger.service": u("a", "Unit/X-Reload-Triggers", "r2", "flag:Service/X-RestartIfChanged", "false"),
+	}
+	// A mount named nix-opts-added.mount is not /nix: only -.mount and nix.mount are reloaded.
+	head := &Model{Hosts: []Host{{Name: "web", Toplevel: "/nix/store/a.drv", Detail: &HostDetail{Units: before,
+		Etc: map[string]string{"hosts": "h1", "ssh/sshd_config": "s1", "old.conf": "o1"}}}}}
+	work := &Model{Hosts: []Host{{Name: "web", Toplevel: "/nix/store/b.drv", Detail: &HostDetail{Units: after,
+		Etc: map[string]string{"hosts": "h2", "ssh/sshd_config": "s1", "new.conf": "n1"}}}}}
+	d := DiffModels(head, work)[0]
+	want := []UnitChange{
+		{Name: "-.mount", Action: "reload"},
+		{Name: "caddy.service", Action: "reload"},
+		{Name: "data.mount", Action: "restart"},
+		{Name: "dhcpcd.service", Action: "keep"},
+		{Name: "execreload-changed.service", Action: "reload"},
+		{Name: "explicit.service", Action: "restart"},
+		{Name: "getty@.service", Action: "restart"},
+		{Name: "journald.service", Action: "keep"},
+		{Name: "new.service", Action: "start"},
+		{Name: "new.target", Action: "start"},
+		{Name: "nginx.service", Action: "restart"},
+		{Name: "nix-opts-added.mount", Action: "restart"},
+		{Name: "nix.mount", Action: "reload"},
+		{Name: "old.service", Action: "stop"},
+		{Name: "opts-added.mount", Action: "restart"},
+		{Name: "opts.mount", Action: "reload"},
+		{Name: "phpfpm.service", Action: "reload"},
+		{Name: "reload-flag-trigger.service", Action: "reload"},
+		{Name: "sshd.socket", Action: "keep"},
+		{Name: "trigger-added.service", Action: "reload"},
+	}
+	if !reflect.DeepEqual(d.Units, want) {
+		t.Errorf("units\n got %+v\nwant %+v", d.Units, want)
+	}
+	wantEtc := []EtcChange{{Path: "/etc/hosts", Status: "changed"}, {Path: "/etc/new.conf", Status: "added"}, {Path: "/etc/old.conf", Status: "removed"}}
+	if !reflect.DeepEqual(d.Etc, wantEtc) {
+		t.Errorf("etc\n got %+v\nwant %+v", d.Etc, wantEtc)
+	}
+	if d.Status != "changed" {
+		t.Errorf("status %s", d.Status)
+	}
+
+	// Without what to compare (an older evaluation, a new or broken machine) nothing is listed.
+	unknown := &Model{Hosts: []Host{{Name: "web", Toplevel: "/nix/store/a.drv"}}}
+	if d := DiffModels(unknown, work)[0]; d.Units != nil || d.Etc != nil {
+		t.Errorf("no detail before: %+v", d)
+	}
+	if d := DiffModels(&Model{}, work)[0]; d.Status != "added" || d.Units != nil || d.Etc != nil {
+		t.Errorf("a new machine lists no unit: %+v", d)
+	}
+	noUnits := &Model{Hosts: []Host{{Name: "web", Toplevel: "/nix/store/a.drv", Detail: &HostDetail{Etc: map[string]string{"hosts": "h1"}}}}}
+	if d := DiffModels(noUnits, work)[0]; d.Units != nil || len(d.Etc) == 0 {
+		t.Errorf("units unknown before, /etc known: %+v", d)
 	}
 }

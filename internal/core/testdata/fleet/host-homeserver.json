@@ -8,6 +8,30 @@
  "kernel": "6.12.58",
  "toplevel": "/nix/store/1xk3q6-nixos-system-homeserver-26.05.drv",
  "boot": "",
+ "systemPath": "/nix/store/2kq8-nixos-system-homeserver-26.05",
+ "units": {
+  "sshd.service": {
+   "hash": "5f1c",
+   "reload": {},
+   "flags": {}
+  },
+  "jellyfin.service": {
+   "hash": "0be7",
+   "reload": {},
+   "flags": {}
+  },
+  "nginx.service": {
+   "hash": "d91f",
+   "reload": {
+    "Unit/X-Reload-Triggers": "6c02"
+   },
+   "flags": {}
+  }
+ },
+ "etc": {
+  "hosts": "1b7f",
+  "ssh/sshd_config": "41aa"
+ },
  "managedFile": "hosts/homeserver/managed.json",
  "packages": [
   {

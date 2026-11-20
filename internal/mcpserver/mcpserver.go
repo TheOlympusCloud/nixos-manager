@@ -317,7 +317,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		}
 		return core.Host{}, &core.Error{Kind: core.ErrNotFound, Msg: "no machine named " + in.Host}
 	})
-	tool(s, "model_diff", "What the uncommitted changes do to each machine, compared with the last commit: packages, services/programs, users and ports added or removed, package and kernel versions. status is changed whenever the machine's system derivation changes; changed with none of those lists means another setting (a unit, an /etc file, a sysctl...). reboot: the kernel, its modules, the initrd or the kernel parameters change, which only a reboot applies.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
+	tool(s, "model_diff", "What the uncommitted changes do to each machine, compared with the last commit: packages, services/programs, users and ports added or removed, package and kernel versions. status is changed whenever the machine's system derivation changes; changed with none of those lists means another setting (a sysctl, a file outside /etc...). reboot: the kernel, its modules, the initrd or the kernel parameters change, which only a reboot applies. units: what switching does to each changed systemd unit if it runs (restart, reload, start, stop, or keep: it runs the old version until restarted). etc: the /etc files added, removed or changed. closure, only when this server has built both systems (a check builds them): every dependency whose version or size changes (delta in bytes) and the closure size before and after.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
 		head, err := ready(ctx, func() (*core.Model, *core.Job, error) { return svc.Jobs.Model(ctx, "head") })
 		if err != nil {
 			return nil, err
@@ -326,7 +326,9 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"hosts": core.DiffModels(head, work)}, nil
+		hosts := core.DiffModels(head, work)
+		svc.Jobs.AddClosures(ctx, head, work, hosts)
+		return map[string]any{"hosts": hosts}, nil
 	})
 	tool(s, "search_packages", "Search the nixpkgs the flake locks. The first search builds the index, which can take minutes.", func(ctx context.Context, in struct {
 		Query string `json:"query"`

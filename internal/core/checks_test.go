@@ -406,6 +406,38 @@ func TestCheckBuildsTheChangedMachineWithRealNix(t *testing.T) {
 	must[string](t)(s.Commit(ctx, "example: swappiness", false))
 	must[string](t)(s.Push(ctx, false))
 
+	// Both systems are now built here: the diff adds every dependency and the size.
+	write(t, s.Repo, "hosts/example/default.nix",
+		strings.Replace(strings.Replace(def, "{ ... }:", "{ pkgs, ... }:", 1), "system.stateVersion", "boot.kernel.sysctl.\"vm.swappiness\" = 10;\n  environment.systemPackages = [ pkgs.hello ];\n  system.stateVersion", 1))
+	ok(t, s.Stage(ctx, nil))
+	if info := finish(must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"}))); info.State != "passed" {
+		t.Fatalf("check with hello: %s", tail(info.Output, 60))
+	}
+	model := func(at string) *Model {
+		t.Helper()
+		m, j, err := s.Jobs.Model(ctx, at)
+		ok(t, err)
+		if j != nil {
+			finish(j)
+			m, _, err = s.Jobs.Model(ctx, at)
+			ok(t, err)
+		}
+		return m
+	}
+	head, work := model("head"), model("working")
+	ds := DiffModels(head, work)
+	s.Jobs.AddClosures(ctx, head, work, ds)
+	var ex HostDiff
+	for _, d := range ds {
+		if d.Host == "example" {
+			ex = d
+		}
+	}
+	c := ex.Closure
+	if c == nil || c.SizeFrom == 0 || c.SizeTo <= c.SizeFrom || !slices.ContainsFunc(c.Changes, func(x ClosureChange) bool { return x.Name == "hello" && x.From == "" && x.To != "" && x.Delta > 0 }) {
+		t.Fatalf("closure of example: %+v (diff %+v)", c, ex)
+	}
+
 	info = edit(`environment.etc.nixmgr-broken.source = derivation { name = "nixmgr-broken"; system = config.nixpkgs.hostPlatform.system; builder = "/bin/sh"; args = [ "-c" "exit 1" ]; };`)
 	if info.State != "failed" || !slices.Equal(info.Summary.Failed, []string{"example"}) || !strings.Contains(info.Output, "nixmgr-broken") {
 		t.Fatalf("a system that does not build: check %s %+v:\n%s", info.State, info.Summary, tail(info.Output, 60))

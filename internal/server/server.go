@@ -545,8 +545,16 @@ func indexed[T any](w http.ResponseWriter, results []T, j *core.Job, err error) 
 // modelDiff compares the last commit with the working copy, machine by machine.
 func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
 	// Default: the last commit against the working copy. With ?rev=: that commit against its parent.
+	// With ?against=pushed: what a push lands on against the last commit, which it deploys.
 	from, to := "head", "working"
-	if rev := r.URL.Query().Get("rev"); rev != "" {
+	switch against := r.URL.Query().Get("against"); {
+	case against == "pushed":
+		from, to = "pushed", "head"
+	case against != "":
+		writeError(w, http.StatusBadRequest, "against must be pushed")
+		return
+	case r.URL.Query().Get("rev") != "":
+		rev := r.URL.Query().Get("rev")
 		to = "rev:" + rev
 		from = "" // a root commit is compared with nothing
 		if parent, ok := s.Svc.Repo.Parent(r.Context(), rev); ok {
@@ -579,7 +587,9 @@ func (s *Server) modelDiff(w http.ResponseWriter, r *http.Request) {
 		respondCode(w, http.StatusAccepted, map[string]any{"state": "computing", "jobs": jobs})
 		return
 	}
-	out := map[string]any{"state": "ready", "hosts": core.DiffModels(head, work), "inputs": core.DiffInputs(head.Inputs, work.Inputs)}
+	hosts := core.DiffModels(head, work)
+	s.Svc.Jobs.AddClosures(r.Context(), head, work, hosts)
+	out := map[string]any{"state": "ready", "hosts": hosts, "inputs": core.DiffInputs(head.Inputs, work.Inputs)}
 	if work.Error != "" { // nothing to compare with: do not report every machine as removed
 		out["hosts"], out["inputs"], out["error"] = []core.HostDiff{}, []core.InputChange{}, work.Error
 	}
