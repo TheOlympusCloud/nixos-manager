@@ -3,8 +3,9 @@ import { addressProblem, diskOf, installCommand, isPlaceholder } from './install
 import { previewFiles } from './machines'
 
 describe('addressProblem', () => {
-  it('takes host names and IP addresses only, as they go into a shell command', () => {
-    for (const ok of ['', '192.168.1.50', 'nas', 'nas.lan', 'my-pc.example.org', 'fe80::1', '2001:db8::7']) expect(addressProblem(ok), ok).toBe('')
+  it('takes host names and IPv4 addresses only, as they go into a shell command and nix copy', () => {
+    for (const ok of ['', '192.168.1.50', 'nas', 'nas.lan', 'my-pc.example.org']) expect(addressProblem(ok), ok).toBe('')
+    for (const v6 of ['fe80::1', '2001:db8::7', '[2001:db8::7]']) expect(addressProblem(v6), v6).toMatch(/IPv6/)
     for (const bad of ['root@nas', 'nas;reboot', 'nas $(id)', '-oProxyCommand=x', 'nas:22', 'a..b', 'nas.', '`x`', "nas'", 'nas\nx']) expect(addressProblem(bad), bad).not.toBe('')
   })
 })

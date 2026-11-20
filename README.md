@@ -609,7 +609,8 @@ nixos-anywhere**, open until the machine has reported a deployment:
    (`sudo passwd`, or your key in `/root/.ssh/authorized_keys`). Any Linux
    reachable as root works too: nixos-anywhere replaces it with its own
    installer, which keeps the host key.
-3. Enter its address and **Fetch host key**. The server opens an SSH
+3. Enter its address (a host name or IPv4 address, SSH on port 22) and
+   **Fetch host key**. The server opens an SSH
    connection, reads the host key the machine proves it holds, and closes the
    connection before any login: it sends no credential and runs nothing.
    Compare the fingerprint with `ssh-keygen -lf

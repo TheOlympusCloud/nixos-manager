@@ -251,6 +251,8 @@ const diskoInputSnippet = `disko = {
 };`
 
 // hasDiskoInput tells whether flake.nix declares an input named disko (disko = …, disko.url = …), outside comments.
+// shortcut: any "disko =" counts, a let binding in outputs too; that flake then fails to evaluate the machine,
+// which says what is missing. Parse the inputs attribute set if this misleads someone.
 func hasDiskoInput(flake string) bool {
 	return diskoInput.MatchString(nixComment.ReplaceAllString(flake, ""))
 }

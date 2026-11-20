@@ -1,11 +1,15 @@
 // Installing a machine that has a disk layout: nixos-anywhere, run by a person from a clone of the repository.
 
-/** Problem with the machine's address ('' when fine). It goes into a shell command, so only a host name or IP address passes. */
+/**
+ * Problem with the machine's address ('' when fine). It goes into a shell command, so only a host name or IPv4 address
+ * passes: nixos-anywhere also gives it to nix copy as ssh://root@<address>, where an IPv6 address needs brackets that ssh
+ * itself does not take.
+ */
 export function addressProblem(address: string): string {
   if (!address) return ''
   const name = /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/
-  const ipv6 = /^[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:[0-9A-Fa-f.:]*$/
-  return name.test(address) || ipv6.test(address) ? '' : 'A host name or IP address, such as 192.168.1.50 or nas.lan (SSH on port 22).'
+  if (address.includes(':')) return 'An IPv6 address does not work in the command: use the machine’s host name.'
+  return name.test(address) ? '' : 'A host name or IPv4 address, such as 192.168.1.50 or nas.lan (SSH on port 22).'
 }
 
 /**
