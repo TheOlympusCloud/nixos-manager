@@ -36,19 +36,47 @@ func (js *Jobs) CheckCommit(ctx context.Context, sha, branch string) (*Job, *Che
 	}
 	trees := strings.Fields(out)
 	js.mu.Lock()
-	defer js.mu.Unlock()
 	if p, ok := js.passed[trees[0]]; ok {
+		js.mu.Unlock()
 		return nil, &p, nil
 	}
-	if i := slices.IndexFunc(js.jobs, func(j *Job) bool { return j.Req.Commit == sha && !j.finishedState() }); i >= 0 {
-		return js.jobs[i], nil, nil
+	if j := js.unfinished(sha); j != nil {
+		js.mu.Unlock()
+		return j, nil, nil
 	}
 	base := ""
 	if i := slices.IndexFunc(trees[1:], func(t string) bool { _, ok := js.passed[t]; return ok }); i >= 0 {
 		base = trees[1+i]
 	}
 	job, err := js.enqueue(JobRequest{Kind: "check", Commit: sha, Branch: branch, Base: base}, trees[0], "")
+	tell := js.onCommit
+	js.mu.Unlock()
+	if err == nil && tell != nil {
+		tell(job)
+	}
 	return job, nil, err
+}
+
+// WatchCommits has fn told of every check of a commit queued from now on.
+func (js *Jobs) WatchCommits(fn func(*Job)) {
+	js.mu.Lock()
+	js.onCommit = fn
+	js.mu.Unlock()
+}
+
+// unfinishedCheck is the queued or running check of a commit, or nil.
+func (js *Jobs) unfinishedCheck(sha string) *Job {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	return js.unfinished(sha)
+}
+
+// unfinished is unfinishedCheck with js.mu held.
+func (js *Jobs) unfinished(sha string) *Job {
+	if i := slices.IndexFunc(js.jobs, func(j *Job) bool { return j.Req.Commit == sha && !j.finishedState() }); i >= 0 {
+		return js.jobs[i]
+	}
+	return nil
 }
 
 // CommitState says where a commit stands: passed (its tree passed a check),

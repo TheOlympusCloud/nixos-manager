@@ -127,3 +127,45 @@ func TestForgejoSettingsNeedLoginAndKeepThePrivateKey(t *testing.T) {
 		t.Fatalf("info %+v", info)
 	}
 }
+
+// The commit status token is saved through the web login only, after Forgejo
+// accepted it, and never sent back.
+func TestForgejoStatusToken(t *testing.T) {
+	forgejo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/pablo/fleet" || r.Header.Get("Authorization") != "token s3cret-token" {
+			w.WriteHeader(401)
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(forgejo.Close)
+	e, _ := forgejoEnv(t)
+	in := map[string]string{"token": "s3cret-token", "console": "http://console.lan:8080"}
+	if code := e.do(t, "POST", "/api/forgejo/status", in, nil); code != 401 {
+		t.Fatalf("without login: %d", code)
+	}
+	e.login(t)
+	e.do(t, "POST", "/api/forgejo/remote", map[string]string{"url": "ssh://git@forgejo.lan:2222/pablo/fleet.git"}, nil)
+	e.do(t, "POST", "/api/forgejo/web", map[string]string{"url": forgejo.URL}, nil)
+
+	var er struct{ Error string }
+	if code := e.do(t, "POST", "/api/forgejo/status", map[string]string{"token": "wrong"}, &er); code != 400 || !strings.Contains(er.Error, "refused the token") {
+		t.Fatalf("wrong token: %d %q", code, er.Error)
+	}
+	resp, err := e.client.Post(e.srv.URL+"/api/forgejo/status", "application/json", strings.NewReader(`{"token":"s3cret-token","console":"http://console.lan:8080"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `"status_token":true`) || strings.Contains(string(b), "s3cret-token") {
+		t.Fatalf("save: %d %s", resp.StatusCode, b)
+	}
+	var st core.ForgejoState
+	if code := e.do(t, "GET", "/api/forgejo", nil, &st); code != 200 || !st.StatusToken || st.StatusConsole != "http://console.lan:8080" || st.StatusAPI != forgejo.URL+"/api/v1/repos/pablo/fleet" {
+		t.Fatalf("state %d %+v", code, st)
+	}
+	if code := e.do(t, "POST", "/api/forgejo/status", map[string]string{"token": ""}, &st); code != 200 || st.StatusToken {
+		t.Fatalf("remove: %d %+v", code, st)
+	}
+}

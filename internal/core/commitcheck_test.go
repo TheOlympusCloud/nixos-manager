@@ -14,7 +14,7 @@ import (
 func laptop(t *testing.T, s *Service) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "laptop")
-	gitOut(t, t.TempDir(), "clone", "-q", s.Repo.originURL(context.Background()), dir)
+	gitOut(t, t.TempDir(), "clone", "-q", s.Repo.Remote(context.Background()), dir) // after insteadOf
 	gitOut(t, dir, "config", "user.name", "Laptop")
 	gitOut(t, dir, "config", "user.email", "laptop@example.invalid")
 	return dir

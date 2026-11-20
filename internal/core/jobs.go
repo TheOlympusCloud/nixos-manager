@@ -66,6 +66,7 @@ type Jobs struct {
 	indexes      map[string]any   // search indexes by key
 	indexErrs    map[string]error // why the last build of an index failed
 	valuesOrder  []string         // option value results, oldest first
+	onCommit     func(*Job)       // told of every check of a commit CheckCommit queues
 }
 
 func newJobs(repo *Repo) *Jobs {
