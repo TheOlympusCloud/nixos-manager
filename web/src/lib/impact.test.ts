@@ -72,10 +72,10 @@ describe('impact', () => {
 
   it('lists units, /etc files, dependencies and the size of a built system', () => {
     const g = impactGroups(detailed)
-    expect(g.map((x) => x.label)).toEqual(['Updated', 'Restarts', 'Reloads', 'Starts', 'Stops', 'Not restarted', '/etc', 'Dependencies', 'Size'])
+    expect(g.map((x) => x.label)).toEqual(['Updated', 'Restarts', 'Reloads', 'New units', 'Stops', 'Not restarted', '/etc', 'Dependencies', 'Size'])
     const by = (label: string) => g.find((x) => x.label === label)!.items
     expect(by('Restarts')).toEqual([{ text: 'nginx.service', kind: 'up' }])
-    expect(by('Starts')).toEqual([{ text: 'new.service', kind: 'add' }])
+    expect(by('New units')).toEqual([{ text: 'new.service', kind: 'add', title: expect.stringMatching(/running target wants it/) }])
     expect(by('Stops')).toEqual([{ text: 'old.service', kind: 'del' }])
     expect(by('Not restarted')[0].title).toMatch(/old version until/)
     expect(by('/etc').map((i) => [i.text, i.kind])).toEqual([

@@ -82,7 +82,7 @@ export function impactGroups(d: Impact): ImpactGroup[] {
     { label: 'Ports', items: [...items(d.portsAdded, 'add'), ...items(d.portsRemoved, 'del')] },
     { label: 'Restarts', items: units('restart', 'up') },
     { label: 'Reloads', items: units('reload', 'up') },
-    { label: 'Starts', items: units('start', 'add') },
+    { label: 'New units', items: units('start', 'add', 'Started now if a running target wants it, else when it is triggered.') },
     { label: 'Stops', items: units('stop', 'del') },
     { label: 'Not restarted', items: units('keep', 'up', KEEP) },
     { label: '/etc', items: (d.etc ?? []).map((e) => ({ text: e.path, kind: etcKind[e.status] })) },
