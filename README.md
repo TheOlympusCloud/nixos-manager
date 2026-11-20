@@ -1141,6 +1141,31 @@ arrived: `Via: web session 3fa2c1d9` (the same label as the `login` line in the
 service log) or `Via: token ci (K3J9QW2M4X1A)`, the token's name and id. A
 commit message may not bring its own `Via` trailer.
 
+## Upgrading
+
+From a version before token scopes, machine tokens and the other changes of
+this release:
+
+- **Data.** The data folder and the fleet repository need no migration. Old
+  tokens keep working, as full tokens, and so do the shared report token and
+  old reports. Sessions are not kept: everyone logs in again.
+- **The shared fleet token.** The old version always made
+  `$NIXMGR_DATA/deploy-token`, so every upgraded install logs "machines may
+  still report with the shared fleet token" at each start until you stop
+  accepting it ([Upgrading from one fleet token](#deployments)).
+- **Scripts that create tokens.** `POST /api/tokens` now needs a `scope`
+  (`read`, `edit` or `full`) and answers 400 without one. Add
+  `"scope": "full"` to get what the old version made.
+- **Fleet modules.** A fleet keeps its own copies of the starter's modules:
+  copy the new `modules/secrets.nix` over yours ([Secrets](#secrets)).
+- **Pure evaluation.** The machine views evaluate the flake as `nix build`
+  does: run **Lock** if `flake.lock` misses an input ([Using it](#using-it)).
+- **Docker.** The image runs as uid 10001: see the upgrade note in
+  [Run it with Docker Compose](#run-it-with-docker-compose).
+- **Rolling back** to the old version gives every read and edit token full
+  access, as it knows no scopes, and accepts expired tokens again. Revoke them
+  on the Tokens page before you roll back, and make new ones after.
+
 ## Configuration
 
 | Variable | Meaning |
