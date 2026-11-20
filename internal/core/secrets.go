@@ -316,7 +316,8 @@ func (st secretsState) recipients(host string) []string {
 }
 
 // sopsYAML is .sops.yaml for the machines: the sops command line then
-// encrypts each file for the keys the console does.
+// encrypts each file for the keys the console does. The starter's
+// modules/secrets.nix finds a machine's age key by its "- <key> # <name>" line.
 func (st secretsState) sopsYAML() string {
 	var b strings.Builder
 	b.WriteString("# Written by nixos-manager (Settings → Secrets) when a machine's key is added or\n" +
@@ -326,7 +327,9 @@ func (st secretsState) sopsYAML() string {
 		fmt.Fprintf(&b, "  - path_regex: '^%s$'\n    key_groups:\n      - age:\n", regexp.QuoteMeta(path))
 		for _, r := range st.recipients(host) {
 			who := "this nixos-manager server"
-			if i := slices.IndexFunc(st.machines, func(m SecretMachine) bool { return m.Recipient == r }); i >= 0 && r != st.admin {
+			if r != st.admin && host != "" { // the machine's own rule names it, even with a key another has too
+				who = host
+			} else if i := slices.IndexFunc(st.machines, func(m SecretMachine) bool { return m.Recipient == r }); i >= 0 && r != st.admin {
 				who = st.machines[i].Name
 			}
 			fmt.Fprintf(&b, "          - %s # %s\n", r, who)

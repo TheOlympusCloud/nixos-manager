@@ -18,7 +18,8 @@
   and the machines that get them (`common.json` for every machine with a key,
   `hosts/<name>.json` for one), and the machines' SSH host keys (`hosts/<name>.pub`).
   nixos-manager writes them (Settings → Secrets); `modules/secrets.nix` puts each value on
-  its machine as `/run/secrets/<name>`. Never put a secret here in plain text.
+  its machine as `/run/secrets/<name>`, once the file is encrypted for the machine's
+  approved key (named in `.sops.yaml`). Never put a secret here in plain text.
 
 Every machine runs comin: it pulls `main` from Forgejo and switches to
 `nixosConfigurations.<its hostname>`. A branch named `testing-<hostname>` is

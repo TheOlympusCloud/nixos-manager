@@ -123,10 +123,16 @@ func TestSecretsMachineKeys(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 	conf, _, _ := s.Repo.Read(".sops.yaml")
-	for _, want := range []string{st.Recipient, st.Machines[0].Recipient, st.Machines[1].Recipient, `'^secrets/hosts/web\.json$'`, `'^secrets/common\.json$'`} {
+	// "- <age key> # <machine>": the starter's modules/secrets.nix finds a machine's key by it.
+	for _, want := range []string{"- " + st.Machines[0].Recipient + " # pi\n", "- " + st.Machines[1].Recipient + " # web\n", `'^secrets/hosts/web\.json$'`, `'^secrets/common\.json$'`} {
 		if !strings.Contains(conf, want) {
 			t.Fatalf(".sops.yaml lacks %s:\n%s", want, conf)
 		}
+	}
+	// A clone with web's key is named in its own rule, so it finds its key too.
+	must[SecretMachine](t)(s.SetMachineKey(ctx, "web2", pub))
+	if conf, _, _ := s.Repo.Read(".sops.yaml"); !strings.Contains(conf, "- "+st.Machines[1].Recipient+" # web2\n") {
+		t.Fatalf(".sops.yaml does not name web2:\n%s", conf)
 	}
 	isErr(t, must2(s.SetMachineKey(ctx, "web", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7 root@web")), ErrInvalid)
 	isErr(t, must2(s.SetMachineKey(ctx, "Web!", pub)), ErrInvalid)

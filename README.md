@@ -868,9 +868,15 @@ secrets/hosts/<name>.json  what that machine alone gets
   repository: a key that arrives in `secrets/hosts/` another way (a pull, an
   edit in Code, a token that can only edit) is listed under **Keys waiting for
   approval**, and nothing is encrypted for it until a person approves it there.
-  Re-encrypt writes back the approved key of a machine whose `.pub` was changed. A machine without a key gets no secrets at all, so adding a
-  secret for every machine never fails a deployment on one that cannot
-  decrypt it. The starter fleet makes an SSH host key on every machine, even
+  Re-encrypt writes back the approved key of a machine whose `.pub` was changed.
+  The starter's `modules/secrets.nix` finds a machine's approved age key in
+  `.sops.yaml` (its `- age1… # <name>` line) and gives the machine only the
+  files encrypted for it. So adding a secret for every machine never fails a
+  deployment on one that cannot decrypt it, and neither does a key that only
+  waits for approval or a file not encrypted again yet. A fleet started before
+  this keeps its own copy of the module, which gives a machine its secrets as
+  soon as its `.pub` exists: copy `templates/fleet/modules/secrets.nix` over it.
+  The starter fleet makes an SSH host key on every machine, even
   without an SSH server (`services.openssh.generateHostKeys`). **Remove**
   deletes the machine's own secrets and encrypts the others again without it,
   with a new data key, so it cannot open what is added later; change the values
