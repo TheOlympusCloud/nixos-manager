@@ -101,6 +101,41 @@ func TestPathValidation(t *testing.T) {
 	}
 }
 
+// A .git folder anywhere in the path is git's own data: a config written there
+// (core.fsmonitor) runs a command on the next git status.
+func TestNoPathIntoAGitFolder(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "sub/a.nix", "{ }\n")
+	commit := commitAll(t, r, "init")
+	for _, p := range []string{"sub/.git/config", "sub/.git", ".GIT/config", "a/.Git/HEAD", "a/b/.gIt"} {
+		_, err := r.Write(p, "x", "")
+		isErr(t, err, ErrInvalid)
+		isErr(t, r.Mkdir(p), ErrInvalid)
+		isErr(t, r.Move("sub/a.nix", p), ErrInvalid)
+		isErr(t, r.Restore(ctx, p, commit, ""), ErrInvalid)
+		_, _, err = r.Read(p)
+		isErr(t, err, ErrInvalid)
+	}
+	// Nor through a symlink to one, which only a pushed commit can bring.
+	ok(t, os.Symlink(".git", filepath.Join(r.Dir, "link")))
+	_, err := r.Write("link/config", "[core]\n\tfsmonitor = touch pwned\n", "")
+	isErr(t, err, ErrInvalid)
+	_, _, err = r.Read("link/config")
+	isErr(t, err, ErrInvalid)
+	isErr(t, r.Mkdir("link/hooks2"), ErrInvalid)
+	isErr(t, r.Move("sub/a.nix", "link/x"), ErrInvalid)
+	isErr(t, r.Delete("link/index"), ErrInvalid)
+	if _, err := os.Stat(filepath.Join(r.Dir, ".git", "index")); err != nil {
+		t.Fatal("the index went away:", err)
+	}
+	_, err = r.Status(ctx)
+	ok(t, err)
+	if _, err := os.Stat(filepath.Join(r.Dir, "pwned")); err == nil {
+		t.Fatal("git status ran the written fsmonitor command")
+	}
+}
+
 func TestWriteReadConflicts(t *testing.T) {
 	r := newRepo(t)
 	h := must[string](t)(r.Write("hosts/web/default.nix", "{ }\n", ""))
