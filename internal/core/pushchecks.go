@@ -186,14 +186,8 @@ func (f *Forgejo) report(sha string, job *Job, pass *CheckPass, err error) {
 		default:
 			f.postStatus(ctx, sha, "pending", "Checking: nix flake check, then a build of every machine it changes")
 			<-job.Done()
-			info := job.Info(true)
-			if info.State == "passed" && info.Summary != nil {
-				f.postStatus(ctx, sha, "success", passedText(info.Summary.Base, info.Summary.Built))
-			} else if info.State == "passed" {
-				f.postStatus(ctx, sha, "success", "Passed")
-			} else {
-				f.postStatus(ctx, sha, "failure", failedText(info))
-			}
+			state, desc := checkStatus(job.Info(true))
+			f.postStatus(ctx, sha, state, desc)
 		}
 		f.mu.Lock()
 		if job = f.Jobs.unfinishedCheck(sha); job == nil {
@@ -220,16 +214,23 @@ func passedText(base string, built []string) string {
 	return fmt.Sprintf("Passed: built the %d machines it changes", len(built))
 }
 
-// failedText says why a check failed, for a commit status.
-func failedText(info JobInfo) string {
-	sum := info.Summary
+// checkStatus is the commit status a finished check gives: success, failure,
+// or error when it ran out of time before it could tell.
+func checkStatus(info JobInfo) (string, string) {
+	sum, last := info.Summary, string(lastLine([]byte(info.Output)))
 	switch {
+	case info.State == "passed" && sum != nil:
+		return "success", passedText(sum.Base, sum.Built)
+	case info.State == "passed":
+		return "success", "Passed"
+	case strings.HasPrefix(last, "stopped:"):
+		return "error", "Not checked to the end: the check ran out of time"
 	case sum == nil:
-		return "Failed: nix flake check or the evaluation failed; the log says why"
+		return "failure", "Failed: nix flake check or the evaluation failed; the log says why"
 	case len(sum.Failed) > 0:
-		return truncate(fmt.Sprintf("Failed: %s %s not build", list(sum.Failed), map[bool]string{true: "does", false: "do"}[len(sum.Failed) == 1]), 140)
+		return "failure", truncate(fmt.Sprintf("Failed: %s %s not build", list(sum.Failed), map[bool]string{true: "does", false: "do"}[len(sum.Failed) == 1]), 140)
 	}
-	return truncate("Failed: "+string(lastLine([]byte(info.Output))), 140)
+	return "failure", truncate("Failed: "+last, 140)
 }
 
 // apiBase is the repository in Forgejo's API, e.g.

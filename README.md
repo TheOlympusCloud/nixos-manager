@@ -396,7 +396,8 @@ Connect the repository in **Settings → Forgejo**; the steps are numbered there
 5. **Commit statuses** (optional). With a Forgejo access token, each check of
    a pushed commit shows next to the commit in Forgejo, on its branch and on
    pull requests, as the status `nixos-manager/check`: pending while it runs,
-   then success or failure, with a link to its log in the console. Create the
+   then success or failure (error when the check ran out of time), with a link
+   to its log in the console. Create the
    token in Forgejo → **Settings → Applications → Generate new token**, as a user
    who can write to the repository, with the **repository** permission **Read and
    write**, and paste it in Settings. It is tried on the repository through

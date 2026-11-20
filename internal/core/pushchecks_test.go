@@ -456,3 +456,27 @@ func TestPushDuringAFetchIsCheckedByTheNextOne(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckStatus(t *testing.T) {
+	sum := func(base string, built, failed []string) *CheckSummary {
+		return &CheckSummary{Base: base, Built: built, Failed: failed}
+	}
+	for _, c := range []struct {
+		info        JobInfo
+		state, desc string
+	}{
+		{JobInfo{State: "passed", Summary: sum("abc", []string{"web"}, nil)}, "success", "Passed: built web"},
+		{JobInfo{State: "passed", Summary: sum("abc", []string{}, nil)}, "success", "Passed: no machine changes"},
+		{JobInfo{State: "passed", Summary: sum("", []string{"db", "web"}, nil)}, "success", "Passed: built every machine (2)"},
+		{JobInfo{State: "passed", Summary: sum("abc", []string{"a", "b", "c", "d", "e"}, nil)}, "success", "Passed: built the 5 machines it changes"},
+		{JobInfo{State: "failed", Summary: sum("abc", []string{"web"}, []string{"db"}), Output: "...\n1 machine does not build: db\n"}, "failure", "Failed: db does not build"},
+		{JobInfo{State: "failed", Summary: sum("abc", nil, []string{"db", "pi"})}, "failure", "Failed: db and pi do not build"},
+		{JobInfo{State: "failed", Output: "$ nix flake check\nfailed: exit status 1\n"}, "failure", "Failed: nix flake check or the evaluation failed; the log says why"},
+		{JobInfo{State: "failed", Summary: sum("abc", nil, nil), Output: "Building web…\n\nstopped: the job ran out of time\n"}, "error", "Not checked to the end: the check ran out of time"},
+		{JobInfo{State: "failed", Output: "\nstopped: the job ran out of time\n"}, "error", "Not checked to the end: the check ran out of time"},
+	} {
+		if state, desc := checkStatus(c.info); state != c.state || desc != c.desc {
+			t.Errorf("%+v: %s %q, want %s %q", c.info, state, desc, c.state, c.desc)
+		}
+	}
+}
