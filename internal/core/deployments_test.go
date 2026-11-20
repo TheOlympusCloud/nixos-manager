@@ -298,7 +298,7 @@ func TestDeploymentOverviewFollowsCominBranches(t *testing.T) {
 
 	ov := must[DeployOverview](t)(d.Overview(ctx, m, now))
 	for _, x := range ov.Machines {
-		want := map[string][2]string{"a": {"stable", "try-a"}, "b": {"stable", "testing-b"}, "c": {"stable", "testing-c"}, "d": {"main", "testing-d"}, "gone": {"stable", "testing-gone"}}[x.Host]
+		want := map[string][2]string{"a": {"stable", "try-a"}, "b": {"stable", "testing-b"}, "c": {"stable", ""}, "d": {"main", "testing-d"}, "gone": {"stable", ""}}[x.Host]
 		if x.Main != want[0] || x.Testing != want[1] {
 			t.Errorf("%s follows %s and %s, want %v", x.Host, x.Main, x.Testing, want)
 		}

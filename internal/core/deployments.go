@@ -419,10 +419,10 @@ type MachineDeployment struct {
 	// Branch is the main branch its comin follows (services.comin.remotes), or
 	// its testing branch when that is on top of the main one.
 	Branch string `json:"branch"`
-	// Main and Testing are those two branches (testing-<host> unless its
-	// settings name another). A trial is a commit pushed to Testing.
+	// Main and Testing are those two branches; Testing is "" when its comin
+	// settings are unknown or name none. A trial is a commit pushed to Testing.
 	Main    string `json:"main"`
-	Testing string `json:"testing"`
+	Testing string `json:"testing,omitempty"`
 	// Culprits, when its last deployment failed on its main branch, are the
 	// commits after the last one it deployed up to the failed one, newest
 	// first: reverting them brings it back to what it runs. Empty when that is
@@ -524,8 +524,9 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	gaps := map[[2]string]gap{}
 	for _, h := range hosts {
 		b := follows[h]
+		m := MachineDeployment{Host: h, Testing: b.Testing, Reports: reports[h]}
 		b.Main, b.Testing = cmp.Or(b.Main, ov.Branch), cmp.Or(b.Testing, "testing-"+h)
-		m := MachineDeployment{Host: h, Branch: b.Main, Main: b.Main, Testing: b.Testing, Target: tips[b.Main], Reports: reports[h]}
+		m.Branch, m.Main, m.Target = b.Main, b.Main, tips[b.Main]
 		if m.Reports == nil {
 			m.Reports = []DeployReport{}
 		}
