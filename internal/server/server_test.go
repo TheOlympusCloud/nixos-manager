@@ -893,3 +893,59 @@ func TestCheckACommitOverHTTP(t *testing.T) {
 		t.Fatalf("checked again: %d", code)
 	}
 }
+
+func TestCompleteRunes(t *testing.T) {
+	for in, want := range map[string]string{
+		"a\xffb":           "a\xffb", // a bad byte inside goes out, as U+FFFD
+		"ab":               "ab",
+		"ab\xe2\x82":       "ab", // € cut after two of its three bytes
+		"ab\xe2\x82\xac":   "ab\xe2\x82\xac",
+		"x\xf0\x9f\x98":    "x", // a four-byte character cut after three
+		"\xf0\x9f\x98\x80": "\xf0\x9f\x98\x80",
+		"a\xff":            "a\xff",
+	} {
+		if got := string(completeRunes([]byte(in))); got != want {
+			t.Errorf("completeRunes(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A running job's output streams even with a byte that is not UTF-8 in it, as
+// nix -L logs have: it comes as U+FFFD before the job ends.
+func TestJobEventsStreamInvalidUTF8(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	release := filepath.Join(t.TempDir(), "release")
+	nix := filepath.Join(t.TempDir(), "nix")
+	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\" hash path \"*) echo sha256-fake; exit ;; esac\n"+
+		"case \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\n"+
+		"case \"$*\" in *\"flake check\"*) printf 'a\\377b\\n'; while [ ! -f '"+release+"' ]; do sleep 0.02; done ;; esac\n"), 0o755)
+	e.svc.Jobs.Nix = nix
+	var w struct{ Hash string }
+	e.do(t, "GET", "/api/file?path=flake.nix", nil, &w)
+	e.do(t, "PUT", "/api/file", map[string]string{"path": "flake.nix", "content": "{ }\n", "base_hash": w.Hash}, nil)
+	e.do(t, "POST", "/api/stage", map[string]any{"paths": []string{}}, nil)
+	var job struct{ ID string }
+	if code := e.do(t, "POST", "/api/jobs", map[string]any{"kind": "check"}, &job); code != 200 {
+		t.Fatalf("submit: %d", code)
+	}
+	defer os.WriteFile(release, nil, 0o644)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", e.srv.URL+"/api/jobs/"+job.ID+"/events", nil)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		if strings.HasPrefix(sc.Text(), "event: done") {
+			t.Fatal("done came before the output")
+		}
+		if strings.HasPrefix(sc.Text(), "data: ") && strings.Contains(sc.Text(), "a\\ufffdb") {
+			return
+		}
+	}
+	t.Fatalf("no output while the job ran: %v", sc.Err())
+}
