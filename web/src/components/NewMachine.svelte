@@ -1,15 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
+  import { api, type MachineDisk, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
   import { createMachine, fleet } from '../lib/fleet.svelte'
-  import { architectures, hardwareCheck, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
+  import { installCommand } from '../lib/install'
+  import { architectures, deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
   import { go, machineLink } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { toast } from '../lib/ui.svelte'
   import { copyText } from '../lib/util'
   import Icon from './Icon.svelte'
 
-  /** The new-machine wizard: name, architecture, role, platform and hardware, then a preview of the files. */
+  /** The new-machine wizard: name, architecture, role, platform and hardware or disk layout, then a preview of the files. */
   let { onclose }: { onclose: () => void } = $props()
 
   let el: HTMLDialogElement
@@ -20,8 +21,13 @@
   let role = $state<MachineRole>('server')
   let platform = $state<MachinePlatform>('hardware')
   let hardware = $state('')
+  // nixos-anywhere installs it on a disko layout, instead of NixOS installed by hand.
+  let anywhere = $state(false)
+  let disk = $state<MachineDisk>('ext4')
+  let device = $state('')
   let creating = $state(false)
-  let autoFlake = $state<boolean | null>(null)
+  let flakeText = $state<string | null>(null)
+  const autoFlake = $derived(flakeText === null ? null : flakeText.includes('readDir ./hosts'))
 
   const taken = $derived([
     ...(fleet.model?.hosts.map((h) => h.name) ?? []),
@@ -31,18 +37,27 @@
   const nameProblem = $derived(machineNameProblem(name.trim(), taken))
   // A container has no hardware configuration: whatever was pasted before choosing LXC is not sent.
   const lxc = $derived(platform === 'proxmox-lxc')
-  const hw = $derived(lxc ? {} : hardwareCheck(hardware))
-  const spec = $derived<MachineSpec>({ name: name.trim(), system, role, platform, ...(!lxc && hardware.trim() ? { hardware } : {}) })
+  const hw = $derived(lxc || anywhere ? {} : hardwareCheck(hardware))
+  const layout = $derived(!lxc && anywhere)
+  const devProblem = $derived(deviceProblem(device.trim()))
+  const spec = $derived<MachineSpec>({
+    name: name.trim(),
+    system,
+    role,
+    platform,
+    ...(layout ? { disk, device: device.trim() } : !lxc && hardware.trim() ? { hardware } : {}),
+  })
+  const noDiskoInput = $derived(layout && flakeText !== null && !hasDiskoInput(flakeText))
   const files = $derived(previewFiles(spec))
   let openName = $state('managed.json')
   const shown = $derived(files.find((f) => f.path.endsWith('/' + openName)) ?? files[files.length - 1])
-  const canNext = $derived(step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !hw.error : true)
+  const canNext = $derived(step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !hw.error && (!layout || (!!device.trim() && !devProblem)) : true)
 
   onMount(() => {
     el.showModal()
     // Whether the flake picks up hosts/<name>/ by itself (the starter flake does).
     api.file('flake.nix').then(
-      (f) => (autoFlake = f.content.includes('readDir ./hosts')),
+      (f) => (flakeText = f.content),
       () => {},
     )
   })
@@ -59,7 +74,11 @@
     creating = false
     if (!res) return
     toast(
-      res.registered ? `${res.name} is in hosts/${res.name}/; it is being evaluated now.` : `Add ${res.name} to flake.nix to finish: the snippet is on its page.`,
+      res.inputSnippet
+        ? `Add the disko input to flake.nix, then Lock: ${res.name}'s disk layout needs it.`
+        : res.registered
+          ? `${res.name} is in hosts/${res.name}/; it is being evaluated now.`
+          : `Add ${res.name} to flake.nix to finish: the snippet is on its page.`,
       'ok',
       `Created ${res.name}`,
       { label: 'Review in Changes', run: () => go('#/changes') },
@@ -167,6 +186,50 @@
           </span>
         </div>
       {:else}
+        <fieldset class="field">
+          <legend class="label">Installing NixOS</legend>
+          <div class="choices two">
+            <label class="choice" class:on={!anywhere}>
+              <input type="radio" name="install" value={false} bind:group={anywhere} />
+              <span class="c-title"><Icon name="terminal" size={15} />Installed by hand</span>
+              <span class="c-note">From the NixOS installer, as usual. Its hardware configuration goes below.</span>
+            </label>
+            <label class="choice" class:on={anywhere}>
+              <input type="radio" name="install" value={true} bind:group={anywhere} />
+              <span class="c-title"><Icon name="layers" size={15} />nixos-anywhere</span>
+              <span class="c-note">Erases a disk, lays it out with disko and installs over SSH. It writes the hardware configuration itself.</span>
+            </label>
+          </div>
+        </fieldset>
+      {/if}
+      {#if layout}
+        <fieldset class="field">
+          <legend class="label">Disk layout</legend>
+          <div class="choices two">
+            {#each disks as d (d.disk)}
+              <label class="choice" class:on={disk === d.disk}>
+                <input type="radio" name="disk" value={d.disk} bind:group={disk} />
+                <span class="c-title"><Icon name="box" size={15} />{d.label}</span>
+                <span class="c-note">{d.note}</span>
+              </label>
+            {/each}
+          </div>
+          <span class="hint">Both have a 1 GiB boot partition and boot with GRUB{system === 'x86_64-linux' ? ', on BIOS and UEFI' : ' on UEFI'}.</span>
+        </fieldset>
+        <label class="field">
+          <span class="label">Disk to erase</span>
+          <input class="mono" bind:value={device} placeholder="/dev/nvme0n1" spellcheck="false" autocomplete="off" aria-invalid={!!devProblem} aria-describedby="device-hint" />
+          {#if devProblem}
+            <span class="problem" id="device-hint">{devProblem}</span>
+          {:else}
+            <span class="hint" id="device-hint">
+              As <span class="mono">lsblk</span> shows it on the machine: <span class="mono">/dev/sda</span>, <span class="mono">/dev/nvme0n1</span>{#if platform === 'proxmox-vm'}, or
+                <span class="mono">/dev/vda</span> for a VirtIO Block disk{/if}. A <span class="mono">/dev/disk/by-id/…</span> name stays right when disks are added. Everything on
+              it is erased when you run the install.
+            </span>
+          {/if}
+        </label>
+      {:else if !lxc}
         <div class="field">
           <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
           <p class="lead">
@@ -204,7 +267,18 @@
           {#if role === 'server'}
             <span class="warn"><Icon name="key" size={13} />The server preset allows SSH keys only and creates no user: add yours with a key in Users before deploying, or nobody can log in over SSH.</span>
           {/if}
+          {#if noDiskoInput}
+            <span class="warn"><Icon name="alert" size={13} />flake.nix has no disko input, which disk-config.nix needs: add it to its inputs, then Lock.</span>
+          {/if}
         </p>
+        {#if noDiskoInput}
+          <div class="cmd">
+            <pre class="snippet">{diskoInputSnippet}</pre>
+            <button type="button" class="small" onclick={() => copyCommand(diskoInputSnippet)}
+              ><Icon name={copied === diskoInputSnippet ? 'tick' : 'copy'} size={13} />{copied === diskoInputSnippet ? 'Copied' : 'Copy'}</button
+            >
+          </div>
+        {/if}
         <div class="files">
           <ul class="file-list" role="tablist" aria-label="Files">
             {#each files as f (f.path)}
@@ -220,6 +294,16 @@
             <pre>{shown.content}</pre>
           </div>
         </div>
+        {#if layout}
+          <div class="install">
+            <span class="label">Installing it</span>
+            <p class="hint">
+              Once you commit and push, {spec.name}'s page walks you through it: boot the NixOS installer, fetch its SSH host key for secrets, then run this from a clone of the
+              repository. Nothing is installed until you do.
+            </p>
+            <code class="wrap">{#each installCommand(spec.name, '', true).split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
+          </div>
+        {/if}
       </div>
     {/if}
   </form>
@@ -363,6 +447,10 @@
   .ok-text {
     color: var(--green);
   }
+  .review {
+    display: grid;
+    gap: var(--s3);
+  }
   .review .lead {
     display: grid;
     gap: 6px;
@@ -475,6 +563,23 @@
   textarea {
     font-size: 12px;
     resize: vertical;
+  }
+  .install {
+    display: grid;
+    gap: 6px;
+  }
+  .install code,
+  .snippet {
+    padding: 6px 10px;
+    color: var(--fg-strong);
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+  }
+  .snippet {
+    flex: 1;
+    margin: 0;
+    font: 12px/1.55 var(--mono);
   }
   .files {
     display: grid;

@@ -172,9 +172,22 @@ export type ValuesReply = { state: 'ready'; values: OptionValues[] } | { state: 
 
 export type MachineRole = 'minimal' | 'server' | 'desktop'
 export type MachinePlatform = 'hardware' | 'proxmox-lxc' | 'proxmox-vm'
-export type MachineSpec = { name: string; system: 'x86_64-linux' | 'aarch64-linux'; role: MachineRole; hardware?: string; platform?: MachinePlatform }
-/** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. */
-export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string }
+/** A disko disk layout, for a machine nixos-anywhere installs. */
+export type MachineDisk = 'ext4' | 'btrfs'
+/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). */
+export type MachineSpec = {
+  name: string
+  system: 'x86_64-linux' | 'aarch64-linux'
+  role: MachineRole
+  hardware?: string
+  platform?: MachinePlatform
+  disk?: MachineDisk
+  device?: string
+}
+/** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. inputSnippet: the disko input flake.nix lacks. */
+export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string; inputSnippet?: string }
+/** An SSH ed25519 host key and its SHA256 fingerprint. */
+export type HostKey = { key: string; fingerprint: string }
 
 /** The machine's app-owned file (hosts/<host>/managed.json). */
 export type Managed = { host?: string; path: string; exists: boolean; hash: string; packages: string[]; settings: Record<string, unknown> }
@@ -294,6 +307,8 @@ export const api = {
   optionValues: (names: string[], hosts: string[] = []) =>
     get<ValuesReply>('/api/fleet/values', { name: names, host: hosts }),
   createMachine: (spec: MachineSpec) => post<MachineCreated>('/api/machines', spec),
+  /** The SSH host key of the machine at this address: the server starts the handshake and stops at the key, never logs in. */
+  fetchHostKey: (address: string) => post<HostKey>('/api/hostkey', { address }),
   /** Stages the inverse of a commit, or with since of every commit after since up to rev (nothing is committed). 409: local changes, not on this branch, or a conflict. */
   revert: (rev: string, since = '') => post('/api/revert', { rev, since }),
   /** Commits the staged changes (or takes the unpushed commits) on the machine's testing branch and pushes it; the working copy moves there. */
