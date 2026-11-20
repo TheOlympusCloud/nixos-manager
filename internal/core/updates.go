@@ -95,7 +95,8 @@ type Updates struct {
 // Nix updated the inputs becomes an error; one being checked is checked
 // again by Run. The jobs of before the stop are gone.
 func OpenUpdates(dataDir string, svc *Service) (*Updates, error) {
-	u := &Updates{Svc: svc, path: filepath.Join(dataDir, "updates.json"), now: time.Now, loc: time.Local}
+	u := &Updates{Svc: svc, path: filepath.Join(dataDir, "updates.json"), now: time.Now, loc: time.Local,
+		f: updatesFile{Schedule: UpdateSchedule{Day: 1, Hour: 4}}} // off; Monday at 04:00 once turned on
 	b, err := os.ReadFile(u.path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err

@@ -369,6 +369,9 @@ func TestUpdateTick(t *testing.T) {
 	madrid, _ := time.LoadLocation("Europe/Madrid")
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, madrid)
 	u.now, u.loc = func() time.Time { return now }, madrid
+	if st := u.Status(ctx); st.Schedule != (UpdateSchedule{Day: 1, Hour: 4}) || !st.Next.IsZero() {
+		t.Fatalf("a new schedule %+v", st)
+	}
 	for _, bad := range []UpdateSchedule{{Day: 7}, {Day: -2}, {Hour: 24}, {Hour: -1}} {
 		_, err := u.SetSchedule(bad)
 		isErr(t, err, ErrInvalid)

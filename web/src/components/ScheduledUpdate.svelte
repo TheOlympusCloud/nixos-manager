@@ -209,6 +209,9 @@
     align-items: center;
     gap: 8px;
   }
+  .schedule select {
+    width: auto;
+  }
   .latest {
     display: grid;
     gap: 8px;
