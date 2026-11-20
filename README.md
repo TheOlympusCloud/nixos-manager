@@ -267,6 +267,10 @@ like every other machine:
 
 The alternative, on any host with Docker. The image carries its own Nix.
 
+> **Upgrading from an image that ran as root?** With Compose, nothing to do.
+> With plain `docker run`, give the volume to the new user once first; the
+> command is below.
+
 1. Pick a login password and store its hash:
 
    ```sh
