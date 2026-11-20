@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -202,20 +203,117 @@ func TestJobsRunOneAtATimeInOrder(t *testing.T) {
 	}
 }
 
-func TestLockAndUpdateCommands(t *testing.T) {
-	ctx := context.Background()
-	s := newService(t)
-	info := wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "update", Inputs: []string{"nixpkgs", "home-manager"}})))
-	if !strings.Contains(info.Output, "flake update nixpkgs home-manager --flake path:"+s.Repo.Dir) {
-		t.Fatalf("update output:\n%s", info.Output)
+// lockNix plays nix flake lock and update: it lists the flake it was given
+// and prints its flake.nix, then writes flake.lock there. With TOUCH set it
+// also changes that file in the working copy, like a save during the lock.
+const lockNix = `#!/bin/sh
+echo "nix $*"
+for a in "$@"; do case "$a" in path:*) d="${a#path:}" ;; esac; done
+(cd "$d" && find . -mindepth 1 | LC_ALL=C sort)
+echo "flake.nix: $(cat "$d/flake.nix")"
+printf 'locked by %s\n' "$3 $4" > "$d/flake.lock"
+[ -z "$TOUCH" ] || echo changed > "$TOUCH"
+case "$*" in *broken*) exit 1 ;; esac
+`
+
+func fileText(t *testing.T, r *Repo, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(r.Dir, p))
+	if err != nil {
+		t.Fatal(err)
 	}
-	info = wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"})))
-	if !strings.Contains(info.Output, "flake lock path:"+s.Repo.Dir) {
-		t.Fatalf("lock output:\n%s", info.Output)
+	return string(b)
+}
+
+func lockService(t *testing.T) *Service {
+	t.Helper()
+	s := NewService(newRepo(t))
+	s.Jobs.Nix = script(t, "nix", lockNix)
+	return s
+}
+
+// Lock and update run on an export of the tracked files plus flake.nix and
+// flake.lock, as they are in the working copy, and copy flake.lock back:
+// untracked and ignored files and .git never reach the world-readable store.
+func TestLockAndUpdateRunOnAnExport(t *testing.T) {
+	ctx := context.Background()
+	s := lockService(t)
+	write(t, s.Repo, "flake.nix", "{ committed }\n")
+	write(t, s.Repo, ".gitignore", "ignored.txt\n")
+	write(t, s.Repo, "hosts/a.nix", "{ }\n")
+	commitAll(t, s.Repo, "init")
+	write(t, s.Repo, "flake.nix", "{ edited }\n")
+	write(t, s.Repo, "secret.txt", "untracked\n")
+	write(t, s.Repo, "ignored.txt", "ignored\n")
+	ok(t, s.Repo.Delete("hosts/a.nix"))
+
+	info := wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"})))
+	if info.State != "passed" {
+		t.Fatalf("lock %s:\n%s", info.State, info.Output)
+	}
+	for _, leak := range []string{"secret.txt", "ignored.txt", "./.git\n", "hosts/a.nix", "path:" + s.Repo.Dir} {
+		if strings.Contains(info.Output, leak) {
+			t.Errorf("%q reached nix:\n%s", leak, info.Output)
+		}
+	}
+	if !strings.Contains(info.Output, "./.gitignore\n./flake.nix\n") || !strings.Contains(info.Output, "flake.nix: { edited }") {
+		t.Fatalf("nix did not get the working copy's tracked files:\n%s", info.Output)
+	}
+	if lock := fileText(t, s.Repo, "flake.lock"); lock != "locked by flake lock\n" {
+		t.Fatalf("flake.lock = %q", lock)
+	}
+
+	info = wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "update", Inputs: []string{"nixpkgs", "home-manager"}})))
+	if info.State != "passed" || !strings.Contains(info.Output, "flake update nixpkgs home-manager --flake path:") ||
+		!strings.Contains(info.Output, "./flake.lock") || strings.Contains(info.Output, s.Repo.Dir) {
+		t.Fatalf("update %s:\n%s", info.State, info.Output)
+	}
+	if lock := fileText(t, s.Repo, "flake.lock"); lock != "locked by flake update\n" {
+		t.Fatalf("flake.lock = %q", lock)
 	}
 	for _, bad := range []JobRequest{{Kind: "update", Inputs: []string{"--override-input"}}, {Kind: "rm"}, {Kind: "check", Targets: []string{"a\nb"}}} {
 		_, err := s.Jobs.Submit(ctx, bad)
 		isErr(t, err, ErrInvalid)
+	}
+}
+
+// A new repository has nothing tracked yet (the starter flake is written but
+// not staged), and must still lock before its first check.
+func TestLockANewRepository(t *testing.T) {
+	s := lockService(t)
+	write(t, s.Repo, "flake.nix", "{ starter }\n")
+	write(t, s.Repo, "hosts/example/default.nix", "{ }\n")
+	info := wait(t, must[*Job](t)(s.Jobs.Submit(context.Background(), JobRequest{Kind: "lock"})))
+	if info.State != "passed" || !strings.Contains(info.Output, "flake.nix: { starter }") || strings.Contains(info.Output, "hosts") {
+		t.Fatalf("lock %s:\n%s", info.State, info.Output)
+	}
+	if lock := fileText(t, s.Repo, "flake.lock"); lock != "locked by flake lock\n" {
+		t.Fatalf("flake.lock = %q", lock)
+	}
+}
+
+// A flake.nix or flake.lock saved while Nix locked wins: the stale lock is not
+// written over it, and a failed lock writes nothing.
+func TestLockDoesNotOverwriteAConcurrentChange(t *testing.T) {
+	ctx := context.Background()
+	for _, f := range []string{"flake.lock", "flake.nix"} {
+		s := lockService(t)
+		write(t, s.Repo, "flake.nix", "{ }\n")
+		write(t, s.Repo, "flake.lock", "old\n")
+		t.Setenv("TOUCH", filepath.Join(s.Repo.Dir, f))
+		info := wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"})))
+		if info.State != "failed" || !strings.Contains(info.Output, "changed while") {
+			t.Fatalf("%s: lock %s:\n%s", f, info.State, info.Output)
+		}
+		if lock := fileText(t, s.Repo, "flake.lock"); lock != map[string]string{"flake.lock": "changed\n", "flake.nix": "old\n"}[f] {
+			t.Fatalf("%s: flake.lock = %q", f, lock)
+		}
+	}
+	s := lockService(t)
+	write(t, s.Repo, "flake.nix", "{ }\n")
+	info := wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "update", Inputs: []string{"broken"}})))
+	if _, err := os.Stat(filepath.Join(s.Repo.Dir, "flake.lock")); info.State != "failed" || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed update: %s, flake.lock %v", info.State, err)
 	}
 }
 

@@ -79,9 +79,22 @@ echo "ok   login required"
 api GET /api/tree | json '["entries"]' | grep -q "'flake.nix'" || fail "starter flake not written"
 echo "ok   new repository got the starter flake"
 
+# Lock runs on an export: an untracked file, an ignored one and .git stay out of the store.
+repo_dir=$work/data/repo
+echo e2e > "$repo_dir/e2e-untracked"
+echo e2e > "$repo_dir/e2e-ignored"
+echo e2e-ignored >> "$repo_dir/.git/info/exclude"
 [ "$(run_job '{"kind":"lock"}')" = passed ] || fail "nix flake lock: $(cat "$work"/events-*)"
 api GET '/api/file?path=flake.lock' | json '["hash"]' > /dev/null || fail "no flake.lock after lock"
-echo "ok   flake locked"
+if [ "${E2E_STUB_NIX:-}" != 1 ]; then
+  for p in /nix/store/*-source; do
+    if [ -e "$p/e2e-untracked" ] || [ -e "$p/e2e-ignored" ] || grep -qsF "$work/remote.git" "$p/.git/config"; then
+      fail "lock copied the working copy into $p"
+    fi
+  done
+fi
+rm "$repo_dir/e2e-untracked" "$repo_dir/e2e-ignored"
+echo "ok   flake locked, from an export of the working copy"
 
 [ "$(code POST /api/stage -d '{"paths":[]}')" = 204 ] || fail "stage"
 attr=$(api GET /api/targets | json '["targets"][0]["attr"]') || fail "targets"

@@ -33,6 +33,12 @@ const keepModels = 16
 func (r *Repo) WorkingTree(ctx context.Context) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.indexTree(ctx, []string{"-A", "--", "."})
+}
+
+// indexTree runs each git add in a private copy of the index, so the real one
+// is untouched, and returns the tree it then holds. Needs r.mu.
+func (r *Repo) indexTree(ctx context.Context, adds ...[]string) (string, error) {
 	tmp, err := os.CreateTemp("", "nixmgr-index-")
 	if err != nil {
 		return "", err
@@ -48,8 +54,10 @@ func (r *Repo) WorkingTree(ctx context.Context) (string, error) {
 		}
 	}
 	env := []string{"GIT_INDEX_FILE=" + tmp.Name()}
-	if _, _, err := r.gitRun(ctx, env, nil, "add", "-A", "--", "."); err != nil {
-		return "", err
+	for _, add := range adds {
+		if _, _, err := r.gitRun(ctx, env, nil, append([]string{"add"}, add...)...); err != nil {
+			return "", err
+		}
 	}
 	out, _, err := r.gitRun(ctx, env, nil, "write-tree")
 	return strings.TrimSpace(out), err

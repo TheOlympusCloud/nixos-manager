@@ -468,6 +468,58 @@ func (r *Repo) export(ctx context.Context, tree, dir string) error {
 	return err
 }
 
+// lockFiles are the files nix flake lock and update read besides the tracked ones.
+var lockFiles = []string{"flake.nix", "flake.lock"}
+
+// lockSource is the tree that lock and update run on: the tracked files as
+// they are in the working copy, plus flake.nix and flake.lock even untracked
+// (a new repository locks before its first commit). Untracked and ignored
+// files stay out. It also returns the two files' hashes ("" when absent), for
+// putLock.
+func (r *Repo) lockSource(ctx context.Context) (string, map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	base := map[string]string{}
+	var present []string
+	for _, f := range lockFiles {
+		b, err := r.root.ReadFile(f)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			base[f] = ""
+		case err != nil:
+			return "", nil, r.folderOr(f, err)
+		default:
+			base[f] = hashOf(b)
+			present = append(present, f)
+		}
+	}
+	adds := [][]string{{"-u"}} // no pathspec: "." fails while nothing is tracked
+	if len(present) > 0 {
+		adds = append(adds, append([]string{"-f", "--"}, present...))
+	}
+	tree, err := r.indexTree(ctx, adds...)
+	return tree, base, err
+}
+
+// putLock writes the flake.lock Nix made into the working copy, unless
+// flake.nix or flake.lock changed since lockSource: the lock was made from the
+// old ones, and a save made meanwhile must not be overwritten.
+func (r *Repo) putLock(base map[string]string, lock []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, f := range lockFiles {
+		if err := r.checkBase(f, base[f]); errors.Is(err, ErrConflict) || errors.Is(err, ErrExists) {
+			return errorf(ErrConflict, "%s changed while Nix was locking, so the new flake.lock was not written: run it again", f)
+		} else if err != nil {
+			return err
+		}
+	}
+	if cur, err := r.root.ReadFile("flake.lock"); err == nil && bytes.Equal(cur, lock) {
+		return nil
+	}
+	return r.writeFile("flake.lock", lock)
+}
+
 func (r *Repo) untracked(ctx context.Context) (map[string]bool, error) {
 	out, err := r.git(ctx, "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {

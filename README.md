@@ -394,7 +394,12 @@ nothing staged or changed, then push.
 A branch named `testing-<hostname>` is deployed by comin to that one machine
 only, for trying a change before merging it into `main`.
 
-Never store secrets in the repository; use sops-nix or agenix.
+Never store secrets in the repository; use sops-nix or agenix. Nix copies
+what it evaluates into the store, which every user of the server can read.
+**Lock** and **Update** give it only the tracked files (as they are in the
+working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
+ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
+`flake.lock` is saved while they run, they write nothing: run them again.
 
 ## Deployments
 

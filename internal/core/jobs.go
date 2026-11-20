@@ -56,8 +56,8 @@ func newJobs(repo *Repo) *Jobs {
 
 // JobRequest asks for one of:
 //   - "check": nix flake check on the staged changes, then a dry build of each target attribute;
-//   - "lock": nix flake lock in the working copy;
-//   - "update": nix flake update of Inputs (all when empty) in the working copy.
+//   - "lock": nix flake lock of the working copy;
+//   - "update": nix flake update of Inputs (all when empty) of the working copy.
 type JobRequest struct {
 	Kind    string   `json:"kind"`
 	Targets []string `json:"targets,omitempty"`
@@ -323,8 +323,9 @@ func (js *Jobs) run(job *Job) error {
 	case "values":
 		return js.runValues(ctx, job)
 	}
-	dir := js.Repo.Dir
+	var dir string
 	var steps [][]string
+	var after func() error // once every step passed
 	switch job.Req.Kind {
 	case "check":
 		tmp, err := os.MkdirTemp("", "nixmgr-check-")
@@ -342,13 +343,32 @@ func (js *Jobs) run(job *Job) error {
 		for _, t := range job.Req.Targets {
 			steps = append(steps, js.nixArgs("build", "--dry-run", "--no-link", "-L", "--no-update-lock-file", "path:"+src+"#"+t))
 		}
-	case "lock":
-		// lock and update write flake.lock without Repo.mu, which would block every edit for
-		// the whole download. Safe: a concurrent save of flake.lock is hash-checked and atomic.
-		// shortcut: path: copies the whole folder (with .git) to the store; fine for a config repo, revisit if .git grows large.
-		steps = append(steps, js.nixArgs("flake", "lock", "path:"+dir))
-	case "update":
-		steps = append(steps, js.nixArgs(append(append([]string{"flake", "update"}, job.Req.Inputs...), "--flake", "path:"+dir)...))
+	case "lock", "update":
+		// Nix copies a path: flake whole into the world-readable store, so it gets an
+		// export, never the working copy with .git and stray files. Repo.mu is held
+		// only to export and to copy flake.lock back, not for the whole download.
+		tree, base, err := js.Repo.lockSource(ctx)
+		if err != nil {
+			return err
+		}
+		src, cleanup, err := js.snapshot(ctx, tree)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		dir = src
+		if job.Req.Kind == "lock" {
+			steps = append(steps, js.nixArgs("flake", "lock", "path:"+src))
+		} else {
+			steps = append(steps, js.nixArgs(append(append([]string{"flake", "update"}, job.Req.Inputs...), "--flake", "path:"+src)...))
+		}
+		after = func() error {
+			lock, err := os.ReadFile(filepath.Join(src, "flake.lock"))
+			if err != nil {
+				return fmt.Errorf("nix wrote no flake.lock: %v", err)
+			}
+			return js.Repo.putLock(base, lock)
+		}
 	}
 	for _, args := range steps {
 		fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
@@ -360,6 +380,11 @@ func (js *Jobs) run(job *Job) error {
 				return fmt.Errorf("stopped after %s", jobTimeout)
 			}
 			return fmt.Errorf("failed: %v", err)
+		}
+	}
+	if after != nil {
+		if err := after(); err != nil {
+			return err
 		}
 	}
 	fmt.Fprintln(job, "\nAll steps passed.")
