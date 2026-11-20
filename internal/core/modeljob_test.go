@@ -101,7 +101,8 @@ func TestModelIsCachedPerTree(t *testing.T) {
 	if m3 != nil || j == nil {
 		t.Fatal("an edit did not start a new evaluation")
 	}
-	if again, j2, _ := s.Jobs.Model(ctx, "working"); again != nil || j2 != j {
+	// The same job, or its model when the fake Nix already finished it; never a second job.
+	if again, j2, _ := s.Jobs.Model(ctx, "working"); j2 != j && (j2 != nil || again == nil) {
 		t.Fatal("a second request started a duplicate evaluation")
 	}
 	wait(t, j)
