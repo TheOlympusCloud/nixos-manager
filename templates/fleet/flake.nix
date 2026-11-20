@@ -11,7 +11,12 @@
       url = "github:nlewo/comin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # Add more inputs here (sops-nix, disko, nixos-hardware, ...), then run "Lock".
+    # Secrets (modules/secrets.nix), kept by nixos-manager in secrets/.
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    # Add more inputs here (disko, nixos-hardware, ...), then run "Lock".
   };
 
   outputs =

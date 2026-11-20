@@ -1,9 +1,10 @@
 # Settings shared by every machine.
-{ ... }:
+{ config, lib, ... }:
 {
   imports = [
     ./report-deployments.nix
     ./binary-cache.nix
+    ./secrets.nix
   ];
 
   nix.settings.experimental-features = [
@@ -19,8 +20,9 @@
         name = "origin";
         url = "https://forgejo.example.lan/pablo/nixos-config.git"; # change to the Forgejo repository
         branches.main.name = "main";
-        # For a private repository, put a read-only Forgejo token on the machine (sops-nix or agenix):
-        # auth.access_token_path = "/run/secrets/comin-token";
+        # A private repository needs a read-only Forgejo token on each machine: nixos-manager
+        # keeps it as the secret comin-token (Settings → Secrets → Private repository).
+        auth.access_token_path = lib.mkIf (config.sops.secrets ? comin-token) config.sops.secrets.comin-token.path;
       }
     ];
   };
