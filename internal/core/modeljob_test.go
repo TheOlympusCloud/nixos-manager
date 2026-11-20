@@ -765,3 +765,23 @@ func TestModelOfWhatIsPushed(t *testing.T) {
 		t.Fatalf("no remote: %+v", m)
 	}
 }
+
+// A tree evaluated again, after its failed model was dropped, keeps its fresh
+// model until it is the oldest: its earlier place in the cache order is gone.
+func TestKeepModelMovesATreeEvaluatedAgain(t *testing.T) {
+	js := &Jobs{models: map[string]*Model{}}
+	js.keepModel("a", &Model{Error: "failed"})
+	delete(js.models, "a") // as prepareModel and RefreshModel drop it
+	fresh := &Model{}
+	js.keepModel("a", fresh)
+	for i := range keepModels - 1 {
+		js.keepModel(fmt.Sprint(i), &Model{})
+	}
+	if js.models["a"] != fresh || len(js.modelOrder) != keepModels {
+		t.Fatalf("a: %v, order %v", js.models["a"], js.modelOrder)
+	}
+	js.keepModel("newest", &Model{})
+	if _, ok := js.models["a"]; ok || len(js.models) != keepModels {
+		t.Fatalf("the oldest was not dropped: %v", js.modelOrder)
+	}
+}

@@ -280,6 +280,18 @@ func (js *Jobs) waitModel(ctx context.Context, tree string) (*Model, error) {
 	return nil, errors.New("the fleet evaluation kept being dropped before the check could read it; run the check again")
 }
 
+// keepModel caches m for tree as the newest and forgets the oldest beyond
+// keepModels. A tree evaluated again (its failed model dropped) moves to the
+// end: forgetting its old place would drop the fresh model. Needs js.mu.
+func (js *Jobs) keepModel(tree string, m *Model) {
+	js.models[tree] = m
+	js.modelOrder = append(slices.DeleteFunc(js.modelOrder, func(t string) bool { return t == tree }), tree)
+	for len(js.modelOrder) > keepModels {
+		delete(js.models, js.modelOrder[0])
+		js.modelOrder = js.modelOrder[1:]
+	}
+}
+
 func modelFailed(m *Model) bool {
 	return m.Error != "" || slices.ContainsFunc(m.Hosts, func(h Host) bool { return h.Error != "" }) ||
 		slices.ContainsFunc(m.Homes, func(h Home) bool { return h.Error != "" })
@@ -297,12 +309,7 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 	m := &Model{Tree: job.tree, Hosts: []Host{}, Homes: []Home{}, Inputs: []Input{}}
 	defer func() {
 		js.mu.Lock()
-		js.models[job.tree] = m
-		js.modelOrder = append(js.modelOrder, job.tree)
-		for len(js.modelOrder) > keepModels {
-			delete(js.models, js.modelOrder[0])
-			js.modelOrder = js.modelOrder[1:]
-		}
+		js.keepModel(job.tree, m)
 		js.mu.Unlock()
 	}()
 	src, cleanup, err := js.snapshot(ctx, job.tree)
