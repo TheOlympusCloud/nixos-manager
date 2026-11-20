@@ -138,8 +138,11 @@ func TestCreatedMachinesEvaluate(t *testing.T) {
 	// The file systems and boot loader come from the disk layout alone.
 	attr := "path:" + s.Repo.Dir + "#nixosConfigurations.pc.config"
 	out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "eval", "--json", attr,
-		"--apply", `c: { root = c.fileSystems."/".fsType; boot = c.fileSystems."/boot".fsType; grub = c.boot.loader.grub.devices; efi = c.boot.loader.grub.efiSupport; }`).CombinedOutput()
-	if err != nil || string(out) != `{"boot":"vfat","efi":true,"grub":["/dev/nvme0n1"],"root":"ext4"}` {
+		"--apply", `c: { root = c.fileSystems."/".fsType; boot = c.fileSystems."/boot".fsType; grub = c.boot.loader.grub.devices; efi = c.boot.loader.grub.efiSupport; }`).Output()
+	if ee, ok := err.(*exec.ExitError); ok {
+		out = append(out, ee.Stderr...)
+	}
+	if err != nil || strings.TrimSpace(string(out)) != `{"boot":"vfat","efi":true,"grub":["/dev/nvme0n1"],"root":"ext4"}` {
 		t.Errorf("pc: %v\n%s", err, out)
 	}
 }
