@@ -12,6 +12,7 @@ type Service struct {
 	Jobs    *Jobs
 	Deploys *Deployments // what the machines report after comin deploys; nil turns reports off
 	Secrets *Secrets     // the fleet's sops-nix secrets; nil turns them off
+	Updates *Updates     // scheduled flake input updates; nil turns them off
 }
 
 func NewService(repo *Repo) *Service {

@@ -21,6 +21,12 @@ var fullSHA = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 // commit already queued or running instead of a second one, and no job but the
 // pass when the commit's tree already passed (a push from the console).
 func (js *Jobs) CheckCommit(ctx context.Context, sha, branch string) (*Job, *CheckPass, error) {
+	return js.checkCommit(ctx, sha, branch, false)
+}
+
+// checkCommit is CheckCommit; with again it checks a commit whose tree passed
+// too, against the newest checked commit before it now, and replaces that pass.
+func (js *Jobs) checkCommit(ctx context.Context, sha, branch string, again bool) (*Job, *CheckPass, error) {
 	if !fullSHA.MatchString(sha) {
 		return nil, nil, errorf(ErrInvalid, "%q is not a full commit SHA", sha)
 	}
@@ -36,7 +42,7 @@ func (js *Jobs) CheckCommit(ctx context.Context, sha, branch string) (*Job, *Che
 	}
 	trees := strings.Fields(out)
 	js.mu.Lock()
-	if p, ok := js.passed[trees[0]]; ok {
+	if p, ok := js.passed[trees[0]]; ok && !again {
 		js.mu.Unlock()
 		return nil, &p, nil
 	}

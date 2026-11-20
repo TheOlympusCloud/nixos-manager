@@ -450,3 +450,25 @@ func TestFleetEvents(t *testing.T) {
 		t.Errorf("end of life: %v", keys(es))
 	}
 }
+
+// The latest update of the inputs is told whatever state the machines are in,
+// and its event is over once the update is merged or discarded.
+func TestFleetEventsTellTheUpdate(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t) // no deployments
+	started := time.Date(2026, 11, 23, 4, 0, 0, 0, time.UTC)
+	s.Updates = &Updates{Svc: s, f: updatesFile{Update: &Update{State: "ready", Branch: "main", Started: started, Changed: []string{"pi"}, Message: "Inputs: nixpkgs."}}}
+	n := must[*Notifier](t)(OpenNotifier(t.TempDir(), s))
+	es, looked := n.fleetEvents(ctx, started)
+	if !looked["update"] || looked["deploy"] || len(es) != 1 || es[0].Key != "update-ready:2026-11-23T04:00:00Z" || es[0].Kind != "update-ready" ||
+		es[0].Severity != "info" || !slices.Equal(es[0].Hosts, []string{"pi"}) || es[0].Message != "Inputs: nixpkgs." {
+		t.Fatalf("events %+v %v", es, looked)
+	}
+	if sourceOf(es[0].Key) != "update" || sourceOf("update-failed:x") != "update" {
+		t.Fatal("update events are not of the update source")
+	}
+	s.Updates.f.Update.State = "merged"
+	if es, looked = n.fleetEvents(ctx, started); len(es) != 0 || !looked["update"] {
+		t.Fatalf("after the merge: %+v %v", es, looked)
+	}
+}

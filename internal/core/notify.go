@@ -27,8 +27,9 @@ import (
 )
 
 // Notifications: when a deployment fails or is stuck, a machine goes silent,
-// the branch comin deploys does not evaluate, or a release or input reaches
-// its end of life, nixos-manager tells ntfy, a webhook or a mailbox, set in
+// the branch comin deploys does not evaluate, a release or input reaches its
+// end of life, or a scheduled update of the inputs is ready to merge or
+// failed, nixos-manager tells ntfy, a webhook or a mailbox, set in
 // Settings (notify.json). Each event is sent once per channel; what was sent
 // is kept in notify-state.json, so a restart does not send it again.
 
@@ -81,7 +82,7 @@ type EmailChannel struct {
 // while it lasts.
 type Event struct {
 	Key      string   `json:"key"`
-	Kind     string   `json:"kind"`     // deploy-failed, deploy-stuck, host-silent, eval-failed, eol or test
+	Kind     string   `json:"kind"`     // deploy-failed, deploy-stuck, host-silent, eval-failed, eol, update-ready, update-failed or test
 	Severity string   `json:"severity"` // error, warning, info
 	Title    string   `json:"title"`
 	Message  string   `json:"message"`
@@ -113,7 +114,7 @@ type Notifier struct {
 	Svc     *Service
 	Client  *http.Client   // ntfy and the webhook; nil uses a client with a timeout
 	RootCAs *x509.CertPool // SMTP over TLS; nil uses the system's
-	// events lists what is true now, and which sources ("deploy", "eval") it
+	// events lists what is true now, and which sources ("deploy", "eval", "update") it
 	// could look at: an event of a source it could not look at is not over.
 	events func(ctx context.Context, now time.Time) ([]Event, map[string]bool)
 
@@ -461,6 +462,9 @@ func sourceOf(key string) string {
 	if strings.HasPrefix(key, "eval-failed") || strings.HasPrefix(key, "eol:") {
 		return "eval"
 	}
+	if strings.HasPrefix(key, "update-") {
+		return "update"
+	}
 	return "deploy"
 }
 
@@ -477,20 +481,24 @@ func since(s NotifySettings, channel string) time.Time {
 
 // ---- what to tell -------------------------------------------------------------
 
-// fleetEvents looks at the deployments, as Health does (with the working
-// copy's machines), and at the commit the fleet's branch points at, which is
-// what the machines deploy: whether it evaluates, and which of its releases
-// and inputs ended.
+// fleetEvents looks at the latest update of the inputs, at the deployments,
+// as Health does (with the working copy's machines), and at the commit the
+// fleet's branch points at, which is what the machines deploy: whether it
+// evaluates, and which of its releases and inputs ended.
 func (n *Notifier) fleetEvents(ctx context.Context, now time.Time) ([]Event, map[string]bool) {
 	looked := map[string]bool{}
 	var out []Event
+	if u := n.Svc.Updates; u != nil {
+		looked["update"] = true
+		out = u.events()
+	}
 	working, _, err := n.Svc.Jobs.Model(ctx, "working")
 	if err != nil || working == nil || working.Error != "" || n.Svc.Deploys == nil {
-		return nil, looked // without the fleet's machines nothing is certain
+		return out, looked // without the fleet's machines nothing else is certain
 	}
 	ov, err := n.Svc.Deploys.Overview(ctx, working, now)
 	if err != nil {
-		return nil, looked
+		return out, looked
 	}
 	looked["deploy"] = true
 	out = append(out, deployEvents(working, ov, now)...)
