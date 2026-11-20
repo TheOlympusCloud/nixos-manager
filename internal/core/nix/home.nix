@@ -10,7 +10,8 @@ in
 {
   inherit name;
   packages = lib.unique (map pkgName (try home.config.home.packages [ ]));
+  # Inside try as a whole: reading a removed option (programs.octant) throws.
   programs = builtins.attrNames (
-    lib.filterAttrs (_: p: builtins.isAttrs p && try (p.enable or false) false == true) (try home.config.programs { })
+    lib.filterAttrs (_: p: try (builtins.isAttrs p && (p.enable or false) == true) false) (try home.config.programs { })
   );
 }
