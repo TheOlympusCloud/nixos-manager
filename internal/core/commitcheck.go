@@ -102,3 +102,28 @@ func (js *Jobs) CommitState(ctx context.Context, sha string) (state, job string)
 	}
 	return "unchecked", ""
 }
+
+// CommitCheck is where the last commit of a branch stands with checks.
+type CommitCheck struct {
+	Branch  string `json:"branch"`
+	Commit  string `json:"commit"`
+	Subject string `json:"subject"`
+	State   string `json:"state"`         // passed, unchecked, queued, running or failed
+	Job     string `json:"job,omitempty"` // its newest check, unless it passed
+}
+
+// TipCheck is the state of branch's last commit as comin sees it: on origin,
+// or without a remote, the local branch. nil when there is no such branch.
+func (s *Service) TipCheck(ctx context.Context, branch string) *CommitCheck {
+	ref := "refs/heads/" + branch
+	if _, err := s.Repo.git(ctx, "remote", "get-url", "origin"); err == nil {
+		ref = "refs/remotes/origin/" + branch
+	}
+	out, err := s.Repo.git(ctx, "log", "-1", "--format=%H%x00%s", "--end-of-options", ref, "--")
+	sha, subject, ok := strings.Cut(strings.TrimSpace(out), "\x00")
+	if err != nil || !ok {
+		return nil
+	}
+	state, job := s.Jobs.CommitState(ctx, sha)
+	return &CommitCheck{Branch: branch, Commit: sha, Subject: subject, State: state, Job: job}
+}

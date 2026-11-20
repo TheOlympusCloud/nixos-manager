@@ -23,11 +23,13 @@ type Insight struct {
 	Link     string   `json:"link,omitempty"` // a console route with more about it, e.g. #/deployments
 }
 
-// InsightFix either sets options in each affected machine's managed.json or updates a flake input.
+// InsightFix sets options in each affected machine's managed.json, updates a
+// flake input, or checks a commit.
 type InsightFix struct {
 	Label       string    `json:"label"`
 	Settings    []Setting `json:"settings,omitempty"`
 	UpdateInput string    `json:"updateInput,omitempty"`
+	Check       string    `json:"check,omitempty"` // a commit to check
 }
 
 type Setting struct {
@@ -38,9 +40,10 @@ type Setting struct {
 var severityRank = map[string]int{"error": 0, "warning": 1, "info": 2}
 
 // Insights checks the evaluated fleet and what its machines deployed; origin is
-// the remote this console pushes to ("" for none), and now dates the flake
-// inputs and the deployments.
-func Insights(m *Model, deploys []MachineDeployment, origin string, now time.Time) []Insight {
+// the remote this console pushes to ("" for none), tip the last commit of the
+// branch comin deploys (nil when unknown), and now dates the flake inputs and
+// the deployments.
+func Insights(m *Model, deploys []MachineDeployment, origin string, tip *CommitCheck, now time.Time) []Insight {
 	out := []Insight{}
 	add := func(in Insight) { // only when some machine is affected
 		if len(in.Hosts) > 0 {
@@ -140,6 +143,7 @@ func Insights(m *Model, deploys []MachineDeployment, origin string, now time.Tim
 	out = append(out, inputEOL(m.Inputs, healthy, now)...)
 	out = append(out, deployInsights(m, deploys, now)...)
 	out = append(out, cominInsights(healthy, origin)...)
+	out = append(out, tipInsights(tip)...)
 	slices.SortStableFunc(out, func(a, b Insight) int {
 		if d := severityRank[a.Severity] - severityRank[b.Severity]; d != 0 {
 			return d
@@ -300,6 +304,30 @@ func cominInsights(healthy []Host, origin string) []Insight {
 			Detail: fmt.Sprintf("These machines deploy from %s, not from the repository this console pushes to, so changes made here never reach them. Point services.comin.remotes at the Forgejo repository.", elsewhere)})
 	}
 	return out
+}
+
+// tipInsights flag the last commit of the branch comin deploys until it
+// passed a check: pushed from elsewhere, or with Push without checks.
+func tipInsights(tip *CommitCheck) []Insight {
+	if tip == nil || tip.State == "passed" {
+		return nil
+	}
+	in := Insight{ID: "unchecked-commit", Hosts: []string{}, Link: "#/changes?check=" + tip.Commit}
+	switch tip.State {
+	case "queued", "running":
+		in.Severity, in.Title = "info", fmt.Sprintf("%.7s on %s is being checked", tip.Commit, tip.Branch)
+		in.Detail = fmt.Sprintf("“%s” was pushed without the console's check, and comin deploys it anyway. The check builds every machine it changes; its log is in Changes → Checks.", tip.Subject)
+	case "failed":
+		in.Severity, in.Title = "error", fmt.Sprintf("%.7s on %s failed its check", tip.Commit, tip.Branch)
+		in.Detail = fmt.Sprintf("“%s” is what comin deploys. A machine that does not build keeps its old system and reports a failed deployment. The check's log says what failed: fix it in a new commit, or revert this one in History.", tip.Subject)
+		in.Fix = &InsightFix{Label: "Check again", Check: tip.Commit}
+	default:
+		in.Severity, in.Title = "warning", fmt.Sprintf("%.7s on %s has not passed a check", tip.Commit, tip.Branch)
+		in.Detail = fmt.Sprintf("“%s” was pushed without the console's check (from another clone, Forgejo's web editor, or with Push without checks), and comin deploys it anyway. Checking it builds every machine it changes. With the push webhook (Settings → Forgejo), every push is checked by itself.", tip.Subject)
+		in.Fix = &InsightFix{Label: fmt.Sprintf("Check %.7s", tip.Commit), Check: tip.Commit}
+		in.Link = ""
+	}
+	return []Insight{in}
 }
 
 // sameRepo says whether a comin remote is the repository o.

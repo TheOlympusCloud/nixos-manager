@@ -812,3 +812,55 @@ func cookieHeader(cs []*http.Cookie) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// Health names the deployed commit that never passed a check, and the jobs API
+// checks it.
+func TestCheckACommitOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	if _, err := e.svc.Write("flake.nix", "{ }\n", ""); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Stage(ctx, nil)
+	sha, err := e.svc.Commit(ctx, "unchecked", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding := func() *core.Insight {
+		var res struct{ Insights []core.Insight }
+		e.ready(t, "/api/insights", &res)
+		for _, in := range res.Insights {
+			if in.ID == "unchecked-commit" {
+				return &in
+			}
+		}
+		return nil
+	}
+	if in := finding(); in == nil || in.Fix == nil || in.Fix.Check != sha || in.Severity != "warning" {
+		t.Fatalf("finding %+v", in)
+	}
+	if code := e.do(t, "POST", "/api/jobs", map[string]any{"kind": "check", "commit": sha, "targets": []string{"x"}}, nil); code != 400 {
+		t.Fatalf("a commit with targets: %d", code)
+	}
+	var job struct{ ID string }
+	if code := e.do(t, "POST", "/api/jobs", map[string]any{"kind": "check", "commit": sha}, &job); code != 200 {
+		t.Fatalf("check the commit: %d", code)
+	}
+	j, _ := e.svc.Jobs.Get(job.ID)
+	if info := j.Info(false); info.Commit != sha {
+		t.Fatalf("job %+v", info)
+	}
+	<-j.Done()
+	var jobs struct{ Jobs []core.JobInfo }
+	e.do(t, "GET", "/api/jobs", nil, &jobs)
+	if len(jobs.Jobs) == 0 || jobs.Jobs[0].Commit != sha || jobs.Jobs[0].State != "passed" {
+		t.Fatalf("jobs %+v", jobs)
+	}
+	if in := finding(); in != nil {
+		t.Fatalf("finding after the check %+v", in)
+	}
+	if code := e.do(t, "POST", "/api/jobs", map[string]any{"kind": "check", "commit": sha}, nil); code != 409 {
+		t.Fatalf("checked again: %d", code)
+	}
+}

@@ -162,3 +162,32 @@ func TestCheckCommitRefusesBadInput(t *testing.T) {
 		t.Fatalf("state of nonsense %q", state)
 	}
 }
+
+// The tip is the branch as comin sees it: on origin, or without a remote, the
+// local branch.
+func TestTipCheck(t *testing.T) {
+	ctx := context.Background()
+	s := buildService(t, true) // pushed without a check
+	tip := s.TipCheck(ctx, "main")
+	if tip == nil || tip.State != "unchecked" || tip.Commit != gitOut(t, s.Repo.Dir, "rev-parse", "origin/main") || tip.Subject != "machines" || tip.Branch != "main" {
+		t.Fatalf("tip %+v", tip)
+	}
+	runCheck(t, s)
+	if tip := s.TipCheck(ctx, "main"); tip.State != "passed" {
+		t.Fatalf("after the check: %+v", tip)
+	}
+	if tip := s.TipCheck(ctx, "elsewhere"); tip != nil {
+		t.Fatalf("a missing branch: %+v", tip)
+	}
+	if tip := s.TipCheck(ctx, "--output=/tmp/x"); tip != nil {
+		t.Fatalf("an option as branch: %+v", tip)
+	}
+
+	local := buildService(t, false)
+	if tip := local.TipCheck(ctx, "main"); tip == nil || tip.Commit != gitOut(t, local.Repo.Dir, "rev-parse", "main") || tip.State != "unchecked" {
+		t.Fatalf("without a remote: %+v", tip)
+	}
+	if tip := NewService(newRepo(t)).TipCheck(ctx, "main"); tip != nil {
+		t.Fatalf("no commit yet: %+v", tip)
+	}
+}
