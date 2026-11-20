@@ -297,7 +297,7 @@ func (js *Jobs) runIndex(ctx context.Context, job *Job) (err error) {
 	case "packages":
 		ref := nixpkgsRef(js.lockFile())
 		fmt.Fprintf(job, "Indexing the packages of %s; the first time this takes a few minutes.\n", ref)
-		cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("search", "--json", ref, "^")...)
+		cmd := js.nixCmd(ctx, js.nixArgs("search", "--json", ref, "^")...)
 		var stdout bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, job
 		if err := cmd.Run(); err != nil {

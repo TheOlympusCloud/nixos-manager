@@ -133,7 +133,7 @@ func (js *Jobs) compareSystems(ctx context.Context, from, to string) (*ClosureDi
 
 // nixOutput runs a quick nix command and returns what it printed.
 func (js *Jobs) nixOutput(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs(args...)...)
+	cmd := js.nixCmd(ctx, js.nixArgs(args...)...)
 	cmd.Env = append(cmd.Environ(), "NO_COLOR=1")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

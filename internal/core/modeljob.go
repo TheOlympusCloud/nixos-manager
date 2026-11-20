@@ -459,7 +459,7 @@ func (js *Jobs) evalJSON(ctx context.Context, src string, args map[string]string
 	for _, k := range slices.Sorted(maps.Keys(args)) {
 		call += " " + k + " = " + nixString(args[k]) + ";"
 	}
-	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--json", "--expr", call+" }")...)
+	cmd := js.nixCmd(ctx, js.nixArgs("eval", "--json", "--expr", call+" }")...)
 	var stderr bytes.Buffer
 	stdout := capped{max: maxEvalOutput}
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -486,7 +486,7 @@ func (js *Jobs) evalJSON(ctx context.Context, src string, args map[string]string
 // lockedFlake is src as a flake reference pure evaluation accepts: pinned by
 // its NAR hash, which nix checks as it copies src to the store.
 func (js *Jobs) lockedFlake(ctx context.Context, src string) (string, error) {
-	out, err := exec.CommandContext(ctx, js.Nix, js.nixArgs("hash", "path", src)...).Output()
+	out, err := js.nixCmd(ctx, js.nixArgs("hash", "path", src)...).Output()
 	var ee *exec.ExitError
 	switch {
 	case errors.As(err, &ee):

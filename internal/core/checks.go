@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -156,7 +155,7 @@ func (js *Jobs) buildSystems(ctx context.Context, job *Job, src string, build []
 	fmt.Fprintf(job, "\nBuilding the system of %s: %s.\n", plural(len(build), "changed machine", "changed machines"), strings.Join(names, ", "))
 	args := js.nixArgs(append([]string{"build", "--dry-run", "--no-link", "--no-update-lock-file"}, installables...)...)
 	fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
-	cmd := exec.CommandContext(ctx, js.Nix, args...)
+	cmd := js.nixCmd(ctx, args...)
 	cmd.Dir = src
 	out := capped{max: maxOutput}
 	cmd.Stdout, cmd.Stderr = &out, &out

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -493,5 +494,29 @@ func TestPushWithoutRemoteSaysSoBeforeTheCheckGate(t *testing.T) {
 	isErr(t, err, ErrInvalid)
 	if !strings.Contains(err.Error(), "remote") {
 		t.Fatalf("message %q", err)
+	}
+}
+
+// A nix that leaves a child holding its output (an ssh to a builder, a git
+// fetch) must not keep a job past its time: the child dies with nix.
+func TestNixTimeoutKillsItsChildren(t *testing.T) {
+	pid := filepath.Join(t.TempDir(), "pid")
+	js := &Jobs{Nix: script(t, "nix", "#!/bin/sh\nsleep 120 &\necho $! > '"+pid+"'\nwait\n")}
+	for name, run := range map[string]func(context.Context) error{
+		"step": func(ctx context.Context) error { return js.step(ctx, newJob("1", JobRequest{}), t.TempDir(), js.nixArgs("build")) },
+		"eval": func(ctx context.Context) error { var out any; return js.evalJSON(ctx, t.TempDir(), nil, "{ flakeRef }: 1", &out) },
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		start := time.Now()
+		err := run(ctx)
+		cancel()
+		if err == nil || time.Since(start) > 3*time.Second {
+			t.Fatalf("%s: returned %v after %s", name, err, time.Since(start))
+		}
+		child, err := os.ReadFile(pid)
+		ok(t, err)
+		if exec.Command("kill", "-0", strings.TrimSpace(string(child))).Run() == nil {
+			t.Fatalf("%s: the child of nix still runs", name)
+		}
 	}
 }
