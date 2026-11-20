@@ -138,13 +138,15 @@ ready() {
 model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
 [ "$(echo "$model" | json '["model"].get("error", "")')" = "" ] || fail "the starter flake does not evaluate: $model"
+[ "$(echo "$model" | json '["model"]["hosts"][0].get("error", "")')" = "" ] || fail "the example machine does not evaluate: $model"
 echo "ok   fleet model: the example machine evaluates"
 
 [ "$(code POST /api/hosts/example/packages -d '{"add":["ripgrep"]}')" = 200 ] || fail "add a package by clicking"
 api GET /api/hosts/example/managed | json '["packages"]' | grep -q ripgrep || fail "managed.json lacks the package"
 api GET /api/status | json '["files"]' | grep -q 'hosts/example/managed.json' || fail "the edit is not a git change"
 if [ "${E2E_STUB_NIX:-}" != 1 ]; then # the stub cannot evaluate the edit
-  ready /api/model/diff | json '["hosts"][0]["packagesAdded"]' | grep -q ripgrep || fail "the diff does not show the new package"
+  diff=$(ready /api/model/diff)
+  echo "$diff" | json '["hosts"][0].get("packagesAdded", [])' | grep -q ripgrep || fail "the diff does not show the new package: $diff"
 fi
 echo "ok   package added by clicking shows up as a change"
 

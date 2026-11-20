@@ -107,6 +107,7 @@ state=$(run_job '{"kind":"lock"}')
 model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
 [ "$(echo "$model" | json '["model"].get("error", "")')" = "" ] || fail "the starter flake does not evaluate: $model"
+[ "$(echo "$model" | json '["model"]["hosts"][0].get("error", "")')" = "" ] || fail "the example machine does not evaluate: $model"
 [ -z "$(not_owned)" ] || fail "Nix left files nixos-manager does not own: $(not_owned)"
 echo "ok   real Nix locks and evaluates the starter flake as nixos-manager"
 
