@@ -92,8 +92,8 @@
     <div class="actions">
       <button class="primary" onclick={checkStaged}><Icon name="play" size={12} /> Check staged changes</button>
       <p class="muted small">
-        Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with what is pushed (every machine
-        while nothing is){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
+        Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with the newest pushed commit
+        that passed a check (every machine while none has){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
       </p>
       <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs<Icon name="right" size={12} /></a>
     </div>

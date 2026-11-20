@@ -14,11 +14,11 @@ import (
 	"strings"
 )
 
-// CheckPass is a check that passed: the staged tree, the tree a push lands on
-// that its machines were compared with, and the machines it built.
+// CheckPass is a check that passed: the staged tree, the tree that passed a
+// check its machines were compared with, and the machines it built.
 type CheckPass struct {
 	Tree  string   `json:"tree"`
-	Base  string   `json:"base"`  // "" when nothing was pushed to compare with: every machine was built
+	Base  string   `json:"base"`  // "" when no pushed commit had passed a check: every machine was built
 	Built []string `json:"built"` // every machine whose system differs from Base
 }
 
@@ -80,11 +80,11 @@ func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 	case base == "" && job.Req.Commit != "":
 		fmt.Fprintln(job, "\nNo commit before it passed a check, so every machine is built.")
 	case base == "":
-		fmt.Fprintln(job, "\nNothing is pushed yet to compare with, so every machine is built.")
+		fmt.Fprintln(job, "\nNo pushed commit has passed a check, so every machine is built.")
 	case job.Req.Commit != "":
 		fmt.Fprintf(job, "\nComparing every machine with the newest commit before it that passed a check (tree %.12s).\n", base)
 	default:
-		fmt.Fprintf(job, "\nComparing every machine with what is pushed (tree %.12s).\n", base)
+		fmt.Fprintf(job, "\nComparing every machine with the newest pushed commit that passed a check (tree %.12s).\n", base)
 	}
 	after, err := js.waitModel(ctx, tree)
 	if err == nil && after.Error != "" {

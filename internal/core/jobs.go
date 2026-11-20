@@ -228,7 +228,7 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 		var err error
 		tree, err = js.Repo.stagedTree(ctx)
 		if err == nil {
-			req.Base, err = js.Repo.pushBase(ctx)
+			req.Base, err = js.pushedBase(ctx)
 		}
 		js.Repo.mu.Unlock()
 		if err != nil {

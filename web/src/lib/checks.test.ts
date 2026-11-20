@@ -7,7 +7,7 @@ describe('builtText', () => {
     expect(builtText({ base: 'abc', built: [] })).toBe('no machine changes, so nothing needed building')
     expect(builtText({ base: 'abc', built: ['pi'] })).toBe('built pi, the one machine it changes')
     expect(builtText({ base: 'abc', built: ['pi', 'web'] })).toBe('built the 2 machines it changes: pi, web')
-    expect(builtText({ base: '', built: ['pi', 'web'] })).toBe('built every machine (2), as nothing is pushed to compare with')
+    expect(builtText({ base: '', built: ['pi', 'web'] })).toBe('built every machine (2), as no pushed commit had passed a check')
   })
 })
 
@@ -22,8 +22,8 @@ describe('summaryLines', () => {
     ])
   })
   it('says when no machine changes, and when everything was already built', () => {
-    expect(summaryLines(sum({}))).toEqual(['No machine changes compared with what is pushed'])
-    expect(summaryLines(sum({ base: '', changed: ['web'], built: ['web'] }))).toEqual(['Built: web (every machine: nothing is pushed yet)', 'Everything was already in the server’s store'])
+    expect(summaryLines(sum({}))).toEqual(['No machine changes compared with the newest pushed commit that passed a check'])
+    expect(summaryLines(sum({ base: '', changed: ['web'], built: ['web'] }))).toEqual(['Built: web (every machine: no pushed commit had passed a check)', 'Everything was already in the server’s store'])
   })
   it('names a machine that did not evaluate, without claiming anything was built', () => {
     expect(summaryLines(sum({ failed: ['pi'] }))).toEqual(['Failed: pi'])

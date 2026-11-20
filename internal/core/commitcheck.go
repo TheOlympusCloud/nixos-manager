@@ -44,17 +44,33 @@ func (js *Jobs) CheckCommit(ctx context.Context, sha, branch string) (*Job, *Che
 		js.mu.Unlock()
 		return j, nil, nil
 	}
-	base := ""
-	if i := slices.IndexFunc(trees[1:], func(t string) bool { _, ok := js.passed[t]; return ok }); i >= 0 {
-		base = trees[1+i]
-	}
-	job, err := js.enqueue(JobRequest{Kind: "check", Commit: sha, Branch: branch, Base: base}, trees[0], "")
+	job, err := js.enqueue(JobRequest{Kind: "check", Commit: sha, Branch: branch, Base: js.newestPassed(trees[1:])}, trees[0], "")
 	tell := js.onCommit
 	js.mu.Unlock()
 	if err == nil && tell != nil {
 		tell(job)
 	}
 	return job, nil, err
+}
+
+// newestPassed is the first of trees that passed a check, or "" for none;
+// js.mu held. A check builds every machine whose system differs from it, so
+// a machine that did not build in a failed or unchecked commit is built again.
+func (js *Jobs) newestPassed(trees []string) string {
+	if i := slices.IndexFunc(trees, func(t string) bool { _, ok := js.passed[t]; return ok }); i >= 0 {
+		return trees[i]
+	}
+	return ""
+}
+
+// pushedBase is the tree a check of the staged changes compares the machines
+// with: the newest pushed commit that passed a check (see newestPassed). Needs
+// Repo.mu.
+func (js *Jobs) pushedBase(ctx context.Context) (string, error) {
+	trees, err := js.Repo.pushedTrees(ctx)
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	return js.newestPassed(trees), err
 }
 
 // WatchCommits has fn told of every check of a commit queued from now on.

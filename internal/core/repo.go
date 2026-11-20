@@ -985,16 +985,28 @@ func (r *Repo) currentBranch(ctx context.Context) (string, error) {
 // deployed on top of it), else "" when the remote has neither, as last
 // fetched. Needs r.mu.
 func (r *Repo) pushBase(ctx context.Context) (string, error) {
+	trees, err := r.pushedTrees(ctx)
+	if len(trees) == 0 {
+		return "", err
+	}
+	return trees[0], err
+}
+
+// pushedTrees are the trees of what a push lands on (see pushBase) and of the
+// commits before it on its first-parent line, newest first, as far back as a
+// check looks for one that passed; none when nothing is pushed. Needs r.mu.
+func (r *Repo) pushedTrees(ctx context.Context) ([]string, error) {
 	refs := []string{"refs/remotes/origin/HEAD"}
 	if cur, err := r.git(ctx, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
 		refs = append([]string{"refs/remotes/origin/" + strings.TrimSpace(cur)}, refs...)
 	}
 	for _, ref := range refs {
-		if out, err := r.git(ctx, "rev-parse", "--verify", "-q", ref+"^{tree}"); err == nil {
-			return strings.TrimSpace(out), nil
+		if _, err := r.git(ctx, "rev-parse", "--verify", "-q", ref); err == nil {
+			out, err := r.git(ctx, "log", "--first-parent", "--format=%T", fmt.Sprintf("--max-count=%d", checkedAncestors+1), "--end-of-options", ref, "--")
+			return strings.Fields(out), err
 		}
 	}
-	return "", nil
+	return nil, nil
 }
 
 // Push sends the current branch to origin and sets it as upstream.

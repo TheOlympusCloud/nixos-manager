@@ -191,3 +191,43 @@ func TestTipCheck(t *testing.T) {
 		t.Fatalf("no commit yet: %+v", tip)
 	}
 }
+
+// A check of the staged changes compares with the newest pushed commit that
+// passed a check, not with what is pushed: on top of a pushed commit that broke
+// db, an edit of web builds db too, and fails.
+func TestStagedCheckOnTopOfAFailedCommitBuildsItsBrokenMachine(t *testing.T) {
+	ctx := context.Background()
+	s := buildService(t, true)
+	checked := runCheck(t, s).Tree // what is pushed passes
+	sha := pushFrom(t, s, laptop(t, s), "hosts/db", "db broken\n")
+	job, _, err := s.Jobs.CheckCommit(ctx, sha, "main")
+	ok(t, err)
+	if info := wait(t, job); info.State != "failed" {
+		t.Fatalf("the pushed commit's check %s:\n%s", info.State, info.Output)
+	}
+	must[string](t)(s.Repo.Pull(ctx))
+
+	write(t, s.Repo, "hosts/web", "web kernel=2\n")
+	info := runCheck(t, s)
+	if info.State != "failed" || info.Summary.Base != checked || !slices.Equal(info.Summary.Changed, []string{"db", "web"}) ||
+		!slices.Equal(info.Summary.Failed, []string{"db"}) || !strings.Contains(info.Output, "the newest pushed commit that passed a check") {
+		t.Fatalf("check on top of the broken commit %s %+v:\n%s", info.State, info.Summary, info.Output)
+	}
+	must[string](t)(s.Commit(ctx, "web: new kernel", true))
+	_, err = s.Push(ctx, false)
+	isErr(t, err, ErrNotChecked)
+	if tip := s.TipCheck(ctx, "main"); tip.Commit != sha || tip.State != "failed" {
+		t.Fatalf("tip %+v", tip)
+	}
+
+	// Once db is fixed, the check passes and the push goes through.
+	write(t, s.Repo, "hosts/db", "db\n")
+	if info := runCheck(t, s); info.State != "passed" || !slices.Equal(info.Summary.Built, []string{"web"}) {
+		t.Fatalf("check with db fixed %s %+v:\n%s", info.State, info.Summary, info.Output)
+	}
+	must[string](t)(s.Commit(ctx, "db: fix it", false))
+	must[string](t)(s.Push(ctx, false))
+	if tip := s.TipCheck(ctx, "main"); tip.State != "passed" {
+		t.Fatalf("tip after the fix %+v", tip)
+	}
+}

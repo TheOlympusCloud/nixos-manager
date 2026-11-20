@@ -379,7 +379,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		t, err := svc.Jobs.Targets(ctx)
 		return map[string][]core.Target{"targets": t}, err
 	})
-	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with what is pushed (every machine when nothing is pushed), then a dry build of each extra target. Commit and push need it to pass. With commit, check that commit instead, compared with the newest commit before it that passed a check (for a commit pushed without one). Waits for the result.", func(ctx context.Context, in struct {
+	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with the newest pushed commit that passed a check (every machine when none has), then a dry build of each extra target. Commit and push need it to pass. With commit, check that commit instead, compared with the newest commit before it that passed a check (for a commit pushed without one). Waits for the result.", func(ctx context.Context, in struct {
 		Targets []string `json:"targets,omitempty" jsonschema:"extra attributes from list_targets to dry-build (evaluate only); the changed machines are always built"`
 		Commit  string   `json:"commit,omitempty" jsonschema:"a full commit SHA to check instead of the staged changes; takes no targets"`
 	}) (jobOut, error) {
