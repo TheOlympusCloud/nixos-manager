@@ -402,6 +402,21 @@ func TestStoreReportTokens(t *testing.T) {
 	if v := must[string](t)(sec.Reveal(ctx, "web", "other")); v != "kept" {
 		t.Fatal("another secret was lost")
 	}
+
+	// New tokens are stored again for the machines that read theirs from the
+	// secrets, or they would stop reporting with nothing said; pi no longer does.
+	ok(t, sec.Delete(ctx, "pi", ReportSecret))
+	old := must[string](t)(svc.Deploys.HostToken("web"))
+	if hosts := must[[]string](t)(svc.RotateReportTokens(ctx)); !slices.Equal(hosts, []string{"web"}) {
+		t.Fatalf("stored again for %v", hosts)
+	}
+	want := must[string](t)(svc.Deploys.HostToken("web"))
+	if got := must[string](t)(sec.Reveal(ctx, "web", ReportSecret)); want == old || got != want {
+		t.Fatalf("web keeps %q; its token is %q (was %q)", got, want, old)
+	}
+	if _, err := sec.Reveal(ctx, "pi", ReportSecret); err == nil {
+		t.Fatal("pi got a report token it did not keep in its secrets")
+	}
 }
 
 // The sops JSON that reaches the disk names only the given keys, and its

@@ -3,8 +3,8 @@
   import { installCommand, localOnly, onSharedToken, TOKEN_FILE, urlLine } from '../../lib/deployments'
   import { loadDeployments } from '../../lib/deployments.svelte'
   import { fleet } from '../../lib/fleet.svelte'
-  import { codeLink, link, machineLink } from '../../lib/router.svelte'
-  import { confirmBox, report } from '../../lib/ui.svelte'
+  import { codeLink, go, link, machineLink } from '../../lib/router.svelte'
+  import { confirmBox, report, toast } from '../../lib/ui.svelte'
   import { copyText } from '../../lib/util'
   import Icon from '../Icon.svelte'
 
@@ -50,13 +50,19 @@
   async function regenerate() {
     const ok = await confirmBox({
       title: 'Make new report tokens?',
-      message: 'Every machine gets a new token. Machines with their current one stop reporting until they get the new one.',
+      message:
+        'Every machine gets a new token. Machines that keep theirs in the secrets get the new one there, to commit and push; the others stop reporting until they get it.',
       ok: 'Make new tokens',
       danger: true,
     })
     if (!ok) return
     try {
-      await api.regenerateDeployTokens()
+      const stored = await api.regenerateDeployTokens()
+      if (stored.length)
+        toast(`New tokens are in the secrets of ${stored.join(', ')}: commit and push them, or ${stored.length === 1 ? 'it stops' : 'they stop'} reporting.`, 'ok', 'New tokens', {
+          label: 'View changes',
+          run: () => go('#/changes'),
+        })
       rotated++
       reveal = true
       loadDeployments()

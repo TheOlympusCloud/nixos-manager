@@ -751,6 +751,8 @@ To turn it on (the **Deployments** view walks you through it):
    With sops-nix or agenix, point `fleet.deployReport.tokenFile` at the secret
    instead. Never commit a token. **New tokens for every machine** replaces the
    key; machines with an old token stop reporting until they get the new one.
+   Those that keep theirs in the secrets get it there at once: commit and push
+   it.
 
 3. The first report arrives with the next deployment after both are in place,
    and the first heartbeat a few minutes after the deployment that installs
@@ -931,7 +933,8 @@ Two setup steps under **Settings → Secrets**:
 - **Report tokens.** **Store every machine's token** saves each machine's own
   [report token](#deployments) as its secret `nixos-manager-report`, which
   `modules/secrets.nix` points the report hook at, instead of copying it over
-  SSH. Store them again after **New tokens for every machine**.
+  SSH. **New tokens for every machine** stores the new ones again for the
+  machines that have theirs there; commit and push them.
 
 **A fleet made before secrets** has neither `modules/secrets.nix` nor the
 sops-nix input. Add the input to `flake.nix` and run **Lock**:

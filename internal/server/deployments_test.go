@@ -81,8 +81,9 @@ func TestDeploymentReportsOverHTTP(t *testing.T) {
 	if code := e.do(t, "GET", "/api/deployments/token?host=../pi", nil, &got); code != 400 {
 		t.Fatalf("token for an invalid name: %d", code)
 	}
-	if code := e.do(t, "POST", "/api/deployments/token", struct{}{}, nil); code != 204 {
-		t.Fatalf("rotate: %d", code)
+	var rotated struct{ Stored []string }
+	if code := e.do(t, "POST", "/api/deployments/token", struct{}{}, &rotated); code != 200 || rotated.Stored == nil || len(rotated.Stored) != 0 {
+		t.Fatalf("rotate: %d %+v", code, rotated) // no machine keeps its token in the secrets
 	}
 	if code := report(t, e, tok, "application/json", good); code != 401 {
 		t.Fatalf("the old token still reports: %d", code)

@@ -275,7 +275,7 @@
       <strong>Report tokens</strong>
       <span class="muted small">
         Each machine's own report token (Deployments) as its secret <span class="mono">{reportSecret}</span>, instead of copying it over SSH; the starter fleet's
-        <span class="mono">modules/secrets.nix</span> points the report hook at it. Store them again after <strong>New tokens for every machine</strong>.
+        <span class="mono">modules/secrets.nix</span> points the report hook at it. <strong>New tokens for every machine</strong> stores the new ones again for the machines that have theirs here.
         {#if st.machines.length}Stored for: {st.machines.filter((m) => hasReportToken(m.name)).map((m) => m.name).join(', ') || 'none yet'}.{/if}
       </span>
       <div class="row">
