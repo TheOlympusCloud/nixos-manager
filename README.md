@@ -481,6 +481,13 @@ When **Pull** rebases your local commits onto new remote commits, the result
 was never checked as a whole, so **Push** refuses it: run the checks again with
 nothing staged or changed, then push.
 
+Never store secrets in the repository; use sops-nix or agenix. Nix copies
+what it evaluates into the store, which every user of the server can read.
+**Lock** and **Update** give it only the tracked files (as they are in the
+working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
+ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
+`flake.lock` is saved while they run, they write nothing: run them again.
+
 ### Try a change on one machine first
 
 comin also follows a testing branch on each machine, `testing-<hostname>`
@@ -513,13 +520,6 @@ risky change on a remote machine.
 
 When `main` moves on without the trial, comin leaves it and deploys `main`;
 Changes says so. MCP has the same: `try_on_machine` and `end_trial`.
-
-Never store secrets in the repository; use sops-nix or agenix. Nix copies
-what it evaluates into the store, which every user of the server can read.
-**Lock** and **Update** give it only the tracked files (as they are in the
-working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
-ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
-`flake.lock` is saved while they run, they write nothing: run them again.
 
 ## Deployments
 
