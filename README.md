@@ -52,11 +52,11 @@ An MCP server gives automation the same features.
   shows its error.
 - **Checks**: on exactly the staged changes, with live output, `nix flake check`
   and then a real build of every machine whose system they change compared
-  with what is pushed (the comparison Changes shows), so a package or system
-  that evaluates but does not build fails the check. With nothing pushed yet,
-  every machine is built. The result says which machines were built, which
-  failed, which need a reboot, and what Nix built and downloaded (from a dry
-  run first). Configurations you tick are dry-built on top, which only
+  with what is pushed (by system derivation, as Changes compares), so a
+  package or system that evaluates but does not build fails the check. With
+  nothing pushed yet, every machine is built. The result says which machines
+  were built, which failed, which need a reboot, and what Nix built and
+  downloaded (from a dry run first). Configurations you tick are dry-built on top, which only
   evaluates them. A commit needs a passing check of the staged changes, and a
   push needs a passing check of the commit being pushed that compared it with
   what the push lands on now. In the web UI you can override both explicitly;

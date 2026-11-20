@@ -38,8 +38,8 @@ type CheckSummary struct {
 }
 
 // runCheck checks the staged tree: nix flake check, then a real build of every
-// machine whose system differs from the tree a push lands on (the comparison
-// Changes shows), then a dry build of each extra target.
+// machine whose system differs from the tree a push lands on (by system
+// derivation, as Changes compares), then a dry build of each extra target.
 func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 	tree, base := job.tree, job.Req.Base
 	var sum *CheckSummary // once the machines are compared
