@@ -450,8 +450,9 @@ without the token file, and never fails a deployment. nixos-manager keeps the
 last 20 reports per machine in `$NIXMGR_DATA/deployments.json`; the token is in
 `$NIXMGR_DATA/deploy-token`. The reports of a machine that is no longer in the
 flake are deleted once the working copy is exactly the tip of the branch comin
-deploys (a machine deleted but not pushed, or missing on another branch, keeps
-them). **Forget** on a machine's row deletes its reports by hand; it comes
+deploys, if the machine last reported a commit of that branch, deployed from
+it. A machine deleted but not pushed, or one that comin deploys from another
+branch, keeps them. **Forget** on a machine's row deletes its reports by hand; it comes
 back if it reports again. A repository made from an older starter fleet has
 no hook yet: copy both `report-deployment*` files from `templates/fleet/modules/`
 into its `modules/` and import `report-deployments.nix` from `common.nix`.

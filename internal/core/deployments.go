@@ -267,11 +267,13 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	if err != nil {
 		return ov, err
 	}
-	if gone := d.removed(ctx, model, reports, tips[ov.Branch]); len(gone) > 0 {
-		if err := d.Forget(gone...); err != nil {
+	if gone := d.removed(ctx, model, reports, ov.Branch, tips[ov.Branch]); len(gone) > 0 {
+		if err := d.Forget(gone...); err != nil && !errors.Is(err, ErrNotFound) { // not found: a request at the same time dropped them
 			slog.Warn("cannot drop the reports of machines no longer in the flake", "hosts", gone, "err", err)
 		} else {
-			slog.Info("dropped the reports of machines no longer in the flake", "hosts", gone)
+			if err == nil {
+				slog.Info("dropped the reports of machines no longer in the flake", "hosts", gone)
+			}
 			for _, h := range gone {
 				delete(reports, h)
 			}
@@ -362,17 +364,18 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 }
 
 // removed lists the machines that reported but are no longer in the flake,
-// when that is certain: the flake evaluated, and the working copy is exactly
-// the tip of the branch comin deploys. On another branch, or with a machine
-// deleted but not pushed, the machine may still be in service.
-func (d *Deployments) removed(ctx context.Context, model *Model, reports map[string][]DeployReport, tip string) []string {
+// when that is certain: the flake evaluated, the working copy is exactly the
+// tip of the branch comin deploys, and the machine's last report is of a
+// commit of that branch, deployed from it. On another branch, or with a
+// machine deleted but not pushed, the machine may still be in service.
+func (d *Deployments) removed(ctx context.Context, model *Model, reports map[string][]DeployReport, branch, tip string) []string {
 	if model == nil || model.Error != "" || model.Tree == "" || tip == "" {
 		return nil
 	}
 	in := append(hostNames(model), model.Darwin...)
 	var gone []string
-	for h := range reports {
-		if !slices.Contains(in, h) {
+	for h, rs := range reports {
+		if !slices.Contains(in, h) && len(rs) > 0 {
 			gone = append(gone, h)
 		}
 	}
@@ -382,6 +385,12 @@ func (d *Deployments) removed(ctx context.Context, model *Model, reports map[str
 	if tree, err := d.repo.git(ctx, "rev-parse", "--verify", "-q", "--end-of-options", tip+"^{tree}"); err != nil || strings.TrimSpace(tree) != model.Tree {
 		return nil
 	}
+	gone = slices.DeleteFunc(gone, func(h string) bool {
+		last := reports[h][0]
+		// comin's ref is <remote>/<branch>; older reports have none.
+		fromBranch := last.Ref == "" || last.Ref == branch || strings.HasSuffix(last.Ref, "/"+branch)
+		return !fromBranch || !d.isAncestor(ctx, last.Commit, tip)
+	})
 	slices.Sort(gone)
 	return gone
 }

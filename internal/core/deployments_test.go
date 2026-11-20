@@ -269,8 +269,18 @@ func TestReportsOfRemovedMachinesArePruned(t *testing.T) {
 	}
 	gitOut(t, r.Dir, "switch", "-q", "-c", "main", c1)
 
+	// Machines that may still be in service from another branch keep their reports:
+	// one that runs a commit main does not have (nas, defined only on stable), and one
+	// that comin deploys from another branch pinned at an older commit of main (old).
+	gitOut(t, r.Dir, "switch", "-q", "-c", "stable")
+	write(t, r, "nas.nix", "{ }\n")
+	cs := commitAll(t, r, "add nas on stable")
+	gitOut(t, r.Dir, "switch", "-q", "main")
+	ok(t, d.Record(ReportIn{Host: "nas", Commit: cs, Ref: "origin/stable", Status: "done"}, now))
+	ok(t, d.Record(ReportIn{Host: "old", Commit: c1, Ref: "origin/stable", Status: "done"}, now))
+	ok(t, d.Record(ReportIn{Host: "gone", Commit: c1, Ref: "origin/main", Status: "done"}, now))
 	ok(t, d.Record(ReportIn{Host: "mac", Commit: c1, Status: "done"}, now)) // nix-darwin: in the flake, not in the model's hosts
-	if got := hosts(must[DeployOverview](t)(d.Overview(ctx, &Model{Tree: tip, Hosts: m.Hosts, Darwin: []string{"mac"}}, now))); !slices.Equal(got, []string{"kept", "mac"}) {
+	if got := hosts(must[DeployOverview](t)(d.Overview(ctx, &Model{Tree: tip, Hosts: m.Hosts, Darwin: []string{"mac"}}, now))); !slices.Equal(got, []string{"kept", "mac", "nas", "old"}) {
 		t.Fatalf("at the tip: machines %v", got)
 	}
 	if again := must[*Deployments](t)(OpenDeployments(dir, r)); again.reports["gone"] != nil || again.reports["kept"] == nil {
