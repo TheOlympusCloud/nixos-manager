@@ -45,8 +45,10 @@ func TestLoginParallelGuessing(t *testing.T) {
 	if took := time.Since(start); took > 2*time.Second {
 		t.Fatalf("the attempts queued for %v", took)
 	}
-	if checked.Load() > loginPerSource || checked.Load()+limited.Load() != 31 {
-		t.Fatalf("%d passwords checked, %d refused; want at most %d checked", checked.Load(), limited.Load(), loginPerSource)
+	// A successful login gives its attempt back, so the right password can make
+	// room for one more guess: only the wrong ones are bounded.
+	if wrong := checked.Load() - in.Load(); wrong > loginPerSource || checked.Load()+limited.Load() != 31 {
+		t.Fatalf("%d wrong passwords checked (%d right), %d refused; want at most %d wrong checked", wrong, in.Load(), limited.Load(), loginPerSource)
 	}
 	if in.Load() == 0 {
 		if _, err := a.Login("correct horse", "ip 192.0.2.7", false); !isLimit(err) {
