@@ -255,13 +255,7 @@ func cominInsights(healthy []Host, origin string) []Insight {
 		if !known || len(h.Checks.CominRemotes) == 0 {
 			continue
 		}
-		match := false
-		for _, r := range h.Checks.CominRemotes {
-			if c, err := ParseRemote(r); err == nil && strings.EqualFold(c.Host, o.Host) && strings.EqualFold(c.Path, o.Path) {
-				match = true
-			}
-		}
-		if !match {
+		if !slices.ContainsFunc(h.Checks.CominRemotes, func(r string) bool { return sameRepo(r, o) }) {
 			other = append(other, h.Name)
 			if elsewhere == "" {
 				elsewhere = h.Checks.CominRemotes[0]
@@ -280,6 +274,12 @@ func cominInsights(healthy []Host, origin string) []Insight {
 			Detail: fmt.Sprintf("These machines deploy from %s, not from the repository this console pushes to, so changes made here never reach them. Point services.comin.remotes at the Forgejo repository.", elsewhere)})
 	}
 	return out
+}
+
+// sameRepo says whether a comin remote is the repository o.
+func sameRepo(remote string, o RemoteURL) bool {
+	c, err := ParseRemote(remote)
+	return err == nil && strings.EqualFold(c.Host, o.Host) && strings.EqualFold(c.Path, o.Path)
 }
 
 func list(xs []string) string {

@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,11 +77,12 @@ func (t TokenInfo) Via() string {
 }
 
 type Auth struct {
-	hash []byte
-	path string
+	hash         []byte
+	path         string
+	sessionsPath string // "" keeps sessions in memory only
 
 	mu       sync.Mutex
-	sessions map[string]time.Time
+	sessions map[string]time.Time // sessionKey(id) -> expiry
 	tokens   []Token
 
 	limit    limiter
@@ -153,8 +156,61 @@ func (a *Auth) Login(password, source string, known bool) (string, error) {
 			delete(a.sessions, k)
 		}
 	}
-	a.sessions[id] = now.Add(SessionTTL)
+	a.sessions[a.sessionKey(id)] = now.Add(SessionTTL).UTC().Truncate(time.Second)
+	if err := a.saveSessions(); err != nil { // the login still works, until the next restart
+		slog.Warn("cannot save the sessions; a restart will log this one out", "err", err)
+	}
 	return id, nil
+}
+
+// PersistSessions loads the sessions saved in path and saves every login and
+// logout there, so a restart does not log anyone out. An unreadable file only
+// means logging in again, so it is reported and then replaced.
+func (a *Auth) PersistSessions(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	saved := map[string]time.Time{}
+	if err == nil {
+		if err := json.Unmarshal(b, &saved); err != nil {
+			slog.Warn("cannot read the saved sessions; everyone logs in again", "file", path, "err", err)
+			saved = map[string]time.Time{}
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionsPath = path
+	now := time.Now()
+	for k, exp := range saved {
+		if now.Before(exp) {
+			a.sessions[k] = exp
+		}
+	}
+	return nil
+}
+
+// sessionKey is what is kept of a session id: a MAC with a key derived from
+// the password hash, so the file holds no usable id and a new password ends
+// every session.
+func (a *Auth) sessionKey(id string) string {
+	key := sha256.Sum256(append([]byte("nixos-manager session\x00"), a.hash...))
+	m := hmac.New(sha256.New, key[:])
+	m.Write([]byte(id))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// saveSessions writes the sessions when PersistSessions named a file; a.mu
+// must be held.
+func (a *Auth) saveSessions() error {
+	if a.sessionsPath == "" {
+		return nil
+	}
+	b, err := json.MarshalIndent(a.sessions, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(a.sessionsPath, b)
 }
 
 // SessionLabel is a short public name for a session, for logs and commit
@@ -167,14 +223,21 @@ func SessionLabel(id string) string {
 func (a *Auth) Session(id string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	exp, ok := a.sessions[id]
+	exp, ok := a.sessions[a.sessionKey(id)]
 	return ok && time.Now().Before(exp)
 }
 
 func (a *Auth) Logout(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.sessions, id)
+	k := a.sessionKey(id)
+	if _, ok := a.sessions[k]; !ok {
+		return
+	}
+	delete(a.sessions, k)
+	if err := a.saveSessions(); err != nil {
+		slog.Error("cannot save the logout; the session works again after a restart", "session", SessionLabel(id), "err", err)
+	}
 }
 
 func hashToken(secret string) string {
@@ -260,23 +323,33 @@ func (a *Auth) VerifyToken(secret string) (TokenInfo, bool) {
 	return TokenInfo{}, false
 }
 
-// save writes the token list atomically, readable by the service user only.
+// save writes the token list.
 func (a *Auth) save() error {
 	b, err := json.MarshalIndent(a.tokens, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(a.path), ".tokens-*.json")
+	return writeAtomic(a.path, b)
+}
+
+// writeAtomic replaces path with data, readable by the service user only:
+// readers see the old file or the new one, never a part.
+func writeAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(b); err != nil {
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil { // a crash right after the rename must not leave an empty file
 		tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), a.path)
+	return os.Rename(tmp.Name(), path)
 }

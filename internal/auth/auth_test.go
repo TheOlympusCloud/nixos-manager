@@ -51,6 +51,80 @@ func TestLoginSessions(t *testing.T) {
 	}
 }
 
+// Sessions outlive a restart, but not a logout or a new password, and the
+// session ids themselves never reach the disk.
+func TestSessionsSurviveARestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
+	a := newAuth(t, dir)
+	restart := func(hash []byte) *Auth {
+		t.Helper()
+		b, err := New(string(hash), filepath.Join(dir, "tokens.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.PersistSessions(path); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	if err := a.PersistSessions(path); err != nil {
+		t.Fatal(err)
+	}
+	id, err := a.Login("correct horse", "ip 192.0.2.1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := a.Login("correct horse", "ip 192.0.2.1", false)
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(raw), id) {
+		t.Fatalf("sessions.json: %v, %s", err, raw)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("sessions file mode %v", fi.Mode().Perm())
+	}
+
+	b := restart(a.hash)
+	if !b.Session(id) || !b.Session(other) || b.Session("forged") {
+		t.Fatal("sessions lost in a restart")
+	}
+	b.Logout(id)
+	if c := restart(a.hash); c.Session(id) || !c.Session(other) {
+		t.Fatal("a logout did not outlive the restart")
+	}
+	newHash, _ := bcrypt.GenerateFromPassword([]byte("new password"), bcrypt.MinCost)
+	if restart(newHash).Session(other) {
+		t.Fatal("a session outlived a password change")
+	}
+}
+
+func TestPersistedSessionsDropExpiredAndUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
+	a := newAuth(t, dir)
+	old := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	if err := os.WriteFile(path, []byte(`{"`+a.sessionKey("old")+`":"`+old+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PersistSessions(path); err != nil || a.Session("old") || len(a.sessions) != 0 {
+		t.Fatalf("expired session kept: %v %v", err, a.sessions)
+	}
+	if err := os.WriteFile(path, []byte(`{"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := newAuth(t, dir)
+	if err := b.PersistSessions(path); err != nil {
+		t.Fatalf("an unreadable file stopped the start: %v", err)
+	}
+	id, err := b.Login("correct horse", "ip 192.0.2.1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(path); !strings.Contains(string(raw), b.sessionKey(id)) {
+		t.Fatalf("the unreadable file was not replaced: %s", raw)
+	}
+}
+
 func TestTokensCreateVerifyRevokePersist(t *testing.T) {
 	dir := t.TempDir()
 	a := newAuth(t, dir)

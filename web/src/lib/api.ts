@@ -274,6 +274,8 @@ export const api = {
   deployments: () => get<DeployOverview>('/api/deployments'),
   deployToken: () => get<{ token: string }>('/api/deployments/token').then((r) => r.token),
   regenerateDeployToken: () => post<{ token: string }>('/api/deployments/token').then((r) => r.token),
+  /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
+  forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
 }
 
 // ---- deployments (what comin reports from each machine) ----
@@ -285,7 +287,7 @@ export type DeployState = 'current' | 'behind' | 'failed' | 'silent' | 'unknown'
 export type MachineDeployment = {
   host: string
   state: DeployState
-  /** main, or testing-<host> when comin follows that. */
+  /** The main branch its comin follows, or its testing branch when that is on top of it. */
   branch: string
   target?: string
   /** The last commit it deployed (or built and found unchanged). */

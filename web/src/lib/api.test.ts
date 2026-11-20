@@ -25,6 +25,18 @@ describe('request', () => {
     expect(fetch.mock.calls[1][0]).toBe('/api/tokens/t%2F1')
     expect(fetch.mock.calls[1][1]!.method).toBe('DELETE')
     expect(fetch.mock.calls[1][1]!.body).toBe('{}')
+
+    await api.forgetMachine('old pi')
+    expect(fetch.mock.calls[2][0]).toBe('/api/deployments/machines/old%20pi')
+    expect(fetch.mock.calls[2][1]!.method).toBe('DELETE')
+  })
+
+  it('creates a token with its scope and expiry', async () => {
+    const fetch = mockFetch(200, '{"id":"T1","name":"ci","scope":"read","created":"","token":"nxm_x"}')
+    await api.createToken('ci', 'read', '2026-02-09T12:00:00.000Z')
+    expect(JSON.parse(fetch.mock.calls[0][1]!.body as string)).toEqual({ name: 'ci', scope: 'read', expires: '2026-02-09T12:00:00.000Z' })
+    await api.createToken('ci', 'full')
+    expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ name: 'ci', scope: 'full' })
   })
 
   it('creates a token with its scope and expiry', async () => {

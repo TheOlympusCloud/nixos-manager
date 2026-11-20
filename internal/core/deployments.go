@@ -1,12 +1,15 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,8 +33,7 @@ const (
 	silentAfter    = 7 * 24 * time.Hour
 	behindAfter    = time.Hour
 	rolloutCommits = 12
-	// shortcut: comin's main branch is assumed to be "main" (the starter fleet's); read it from comin's settings if a fleet uses another.
-	mainBranch = "main"
+	defaultBranch  = "main" // comin's own default for a remote's main branch
 )
 
 var (
@@ -181,7 +183,8 @@ func (d *Deployments) save() error {
 	return writeAtomic(d.path, b)
 }
 
-// writeAtomic replaces path with data, readable by the service user only.
+// writeAtomic replaces path with data, readable by the service user only:
+// readers see the old file or the new one, never a part.
 func writeAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
@@ -189,6 +192,10 @@ func writeAtomic(path string, data []byte) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil { // a crash right after the rename must not leave an empty file
 		tmp.Close()
 		return err
 	}
@@ -205,8 +212,10 @@ type MachineDeployment struct {
 	// State: never (no report), failed (the last report is a failure), unknown
 	// (its commit is not in this working copy or not on the branch), current,
 	// behind, or silent (behind and no report for 7 days: probably off).
-	State  string `json:"state"`
-	Branch string `json:"branch"`           // main, or testing-<host> when that is on top of main
+	State string `json:"state"`
+	// Branch is the main branch its comin follows (services.comin.remotes), or
+	// its testing branch when that is on top of the main one.
+	Branch string `json:"branch"`
 	Target string `json:"target,omitempty"` // the branch's last commit
 	// Commit is the last commit it deployed, or built and found unchanged.
 	Commit      string         `json:"commit,omitempty"`
@@ -221,13 +230,13 @@ type MachineDeployment struct {
 
 type DeployOverview struct {
 	Reporting bool                `json:"reporting"` // some machine has reported
-	Branch    string              `json:"branch"`
-	Commits   []Commit            `json:"commits"` // the newest on the branch, for the rollout picture
+	Branch    string              `json:"branch"`    // the main branch most of the fleet follows
+	Commits   []Commit            `json:"commits"`   // the newest on the branch, for the rollout picture
 	Machines  []MachineDeployment `json:"machines"`
 }
 
-// HostNames lists the machines of an evaluated fleet.
-func HostNames(m *Model) []string {
+// hostNames lists the machines of an evaluated fleet.
+func hostNames(m *Model) []string {
 	var out []string
 	if m != nil {
 		for _, h := range m.Hosts {
@@ -237,32 +246,49 @@ func HostNames(m *Model) []string {
 	return out
 }
 
-// Overview says, for the given machines and every machine that reported, what
-// it runs and how that compares with the branch comin follows.
-func (d *Deployments) Overview(ctx context.Context, hosts []string, now time.Time) (DeployOverview, error) {
-	ov := DeployOverview{Branch: mainBranch, Commits: []Commit{}, Machines: []MachineDeployment{}}
+// Overview says, for the machines of the evaluated fleet (nil while it is
+// evaluated) and every machine that reported, what it runs and how that
+// compares with the branch its comin follows.
+func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time) (DeployOverview, error) {
+	ov := DeployOverview{Branch: defaultBranch, Commits: []Commit{}, Machines: []MachineDeployment{}}
 	if d == nil {
 		return ov, nil
 	}
-	hosts = slices.Clone(hosts) // sorted and extended below
+	follows := d.follows(ctx, model)
+	ov.Branch = fleetBranch(follows)
 	d.mu.Lock()
 	reports := make(map[string][]DeployReport, len(d.reports))
 	for h, rs := range d.reports {
 		reports[h] = slices.Clone(rs)
-		hosts = append(hosts, h)
 	}
 	d.mu.Unlock()
-	slices.Sort(hosts)
-	hosts = slices.Compact(hosts)
-	ov.Reporting = len(reports) > 0
 
 	tips, err := d.branchTips(ctx)
 	if err != nil {
 		return ov, err
 	}
-	mainTip := tips[mainBranch]
-	if mainTip != "" {
-		if ov.Commits, err = d.repo.Log(ctx, "", mainTip, rolloutCommits); err != nil {
+	if gone := d.removed(ctx, model, reports, ov.Branch, tips[ov.Branch]); len(gone) > 0 {
+		if err := d.Forget(gone...); err != nil && !errors.Is(err, ErrNotFound) { // not found: a request at the same time dropped them
+			slog.Warn("cannot drop the reports of machines no longer in the flake", "hosts", gone, "err", err)
+		} else {
+			if err == nil {
+				slog.Info("dropped the reports of machines no longer in the flake", "hosts", gone)
+			}
+			for _, h := range gone {
+				delete(reports, h)
+			}
+		}
+	}
+	hosts := hostNames(model)
+	for h := range reports {
+		hosts = append(hosts, h)
+	}
+	slices.Sort(hosts)
+	hosts = slices.Compact(hosts)
+	ov.Reporting = len(reports) > 0
+
+	if tip := tips[ov.Branch]; tip != "" {
+		if ov.Commits, err = d.repo.Log(ctx, "", tip, rolloutCommits); err != nil {
 			return ov, err
 		}
 	}
@@ -277,12 +303,14 @@ func (d *Deployments) Overview(ctx context.Context, hosts []string, now time.Tim
 	}
 	gaps := map[[2]string]gap{}
 	for _, h := range hosts {
-		m := MachineDeployment{Host: h, Branch: mainBranch, Target: mainTip, Reports: reports[h]}
+		b := follows[h]
+		b.Main, b.Testing = cmp.Or(b.Main, ov.Branch), cmp.Or(b.Testing, "testing-"+h)
+		m := MachineDeployment{Host: h, Branch: b.Main, Target: tips[b.Main], Reports: reports[h]}
 		if m.Reports == nil {
 			m.Reports = []DeployReport{}
 		}
-		if t := tips["testing-"+h]; t != "" && mainTip != "" && t != mainTip && d.isAncestor(ctx, mainTip, t) {
-			m.Branch, m.Target = "testing-"+h, t // comin deploys a testing branch that is on top of main
+		if t := tips[b.Testing]; t != "" && m.Target != "" && t != m.Target && d.isAncestor(ctx, m.Target, t) {
+			m.Branch, m.Target = b.Testing, t // comin deploys a testing branch that is on top of the main one
 		}
 		if len(m.Reports) > 0 {
 			m.LastSeen = m.Reports[0].At
@@ -333,6 +361,99 @@ func (d *Deployments) Overview(ctx context.Context, hosts []string, now time.Tim
 		ov.Machines = append(ov.Machines, m)
 	}
 	return ov, nil
+}
+
+// removed lists the machines that reported but are no longer in the flake,
+// when that is certain: the flake evaluated, the working copy is exactly the
+// tip of the branch comin deploys, and the machine's last report is of a
+// commit of that branch, deployed from it. On another branch, or with a
+// machine deleted but not pushed, the machine may still be in service.
+func (d *Deployments) removed(ctx context.Context, model *Model, reports map[string][]DeployReport, branch, tip string) []string {
+	if model == nil || model.Error != "" || model.Tree == "" || tip == "" {
+		return nil
+	}
+	in := append(hostNames(model), model.Darwin...)
+	var gone []string
+	for h, rs := range reports {
+		if !slices.Contains(in, h) && len(rs) > 0 {
+			gone = append(gone, h)
+		}
+	}
+	if len(gone) == 0 {
+		return nil
+	}
+	if tree, err := d.repo.git(ctx, "rev-parse", "--verify", "-q", "--end-of-options", tip+"^{tree}"); err != nil || strings.TrimSpace(tree) != model.Tree {
+		return nil
+	}
+	gone = slices.DeleteFunc(gone, func(h string) bool {
+		last := reports[h][0]
+		// comin's ref is <remote>/<branch>; older reports have none.
+		fromBranch := last.Ref == "" || last.Ref == branch || strings.HasSuffix(last.Ref, "/"+branch)
+		return !fromBranch || !d.isAncestor(ctx, last.Commit, tip)
+	})
+	slices.Sort(gone)
+	return gone
+}
+
+// Forget deletes the reports of these machines. One that is still in the flake
+// shows as never reported until it reports again.
+func (d *Deployments) Forget(hosts ...string) error {
+	if d == nil {
+		return errorf(ErrNotFound, "deployment reports are not set up")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	old := map[string][]DeployReport{}
+	for _, h := range hosts {
+		if rs, ok := d.reports[h]; ok {
+			old[h] = rs
+			delete(d.reports, h)
+		}
+	}
+	if len(old) == 0 {
+		return errorf(ErrNotFound, "no reports from %s", strings.Join(hosts, ", "))
+	}
+	if err := d.save(); err != nil {
+		maps.Copy(d.reports, old)
+		return err
+	}
+	return nil
+}
+
+// follows maps the fleet's machines to the branches their comin follows: those
+// set for the remote this console pushes to, else for its first remote.
+func (d *Deployments) follows(ctx context.Context, model *Model) map[string]CominBranches {
+	out := map[string]CominBranches{}
+	if model == nil {
+		return out
+	}
+	o, err := ParseRemote(d.repo.Remote(ctx))
+	known := err == nil && o.Kind != "local"
+	for _, h := range model.Hosts {
+		if bs := h.Checks.CominBranches; len(bs) > 0 {
+			i := slices.IndexFunc(bs, func(b CominBranches) bool { return known && sameRepo(b.URL, o) })
+			out[h.Name] = bs[max(i, 0)]
+		}
+	}
+	return out
+}
+
+// fleetBranch is the main branch most machines follow (ties: the first by
+// name), for the rollout picture and machines whose comin settings are unknown.
+func fleetBranch(follows map[string]CominBranches) string {
+	n := map[string]int{}
+	for _, b := range follows {
+		if b.Main != "" {
+			n[b.Main]++
+		}
+	}
+	best := defaultBranch
+	for br, c := range n {
+		if c > n[best] || c == n[best] && br < best {
+			best = br
+		}
+	}
+	return best
 }
 
 // branchTips maps branch names to their last commit as comin sees them: on

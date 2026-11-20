@@ -48,7 +48,8 @@ An MCP server gives automation the same features.
   run on exactly the staged changes, with live output. A commit needs a passing
   check of the staged changes, and a push needs a passing check of the commit
   being pushed. In the web UI you can override both explicitly; MCP clients
-  cannot.
+  cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so a restart
+  does not ask for them again.
 - **Git**: stage, commit, branches, push and pull, revert a commit, merge a
   `testing-<host>` branch, repository and per-file history with diffs and
   restore. Every commit uses the configured person's name and email.
@@ -393,14 +394,23 @@ nothing staged or changed, then push.
 A branch named `testing-<hostname>` is deployed by comin to that one machine
 only, for trying a change before merging it into `main`.
 
-Never store secrets in the repository; use sops-nix or agenix.
+Never store secrets in the repository; use sops-nix or agenix. Nix copies
+what it evaluates into the store, which every user of the server can read.
+**Lock** and **Update** give it only the tracked files (as they are in the
+working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
+ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
+`flake.lock` is saved while they run, they write nothing: run them again.
 
 ## Deployments
 
 A push is a deploy: every machine's comin pulls the branch and switches to it.
 With reporting on, each machine tells nixos-manager what comin did, and the
-**Deployments** view shows the latest commits of `main` with the machines that
-run each one, so after a push you watch them catch up. Per machine it shows the
+**Deployments** view shows the latest commits of the branch with the machines
+that run each one, so after a push you watch them catch up. Each machine is
+compared with the branch its own comin follows, read from
+`services.comin.remotes` (the remote this console pushes to, else the first
+one): its `branches.main.name`, or its `branches.testing.name`
+(`testing-<hostname>` by default) when that branch is on top of the main one. Per machine it shows the
 commit, when it was deployed, and comin's error when a build or switch failed;
 the machine page has the same in its **Deployment** card, and the fleet graph
 marks each machine deployed, behind or failed. **Health** flags a failed
@@ -438,7 +448,12 @@ configuration a commit does not change looks behind until a commit does change
 it. The hook posts with `curl` to `/api/deployments/report`, does nothing
 without the token file, and never fails a deployment. nixos-manager keeps the
 last 20 reports per machine in `$NIXMGR_DATA/deployments.json`; the token is in
-`$NIXMGR_DATA/deploy-token`. A repository made from an older starter fleet has
+`$NIXMGR_DATA/deploy-token`. The reports of a machine that is no longer in the
+flake are deleted once the working copy is exactly the tip of the branch comin
+deploys, if the machine last reported a commit of that branch, deployed from
+it. A machine deleted but not pushed, or one that comin deploys from another
+branch, keeps them. **Forget** on a machine's row deletes its reports by hand; it comes
+back if it reports again. A repository made from an older starter fleet has
 no hook yet: copy both `report-deployment*` files from `templates/fleet/modules/`
 into its `modules/` and import `report-deployments.nix` from `common.nix`.
 
@@ -505,14 +520,29 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy and tokens (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks and deployment reports (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
 | `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
 
-Sessions last 7 days and are kept in memory, so a restart logs you out.
+Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
+a keyed hash of each one, never the session itself. Changing the password ends
+every session.
+
+Logins are limited before the password is checked: 10 attempts per 10
+minutes from one address, and 50 per 10 minutes from all addresses together.
+More get `429 Too Many Requests` with `Retry-After`; successful logins do not
+count. A browser that has logged in before keeps a cookie that gives it its own
+limit of 10, outside the shared one, so someone guessing from elsewhere cannot
+lock you out of a browser you already use. Behind a proxy on the same machine
+(`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
+to `X-Forwarded-For`. With Docker, a proxy on the host reaches the container
+from the Docker gateway rather than loopback: set `NIXMGR_TRUSTED_PROXIES` to
+that address (the `remote=` of the `login` lines in the log), or every proxied
+login shares one address's limit. List only proxies there, since anything in
+that list can claim any client address. The counts are kept in memory.
 
 Logins are limited before the password is checked: 10 attempts per 10
 minutes from one address, and 50 per 10 minutes from all addresses together.

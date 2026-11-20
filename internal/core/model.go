@@ -11,11 +11,12 @@ import (
 // Model is what the flake configures, machine by machine, as Nix evaluates it.
 // The JSON shape is shared with the web UI and the MCP tools.
 type Model struct {
-	Tree   string  `json:"tree"`
-	Hosts  []Host  `json:"hosts"`
-	Homes  []Home  `json:"homes"`
-	Inputs []Input `json:"inputs"`
-	Error  string  `json:"error,omitempty"` // the flake itself does not evaluate
+	Tree   string   `json:"tree"`
+	Hosts  []Host   `json:"hosts"`
+	Homes  []Home   `json:"homes"`
+	Inputs []Input  `json:"inputs"`
+	Darwin []string `json:"darwin,omitempty"` // nix-darwin machines, not evaluated; comin can deploy them too
+	Error  string   `json:"error,omitempty"`  // the flake itself does not evaluate
 }
 
 type Host struct {
@@ -42,16 +43,25 @@ type Host struct {
 
 // Checks are the security and maintenance facts the fleet insights look at.
 type Checks struct {
-	SSH                       bool     `json:"ssh"`
-	SSHPasswordAuthentication *bool    `json:"sshPasswordAuthentication"` // null: the NixOS default (allowed)
-	SSHPermitRootLogin        *string  `json:"sshPermitRootLogin"`
-	Fail2ban                  bool     `json:"fail2ban"`
-	AutoGC                    bool     `json:"autoGC"`
-	AutoOptimise              bool     `json:"autoOptimise"`
-	Zram                      bool     `json:"zram"`
-	SSHUserKeys               *int     `json:"sshUserKeys"`  // authorized keys of normal users; null: unknown
-	Comin                     bool     `json:"comin"`        // deployed by comin from the repository
-	CominRemotes              []string `json:"cominRemotes"` // the repositories comin pulls from
+	SSH                       bool            `json:"ssh"`
+	SSHPasswordAuthentication *bool           `json:"sshPasswordAuthentication"` // null: the NixOS default (allowed)
+	SSHPermitRootLogin        *string         `json:"sshPermitRootLogin"`
+	Fail2ban                  bool            `json:"fail2ban"`
+	AutoGC                    bool            `json:"autoGC"`
+	AutoOptimise              bool            `json:"autoOptimise"`
+	Zram                      bool            `json:"zram"`
+	SSHUserKeys               *int            `json:"sshUserKeys"`  // authorized keys of normal users; null: unknown
+	Comin                     bool            `json:"comin"`        // deployed by comin from the repository
+	CominRemotes              []string        `json:"cominRemotes"` // the repositories comin pulls from
+	CominBranches             []CominBranches `json:"cominBranches"`
+}
+
+// CominBranches are the branches comin follows on one of its remotes
+// (services.comin.remotes.*.branches).
+type CominBranches struct {
+	URL     string `json:"url"`
+	Main    string `json:"main"`
+	Testing string `json:"testing"` // deployed with switch-to-configuration test when on top of Main
 }
 
 type Package struct {

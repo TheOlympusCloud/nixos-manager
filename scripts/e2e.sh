@@ -56,9 +56,12 @@ export NIXMGR_DATA=$work/data NIXMGR_LISTEN=127.0.0.1:$port NIXMGR_REMOTE=$work/
   NIXMGR_NIX=$nix_bin NIXMGR_NIXFMT=$nixfmt_bin
 NIXMGR_PASSWORD_HASH=$(printf 'pw\n' | "$work/nixos-manager" hash-password)
 export NIXMGR_PASSWORD_HASH
-"$work/nixos-manager" > "$work/server.log" 2>&1 &
-pid=$!
-for _ in $(seq 100); do curl -s -o /dev/null "$base/" && break; sleep 0.1; done
+start() {
+  "$work/nixos-manager" >> "$work/server.log" 2>&1 &
+  pid=$!
+  for _ in $(seq 100); do curl -s -o /dev/null "$base/" && break; sleep 0.1; done
+}
+start
 
 jar=$work/cookies
 api() { local m=$1 p=$2; shift 2; curl -s -b "$jar" -c "$jar" -X "$m" -H 'Content-Type: application/json' "$base$p" "$@"; }
@@ -79,9 +82,22 @@ echo "ok   login required"
 api GET /api/tree | json '["entries"]' | grep -q "'flake.nix'" || fail "starter flake not written"
 echo "ok   new repository got the starter flake"
 
+# Lock runs on an export: an untracked file, an ignored one and .git stay out of the store.
+repo_dir=$work/data/repo
+echo e2e > "$repo_dir/e2e-untracked"
+echo e2e > "$repo_dir/e2e-ignored"
+echo e2e-ignored >> "$repo_dir/.git/info/exclude"
 [ "$(run_job '{"kind":"lock"}')" = passed ] || fail "nix flake lock: $(cat "$work"/events-*)"
 api GET '/api/file?path=flake.lock' | json '["hash"]' > /dev/null || fail "no flake.lock after lock"
-echo "ok   flake locked"
+if [ "${E2E_STUB_NIX:-}" != 1 ]; then
+  for p in /nix/store/*-source; do
+    if [ -e "$p/e2e-untracked" ] || [ -e "$p/e2e-ignored" ] || grep -qsF "$work/remote.git" "$p/.git/config"; then
+      fail "lock copied the working copy into $p"
+    fi
+  done
+fi
+rm "$repo_dir/e2e-untracked" "$repo_dir/e2e-ignored"
+echo "ok   flake locked, from an export of the working copy"
 
 [ "$(code POST /api/stage -d '{"paths":[]}')" = 204 ] || fail "stage"
 attr=$(api GET /api/targets | json '["targets"][0]["attr"]') || fail "targets"
@@ -93,6 +109,12 @@ state=$(run_job "{\"kind\":\"check\",\"targets\":[\"$attr\"]}")
 [ "$state" = passed ] || fail "check $state: $(cat "$work"/events-*)"
 [ "$(api GET /api/status | json '["staged_checked"]')" = True ] || fail "staged changes not marked checked"
 echo "ok   check passed (flake check + dry build)"
+
+kill "$pid"; wait "$pid" 2>/dev/null || true
+start
+[ "$(code GET /api/status)" = 200 ] || fail "the restart logged the session out"
+[ "$(api GET /api/status | json '["staged_checked"]')" = True ] || fail "the restart forgot the passed check"
+echo "ok   a restart keeps the session and the passed check"
 
 sha=$(api POST /api/commit -d '{"message":"feat: initial machines"}' | json '["sha"]') || fail "commit"
 api POST /api/push -d '{}' > /dev/null
@@ -140,6 +162,11 @@ model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
 [ "$(echo "$model" | json '["model"].get("error", "")')" = "" ] || fail "the starter flake does not evaluate: $model"
 [ "$(echo "$model" | json '["model"]["hosts"][0].get("error", "")')" = "" ] || fail "the example machine does not evaluate: $model"
+if [ "${E2E_STUB_NIX:-}" != 1 ]; then # read from services.comin.remotes in modules/common.nix
+  branches=$(echo "$model" | json '["model"]["hosts"][0]["checks"]["cominBranches"]')
+  [ "$branches" = "[{'url': 'https://forgejo.example.lan/pablo/nixos-config.git', 'main': 'main', 'testing': 'testing-example'}]" ] ||
+    fail "comin's branches: $branches"
+fi
 echo "ok   fleet model: the example machine evaluates"
 
 [ "$(code POST /api/hosts/example/packages -d '{"add":["ripgrep"]}')" = 200 ] || fail "add a package by clicking"

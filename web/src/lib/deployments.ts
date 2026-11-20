@@ -51,7 +51,7 @@ export function stateDetail(m: MachineDeployment): string {
 export type Rollout = {
   /** The newest commits of the branch, newest first, with the machines that run each. */
   rows: { commit: Commit; machines: MachineDeployment[] }[]
-  /** Machines that follow their own testing branch. */
+  /** Machines that follow another branch: their testing branch, or another main branch. */
   testing: MachineDeployment[]
   /** Machines on a commit older than the rows, or none that is known. */
   older: MachineDeployment[]
@@ -87,6 +87,12 @@ export function rollingOut(ov: DeployOverview | null, now = Date.now()): boolean
 export function pollInterval(ov: DeployOverview | null, now = Date.now()): number {
   if (rollingOut(ov, now)) return 5_000
   return ov?.machines.some((m) => m.state === 'behind') ? 15_000 : 60_000
+}
+
+/** The question before forgetting a machine's reports. */
+export function forgetQuestion(m: MachineDeployment): string {
+  const n = m.reports.length
+  return `Delete ${n === 1 ? 'the deployment report' : `the ${n} deployment reports`} of ${m.host}? If it still runs comin and reports again, it comes back.`
 }
 
 /** The first lines of an error, for cards and table cells. */

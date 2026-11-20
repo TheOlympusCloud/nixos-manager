@@ -3,12 +3,15 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,11 +22,13 @@ const (
 	jobTimeout  = 30 * time.Minute
 	maxOutput   = 8 << 20 // per job; nix -L can be chatty
 	keepJobs    = 50
-	queueLength = 256 // skipped model jobs keep their slot until the worker drains them
+	queueLength = 256  // skipped model jobs keep their slot until the worker drains them
+	keepChecks  = 1000 // passed trees remembered; the oldest are forgotten first
 )
 
 // Jobs runs Nix commands one at a time, in submission order, and keeps their
-// output for the UI and MCP. It remembers which staged trees passed a check.
+// output for the UI and MCP. It remembers which staged trees passed a check,
+// in checks.json once PersistChecks has named it.
 type Jobs struct {
 	Repo   *Repo
 	Nix    string // nix binary
@@ -33,6 +38,8 @@ type Jobs struct {
 	jobs        []*Job // oldest first
 	nextID      int
 	passed      map[string]bool
+	passedOrder []string // the passed trees, oldest first
+	checksPath  string   // "" keeps them in memory only
 	queue       chan *Job
 	models      map[string]*Model // by git tree
 	modelOrder  []string
@@ -49,8 +56,8 @@ func newJobs(repo *Repo) *Jobs {
 
 // JobRequest asks for one of:
 //   - "check": nix flake check on the staged changes, then a dry build of each target attribute;
-//   - "lock": nix flake lock in the working copy;
-//   - "update": nix flake update of Inputs (all when empty) in the working copy.
+//   - "lock": nix flake lock of the working copy;
+//   - "update": nix flake update of Inputs (all when empty) of the working copy.
 type JobRequest struct {
 	Kind    string   `json:"kind"`
 	Targets []string `json:"targets,omitempty"`
@@ -231,6 +238,48 @@ func (js *Jobs) Passed(tree string) bool {
 	return js.passed[tree]
 }
 
+type checksFile struct {
+	Passed []string `json:"passed"` // trees that passed a check, oldest first
+}
+
+// PersistChecks loads the trees that passed a check from path and saves every
+// new one there, so a restart does not ask for the checks again. An unreadable
+// file only means running checks again, so it is reported and then replaced.
+func (js *Jobs) PersistChecks(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	var f checksFile
+	if err == nil {
+		if err := json.Unmarshal(b, &f); err != nil {
+			slog.Warn("cannot read the passed checks; they must run again", "file", path, "err", err)
+			f.Passed = nil
+		}
+	}
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	js.checksPath = path
+	for _, t := range f.Passed {
+		js.pass(t)
+	}
+	return nil
+}
+
+// pass records a passed tree as the newest and returns the list to save; js.mu
+// must be held.
+func (js *Jobs) pass(tree string) []string {
+	js.passedOrder = append(slices.DeleteFunc(js.passedOrder, func(t string) bool { return t == tree }), tree)
+	js.passed[tree] = true
+	if n := len(js.passedOrder) - keepChecks; n > 0 {
+		for _, t := range js.passedOrder[:n] {
+			delete(js.passed, t)
+		}
+		js.passedOrder = slices.Delete(js.passedOrder, 0, n)
+	}
+	return slices.Clone(js.passedOrder)
+}
+
 func (js *Jobs) worker() {
 	for job := range js.queue {
 		if job.skip.Load() {
@@ -247,8 +296,14 @@ func (js *Jobs) worker() {
 		}
 		if err == nil && job.Req.Kind == "check" {
 			js.mu.Lock()
-			js.passed[job.tree] = true
+			passed, path := js.pass(job.tree), js.checksPath
 			js.mu.Unlock()
+			if path != "" { // only this worker saves, so the writes cannot overtake each other
+				b, _ := json.Marshal(checksFile{Passed: passed}) // strings always marshal
+				if err := writeAtomic(path, b); err != nil {
+					fmt.Fprintf(job, "\nThe check passed, but saving that failed (%v): after a restart it must run again.\n", err)
+				}
+			}
 		}
 		job.finish(err == nil)
 	}
@@ -269,8 +324,9 @@ func (js *Jobs) run(job *Job) error {
 	case "values":
 		return js.runValues(ctx, job)
 	}
-	dir := js.Repo.Dir
+	var dir string
 	var steps [][]string
+	var after func() error // once every step passed
 	switch job.Req.Kind {
 	case "check":
 		tmp, err := os.MkdirTemp("", "nixmgr-check-")
@@ -288,13 +344,32 @@ func (js *Jobs) run(job *Job) error {
 		for _, t := range job.Req.Targets {
 			steps = append(steps, js.nixArgs("build", "--dry-run", "--no-link", "-L", "--no-update-lock-file", "path:"+src+"#"+t))
 		}
-	case "lock":
-		// lock and update write flake.lock without Repo.mu, which would block every edit for
-		// the whole download. Safe: a concurrent save of flake.lock is hash-checked and atomic.
-		// shortcut: path: copies the whole folder (with .git) to the store; fine for a config repo, revisit if .git grows large.
-		steps = append(steps, js.nixArgs("flake", "lock", "path:"+dir))
-	case "update":
-		steps = append(steps, js.nixArgs(append(append([]string{"flake", "update"}, job.Req.Inputs...), "--flake", "path:"+dir)...))
+	case "lock", "update":
+		// Nix copies a path: flake whole into the world-readable store, so it gets an
+		// export, never the working copy with .git and stray files. Repo.mu is held
+		// only to export and to copy flake.lock back, not for the whole download.
+		tree, base, err := js.Repo.lockSource(ctx)
+		if err != nil {
+			return err
+		}
+		src, cleanup, err := js.snapshot(ctx, tree)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		dir = src
+		if job.Req.Kind == "lock" {
+			steps = append(steps, js.nixArgs("flake", "lock", "path:"+src))
+		} else {
+			steps = append(steps, js.nixArgs(append(append([]string{"flake", "update"}, job.Req.Inputs...), "--flake", "path:"+src)...))
+		}
+		after = func() error {
+			lock, err := os.ReadFile(filepath.Join(src, "flake.lock"))
+			if err != nil {
+				return fmt.Errorf("nix wrote no flake.lock: %v", err)
+			}
+			return js.Repo.putLock(base, lock)
+		}
 	}
 	for _, args := range steps {
 		fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
@@ -306,6 +381,11 @@ func (js *Jobs) run(job *Job) error {
 				return fmt.Errorf("stopped after %s", jobTimeout)
 			}
 			return fmt.Errorf("failed: %v", err)
+		}
+	}
+	if after != nil {
+		if err := after(); err != nil {
+			return err
 		}
 	}
 	fmt.Fprintln(job, "\nAll steps passed.")

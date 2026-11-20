@@ -103,6 +103,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := a.PersistSessions(filepath.Join(data, "sessions.json")); err != nil {
+		return err
+	}
 	repo, err := core.OpenRepoSSH(env("NIXMGR_REPO", filepath.Join(data, "repo")), os.Getenv("NIXMGR_REMOTE"), name, email, filepath.Join(data, "ssh"))
 	if err != nil {
 		return fmt.Errorf("opening the repository: %w", err)
@@ -114,6 +117,9 @@ func run() error {
 	}
 	svc := core.NewService(repo)
 	svc.Jobs.Nix, svc.Jobs.Nixfmt = env("NIXMGR_NIX", "nix"), env("NIXMGR_NIXFMT", "nixfmt")
+	if err := svc.Jobs.PersistChecks(filepath.Join(data, "checks.json")); err != nil {
+		return err
+	}
 	if svc.Deploys, err = core.OpenDeployments(data, repo); err != nil {
 		return err
 	}

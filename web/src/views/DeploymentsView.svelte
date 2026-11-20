@@ -3,11 +3,12 @@
   import DeployBadge from '../components/deployments/DeployBadge.svelte'
   import DeploySetup from '../components/deployments/DeploySetup.svelte'
   import Rollout from '../components/deployments/Rollout.svelte'
-  import type { DeployState } from '../lib/api'
-  import { excerpt, rollingOut, short } from '../lib/deployments'
+  import { api, type DeployState, type MachineDeployment } from '../lib/api'
+  import { excerpt, forgetQuestion, rollingOut, short } from '../lib/deployments'
   import { deploys, loadDeployments, watchDeployments } from '../lib/deployments.svelte'
   import { link, machineLink } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
+  import { confirmBox, report } from '../lib/ui.svelte'
   import { ago } from '../lib/util'
 
   $effect(() => watchDeployments())
@@ -36,6 +37,15 @@
     refreshing = true
     await loadDeployments()
     refreshing = false
+  }
+  async function forget(m: MachineDeployment) {
+    if (!(await confirmBox({ title: 'Forget machine', message: forgetQuestion(m), ok: 'Forget', danger: true }))) return
+    try {
+      await api.forgetMachine(m.host)
+    } catch (e) {
+      report(e, `Cannot forget ${m.host}`)
+    }
+    await loadDeployments()
   }
 </script>
 
@@ -88,7 +98,7 @@
         <h2 id="machines-title">Machines</h2>
         <div class="table-wrap card">
           <table class="data">
-            <thead><tr><th>Machine</th><th>State</th><th>Runs</th><th>Deployed</th><th>Branch</th><th>Last report</th></tr></thead>
+            <thead><tr><th>Machine</th><th>State</th><th>Runs</th><th>Deployed</th><th>Branch</th><th>Last report</th><th><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {#each rows as m (m.host)}
                 <tr class:failed={!!m.failure}>
@@ -103,11 +113,16 @@
                   <td class="when">{#if m.deployedAt}<span title={new Date(m.deployedAt).toLocaleString()}>{ago(m.deployedAt)}</span>{:else}<span class="muted">—</span>{/if}</td>
                   <td class="mono branch">{m.branch}</td>
                   <td class="when muted">{m.lastSeen ? ago(m.lastSeen) : 'never'}</td>
+                  <td class="act">
+                    {#if m.reports.length}
+                      <button class="small forget" onclick={() => forget(m)} aria-label="Forget {m.host}" title="Delete its deployment reports, e.g. once it left the fleet">Forget</button>
+                    {/if}
+                  </td>
                 </tr>
                 {#if m.failure}
                   <tr class="err-row">
                     <td></td>
-                    <td colspan="5">
+                    <td colspan="6">
                       <div class="err-box">
                         <span class="err-title">{m.failure.phase === 'build' ? 'Build' : 'Switch'} of <span class="mono">{short(m.failure.commit)}</span> failed {ago(m.failure.at)}</span>
                         <pre>{excerpt(m.failure.error) || 'comin gave no error message'}</pre>
@@ -251,6 +266,19 @@
   .when,
   .branch {
     white-space: nowrap;
+  }
+  td.act {
+    text-align: right;
+  }
+  .forget {
+    color: var(--fg-muted);
+    background: none;
+    border-color: var(--line);
+  }
+  .forget:hover:not(:disabled) {
+    color: var(--red);
+    background: color-mix(in srgb, var(--red) 10%, transparent);
+    border-color: color-mix(in srgb, var(--red) 40%, transparent);
   }
   tr.failed td {
     border-bottom: 0;
