@@ -788,7 +788,8 @@ func (f *Forgejo) Hook(event, sig string, body []byte) (int, string) {
 
 func (f *Forgejo) sync() {
 	f.mu.Lock()
-	f.pending = false // a push arriving from now on gets its own fetch
+	f.pending = false       // a push arriving from now on gets its own fetch
+	todo := f.claimPushes() // and its own check: this fetch may not bring it
 	f.mu.Unlock()
 	msg, err := f.Repo.FetchForward(context.Background())
 	f.mu.Lock()
@@ -801,9 +802,7 @@ func (f *Forgejo) sync() {
 		}
 	}
 	f.mu.Unlock()
-	if f.Jobs != nil {
-		f.checkPushes(err)
-	}
+	f.checkPushes(todo, err)
 }
 
 // FetchForward fetches origin and fast-forwards the current branch when that

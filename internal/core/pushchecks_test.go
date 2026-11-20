@@ -430,3 +430,29 @@ func TestSetStatusToken(t *testing.T) {
 	err = f.SetStatusToken(ctx, "good-token", "")
 	isErr(t, err, ErrInvalid)
 }
+
+// A push announced while the fetch for an earlier one runs is left to the
+// next fetch, which brings it: both commits are checked.
+func TestPushDuringAFetchIsCheckedByTheNextOne(t *testing.T) {
+	s, f, fake := forgejoFleet(t)
+	clone := laptop(t, s)
+	// The fetch ends a second after the remote sent its refs, which marks that moment.
+	marker := filepath.Join(t.TempDir(), "sent")
+	slow := script(t, "slow-upload-pack", "#!/bin/sh\ngit-upload-pack \"$@\"\ntouch '"+marker+"'\nsleep 1\n")
+	gitOut(t, s.Repo.Dir, "config", "remote.origin.uploadpack", slow)
+
+	otherCommit(t, clone, "hosts/web", "web kernel=2\n")
+	first := gitOut(t, clone, "rev-parse", "HEAD")
+	deliver(t, f, "main", strings.Repeat("0", 40), first)
+	waitFor(t, "the fetch to have the refs", func() bool { _, err := os.Stat(marker); return err == nil })
+	otherCommit(t, clone, "hosts/db", "db kernel=2\n")
+	second := gitOut(t, clone, "rev-parse", "HEAD")
+	hookDelay = 2 * time.Second // its own fetch starts after the first one is done with its commits
+	deliver(t, f, "main", first, second)
+
+	for _, sha := range []string{first, second} {
+		if got := fake.final(t, sha); got[len(got)-1] != "success" {
+			t.Fatalf("statuses of %.7s: %v", sha, got)
+		}
+	}
+}

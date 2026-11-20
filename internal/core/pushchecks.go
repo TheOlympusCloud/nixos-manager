@@ -115,10 +115,9 @@ func (f *Forgejo) savePushed() {
 	}
 }
 
-// checkPushes checks every pushed commit that waits for it, after a fetch.
-// A commit the failed fetch did not bring waits for the next one.
-func (f *Forgejo) checkPushes(fetchErr error) {
-	f.mu.Lock()
+// claimPushes takes the pushed commits that wait for a check, before a fetch
+// that brings them; f.mu held.
+func (f *Forgejo) claimPushes() []pushedCommit {
 	var todo []pushedCommit
 	for sha, e := range f.pushed {
 		if !e.busy {
@@ -126,8 +125,13 @@ func (f *Forgejo) checkPushes(fetchErr error) {
 			todo = append(todo, pushedCommit{Commit: sha, Branch: e.branch})
 		}
 	}
-	f.mu.Unlock()
 	slices.SortFunc(todo, func(a, b pushedCommit) int { return strings.Compare(a.Commit, b.Commit) })
+	return todo
+}
+
+// checkPushes checks the commits claimPushes took, after the fetch. A commit
+// the failed fetch did not bring waits for the next one.
+func (f *Forgejo) checkPushes(todo []pushedCommit, fetchErr error) {
 	for _, p := range todo {
 		job, pass, err := f.Jobs.CheckCommit(context.Background(), p.Commit, p.Branch)
 		if fetchErr != nil && errors.Is(err, ErrNotFound) {
