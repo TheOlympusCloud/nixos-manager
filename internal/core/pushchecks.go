@@ -132,7 +132,9 @@ func (f *Forgejo) checkPushes(fetchErr error) {
 		job, pass, err := f.Jobs.CheckCommit(context.Background(), p.Commit, p.Branch)
 		if fetchErr != nil && errors.Is(err, ErrNotFound) {
 			f.mu.Lock()
-			f.pushed[p.Commit].busy = false
+			if e := f.pushed[p.Commit]; e != nil {
+				e.busy = false
+			}
 			f.mu.Unlock()
 			continue
 		}
@@ -181,8 +183,10 @@ func (f *Forgejo) report(sha string, job *Job, pass *CheckPass, err error) {
 			f.postStatus(ctx, sha, "pending", "Checking: nix flake check, then a build of every machine it changes")
 			<-job.Done()
 			info := job.Info(true)
-			if info.State == "passed" {
+			if info.State == "passed" && info.Summary != nil {
 				f.postStatus(ctx, sha, "success", passedText(info.Summary.Base, info.Summary.Built))
+			} else if info.State == "passed" {
+				f.postStatus(ctx, sha, "success", "Passed")
 			} else {
 				f.postStatus(ctx, sha, "failure", failedText(info))
 			}

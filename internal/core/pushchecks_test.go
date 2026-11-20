@@ -418,6 +418,10 @@ func TestSetStatusToken(t *testing.T) {
 		t.Fatalf("a refused token replaced the saved one: %+v", st)
 	}
 
+	ok(t, os.WriteFile(file, []byte("{broken"), 0o600)) // Settings still opens, to replace it
+	if st, err := f.State(ctx); err != nil || st.StatusToken {
+		t.Fatalf("state with an unreadable token file: %+v %v", st, err)
+	}
 	ok(t, f.SetStatusToken(ctx, "", ""))
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatalf("the token file stayed: %v", err)

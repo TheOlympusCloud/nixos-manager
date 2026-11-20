@@ -273,9 +273,9 @@ func (f *Forgejo) State(ctx context.Context) (ForgejoState, error) {
 	}
 	st.HookSecret, err = f.HookSecret()
 	st.LastDelivery = f.LastDelivery()
-	cfg, cerr := f.statusConfig()
+	cfg, _ := f.statusConfig() // an unreadable file reads as no token, so Settings can replace it
 	st.StatusToken, st.StatusConsole, st.StatusAPI, st.LastStatus = cfg.Token != "", cfg.Console, f.apiBase(ctx), f.LastStatus()
-	return st, cmp.Or(err, cerr)
+	return st, err
 }
 
 // ---- remote URLs ----------------------------------------------------------------
