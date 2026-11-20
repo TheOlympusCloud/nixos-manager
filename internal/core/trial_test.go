@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // trialService is buildService with what is pushed checked, and the working
@@ -278,4 +279,43 @@ func TestEndTrial(t *testing.T) {
 	}
 	_, err = s.EndTrial(ctx, "nope")
 	isErr(t, err, ErrNotFound)
+}
+
+// A request cancelled during the push (a closed tab, a cancelled MCP call)
+// cannot leave the trial half done: the push and the moves around it finish,
+// and when the remote refuses it, everything still goes back as it was.
+func TestTryOnFinishesWhenTheRequestIsCancelled(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		s := trialService(t)
+		marker := filepath.Join(t.TempDir(), "pushing")
+		code := map[bool]string{false: "0", true: "1"}[refuse]
+		hook := filepath.Join(s.Repo.Remote(context.Background()), "hooks", "pre-receive")
+		ok(t, os.WriteFile(hook, []byte("#!/bin/sh\ntouch '"+marker+"'\nsleep 1\nexit "+code+"\n"), 0o755))
+		stageChecked(t, s, "hosts/web", "web kernel=2\n")
+		staged := must[Status](t)(s.Status(context.Background())).StagedTree
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			for {
+				if _, err := os.Stat(marker); err == nil {
+					cancel()
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		tr, err := s.TryOn(ctx, "web", "try", false)
+		cancel()
+		st := must[Status](t)(s.Status(context.Background()))
+		if refuse {
+			if err == nil || branchOf(t, s) != "main" || st.StagedTree != staged || remoteRef(t, s, "testing-web") != "" ||
+				gitOut(t, s.Repo.Dir, "branch", "--list", "testing-web") != "" {
+				t.Fatalf("refused push: %v, on %s, staged %s (want %s)", err, branchOf(t, s), st.StagedTree, staged)
+			}
+			continue
+		}
+		if err != nil || branchOf(t, s) != "testing-web" || remoteRef(t, s, "testing-web") != tr.Commit || len(st.Files) != 0 {
+			t.Fatalf("cancelled push: %v, on %s, remote %q, trial %q, files %v", err, branchOf(t, s), remoteRef(t, s, "testing-web"), tr.Commit, st.Files)
+		}
+	}
 }

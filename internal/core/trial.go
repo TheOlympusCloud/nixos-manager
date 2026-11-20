@@ -108,6 +108,10 @@ func (s *Service) TryOn(ctx context.Context, host, message string, replace bool)
 		}
 	}
 
+	// From here on a cancelled request (a closed tab) must not stop halfway:
+	// the remote may take a push its client was killed in, and git refuses to
+	// run the undo at all. The push keeps its own time limit.
+	ctx = context.WithoutCancel(ctx)
 	// Move to the testing branch without touching the files: HEAD and the
 	// index stay, so going back is just pointing HEAD at the main branch again.
 	oldLocal, _ := r.git(ctx, "rev-parse", "--verify", "-q", "refs/heads/"+b.Testing)
