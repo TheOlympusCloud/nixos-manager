@@ -503,8 +503,13 @@ func TestNixTimeoutKillsItsChildren(t *testing.T) {
 	pid := filepath.Join(t.TempDir(), "pid")
 	js := &Jobs{Nix: script(t, "nix", "#!/bin/sh\nsleep 120 &\necho $! > '"+pid+"'\nwait\n")}
 	for name, run := range map[string]func(context.Context) error{
-		"step": func(ctx context.Context) error { return js.step(ctx, newJob("1", JobRequest{}), t.TempDir(), js.nixArgs("build")) },
-		"eval": func(ctx context.Context) error { var out any; return js.evalJSON(ctx, t.TempDir(), nil, "{ flakeRef }: 1", &out) },
+		"step": func(ctx context.Context) error {
+			return js.step(ctx, newJob("1", JobRequest{}), t.TempDir(), js.nixArgs("build"))
+		},
+		"eval": func(ctx context.Context) error {
+			var out any
+			return js.evalJSON(ctx, t.TempDir(), nil, "{ flakeRef }: 1", &out)
+		},
 	} {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		start := time.Now()
