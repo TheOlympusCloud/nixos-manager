@@ -56,7 +56,7 @@ const featureName = (key: string) => key.replace(/^[a-z]+\./, '')
 export function impactGroups(d: Impact): ImpactGroup[] {
   const items = (xs: string[] | undefined, kind: ImpactItem['kind'], name = (s: string) => s) => (xs ?? []).map((s) => ({ text: name(s), title: s, kind }))
   return [
-    { label: 'Updated', items: (d.versionsChanged ?? []).map((v) => ({ text: `${v.name} ${v.from} → ${v.to}`, kind: 'up' as const })) },
+    { label: 'Updated', items: [...(d.kernel ? [d.kernel] : []), ...(d.versionsChanged ?? [])].map((v) => ({ text: `${v.name} ${v.from} → ${v.to}`, kind: 'up' as const })) },
     {
       label: 'Settings',
       items: (d.settings ?? []).map((c) => ({ text: settingText(c), title: c.from === undefined ? 'Was not set here' : `Was ${nixValue(c.from)}`, kind: c.to === undefined ? ('del' as const) : ('up' as const) })),
@@ -75,7 +75,7 @@ function few(xs: string[], what: string, many = what + 's') {
   return xs.length <= 2 ? xs.join(' and ') : plural(xs.length, what, many)
 }
 
-/** One readable line per machine, e.g. "curl 8.16.0 → 8.17.0 and 2 more updated · jellyfin turned on". */
+/** One readable line per machine, e.g. "Reboot needed · kernel 6.12.1 → 6.12.2 · curl 8.16.0 → 8.17.0 and 2 more updated · jellyfin turned on". */
 export function impactLine(d: Impact): string {
   if (d.status === 'error') return 'Does not evaluate'
   if (d.status === 'unchanged') return 'No change'
@@ -86,6 +86,7 @@ export function impactLine(d: Impact): string {
     return ['New machine', pk && plural(pk, 'package'), ft && plural(ft, 'service or program', 'services and programs')].filter(Boolean).join(' · ')
   }
   const parts: string[] = []
+  if (d.kernel) parts.push(`kernel ${d.kernel.from} → ${d.kernel.to}`)
   const v = d.versionsChanged ?? []
   if (v.length) parts.push(`${v[0].name} ${v[0].from} → ${v[0].to}${v.length > 1 ? ` and ${v.length - 1} more updated` : ''}`)
   const st = d.settings ?? []
@@ -98,7 +99,11 @@ export function impactLine(d: Impact): string {
   if (d.usersRemoved?.length) parts.push(`${d.usersRemoved.length <= 2 ? 'user ' : ''}${few(d.usersRemoved, 'user')} removed`)
   if (d.portsAdded?.length) parts.push(`${d.portsAdded.length <= 2 ? 'port ' : ''}${few(d.portsAdded, 'port')} opened`)
   if (d.portsRemoved?.length) parts.push(`${d.portsRemoved.length <= 2 ? 'port ' : ''}${few(d.portsRemoved, 'port')} closed`)
-  return parts.join(' · ') || 'Changed'
+  // The system derivation moved, but in nothing listed: a unit, an /etc file, a sysctl…
+  if (!parts.length) parts.push(d.reboot ? 'other configuration' : 'Other configuration')
+  // First, so a long line never cuts it off.
+  if (d.reboot) parts.unshift('Reboot needed')
+  return parts.join(' · ')
 }
 
 /** Changed machines (new, changed, removed), the ones that do not evaluate, and the unchanged ones. */

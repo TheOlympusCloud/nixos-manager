@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/TheOlympusCloud/nixos-manager/templates"
 )
 
 // fleetService serves the fixture fleet through scripts/dev/fake-nix.
@@ -71,6 +73,9 @@ func TestModelOfAFleet(t *testing.T) {
 	}
 	if m.Hosts[2].ManagedFile != nil {
 		t.Fatal("pi does not load a managed file")
+	}
+	if !strings.HasSuffix(ws.Toplevel, "-nixos-system-workstation-26.05.drv") || ws.Boot == "" || m.Hosts[0].Boot != "" {
+		t.Fatalf("system derivation and boot: %q %q, homeserver (a container) %q", ws.Toplevel, ws.Boot, m.Hosts[0].Boot)
 	}
 	if ws.ManagedPackages["vscode"] != "vscode" || m.Hosts[2].ManagedPackages == nil {
 		t.Fatalf("managed package names %+v / %+v", ws.ManagedPackages, m.Hosts[2].ManagedPackages)
@@ -271,6 +276,80 @@ func TestHomeModelWithRealNix(t *testing.T) {
 	h := m.Homes[0]
 	if h.Error != "" || !slices.Contains(h.Packages, "hello") || !slices.Contains(h.Programs, "git") {
 		t.Fatalf("home: %+v", h)
+	}
+}
+
+// The model must tell any change of a machine's system, and which ones need a
+// reboot, from a real NixOS evaluation: a container has no kernel of its own,
+// a sysctl changes the system but not what it boots, kernel parameters do.
+func TestChangeDetectionWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	s := NewService(newRepo(t))
+	if _, err := s.Repo.Seed(templates.Fleet); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []MachineSpec{
+		{Name: "ct", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-lxc"},
+		{Name: "vm", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-vm"},
+	} {
+		must[MachineCreated](t)(s.CreateMachine(spec))
+	}
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "machines", true))
+	model := func(at string) *Model {
+		t.Helper()
+		_, j, err := s.Jobs.Model(ctx, at)
+		ok(t, err)
+		if j != nil {
+			select {
+			case <-j.Done():
+			case <-time.After(20 * time.Minute):
+				t.Fatal("the model did not finish")
+			}
+		}
+		m, _, err := s.Jobs.Model(ctx, at)
+		ok(t, err)
+		if m == nil || m.Error != "" || len(m.Hosts) != 3 {
+			t.Fatalf("model at %s: %+v", at, m)
+		}
+		for _, h := range m.Hosts {
+			if h.Error != "" || !strings.HasPrefix(h.Toplevel, "/nix/store/") || !strings.HasSuffix(h.Toplevel, ".drv") {
+				t.Fatalf("%s: toplevel %q, error %s", h.Name, h.Toplevel, h.Error)
+			}
+		}
+		return m
+	}
+	head := model("head")
+	for _, h := range head.Hosts {
+		if (h.Name == "ct") != (h.Boot == "") {
+			t.Fatalf("%s boots %q; only the container boots no kernel of its own", h.Name, h.Boot)
+		}
+	}
+	edit := func(line string) []HostDiff {
+		t.Helper()
+		def := fileText(t, s.Repo, "hosts/example/default.nix")
+		write(t, s.Repo, "hosts/example/default.nix", strings.Replace(def, "system.stateVersion", line+"\n  system.stateVersion", 1))
+		return DiffModels(head, model("working"))
+	}
+	byHost := func(ds []HostDiff) map[string]HostDiff {
+		out := map[string]HostDiff{}
+		for _, d := range ds {
+			out[d.Host] = d
+		}
+		return out
+	}
+	d := byHost(edit(`boot.kernel.sysctl."vm.swappiness" = 10;`))
+	if ex := d["example"]; ex.Status != "changed" || ex.Reboot || ex.PackagesAdded != nil || ex.FeaturesAdded != nil || ex.VersionsChanged != nil {
+		t.Fatalf("a sysctl must show as another change without a reboot: %+v", ex)
+	}
+	if d["ct"].Status != "unchanged" || d["vm"].Status != "unchanged" {
+		t.Fatalf("machines the edit does not touch: %+v %+v", d["ct"], d["vm"])
+	}
+	if ex := byHost(edit(`boot.kernelParams = [ "quiet" ];`))["example"]; ex.Status != "changed" || !ex.Reboot {
+		t.Fatalf("kernel parameters need a reboot: %+v", ex)
 	}
 }
 

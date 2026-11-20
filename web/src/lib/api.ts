@@ -96,6 +96,9 @@ export type HostDiff = {
   portsRemoved?: string[]
   /** Packages kept but at another version, e.g. after a nixpkgs update. */
   versionsChanged?: VersionChange[]
+  kernel?: VersionChange
+  /** The kernel, its modules, the initrd or the kernel parameters change: only a reboot applies them. */
+  reboot?: boolean
 }
 export type VersionChange = { name: string; from: string; to: string }
 /** A flake input added, removed or moved to another revision; compareUrl for GitHub inputs. */

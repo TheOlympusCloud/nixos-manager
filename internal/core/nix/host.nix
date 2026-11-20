@@ -121,6 +121,24 @@ in
   stateVersion = try config.system.stateVersion "";
   timeZone = try config.time.timeZone null;
   kernel = try config.boot.kernelPackages.kernel.version null;
+  # The whole system: a machine changes exactly when this does. Not in try: a
+  # system that does not evaluate (a failed assertion) cannot be deployed, and
+  # the machine shows why.
+  toplevel = config.system.build.toplevel.drvPath;
+  # What only a reboot applies, as toplevel links it: the kernel and its modules
+  # (a new nvidia driver needs a reboot too), the initrd and the kernel
+  # parameters. A container boots no kernel of its own. "or null": a NixOS
+  # release without one of them still shows the rest.
+  boot =
+    if config.boot.kernel.enable or (!config.boot.isContainer) then
+      builtins.toJSON [
+        config.boot.kernelPackages.kernel.drvPath
+        (config.system.modulesTree.drvPath or null)
+        (if config.boot.initrd.enable or true then config.system.build.initialRamdisk.drvPath or null else null)
+        config.boot.kernelParams
+      ]
+    else
+      "";
   managedFile = if managed == null then null else rel managed;
   inherit managedPackages;
   checks = {

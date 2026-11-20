@@ -316,7 +316,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		}
 		return core.Host{}, &core.Error{Kind: core.ErrNotFound, Msg: "no machine named " + in.Host}
 	})
-	tool(s, "model_diff", "What the uncommitted changes do to each machine: packages, services/programs, users and ports added or removed, compared with the last commit.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
+	tool(s, "model_diff", "What the uncommitted changes do to each machine, compared with the last commit: packages, services/programs, users and ports added or removed, package and kernel versions. status is changed whenever the machine's system derivation changes; changed with none of those lists means another setting (a unit, an /etc file, a sysctl...). reboot: the kernel, its modules, the initrd or the kernel parameters change, which only a reboot applies.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
 		head, err := ready(ctx, func() (*core.Model, *core.Job, error) { return svc.Jobs.Model(ctx, "head") })
 		if err != nil {
 			return nil, err

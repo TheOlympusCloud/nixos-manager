@@ -25,6 +25,15 @@ describe('impact', () => {
     expect(impactLine({ host: 'x', status: 'error', error: 'boom' })).toBe('Does not evaluate')
   })
 
+  it('names a change the lists do not show, and a reboot first so it is never cut off', () => {
+    expect(impactLine({ host: 'x', status: 'changed' })).toBe('Other configuration')
+    expect(impactLine({ host: 'x', status: 'changed', reboot: true })).toBe('Reboot needed · other configuration')
+    const kernel = { name: 'kernel', from: '6.12.1', to: '6.12.2' }
+    const k = { host: 'x', status: 'changed' as const, reboot: true, kernel, versionsChanged: [{ name: 'git', from: '1', to: '2' }] }
+    expect(impactLine(k)).toBe('Reboot needed · kernel 6.12.1 → 6.12.2 · git 1 → 2')
+    expect(impactGroups(k)[0].items.map((i) => i.text)).toEqual(['kernel 6.12.1 → 6.12.2', 'git 1 → 2'])
+  })
+
   it('groups the details and drops empty groups', () => {
     const g = impactGroups(changed)
     expect(g.map((x) => x.label)).toEqual(['Updated', 'Installed', 'Removed', 'Turned on', 'Ports'])

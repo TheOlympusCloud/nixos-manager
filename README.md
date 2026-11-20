@@ -44,6 +44,12 @@ An MCP server gives automation the same features.
 - **Changes in NixOS terms**: before committing, see per machine which
   packages, versions, services, users, ports and settings the working copy
   changes, and which inputs moved. History shows the same for every commit.
+  A machine counts as changed whenever its system derivation
+  (`system.build.toplevel`) does, so an edit outside those lists (a systemd
+  unit, an `/etc` file, a sysctl) shows as "Other configuration", and a new
+  kernel, kernel module, initrd or kernel parameter as "Reboot needed". A
+  machine whose system does not evaluate, a failed assertion for instance,
+  shows its error.
 - **Checks**: `nix flake check` plus a dry build of the chosen configurations,
   run on exactly the staged changes, with live output. A commit needs a passing
   check of the staged changes, and a push needs a passing check of the commit

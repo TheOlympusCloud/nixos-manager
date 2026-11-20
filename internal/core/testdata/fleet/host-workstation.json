@@ -6,6 +6,8 @@
  "stateVersion": "26.05",
  "timeZone": "Europe/Madrid",
  "kernel": "6.12.58",
+ "toplevel": "/nix/store/f8w2lc-nixos-system-workstation-26.05.drv",
+ "boot": "[\"/nix/store/0rgk-linux-6.12.58.drv\",\"/nix/store/3dkx-linux-6.12.58-modules.drv\",\"/nix/store/b5yh-initrd-linux-6.12.58.drv\",[\"quiet\"]]",
  "managedFile": "hosts/workstation/managed.json",
  "packages": [
   {
