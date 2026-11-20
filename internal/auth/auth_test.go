@@ -6,15 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func newAuth(t *testing.T, dir string) *Auth {
 	t.Helper()
-	h, err := HashPassword("correct horse")
+	h, err := bcrypt.GenerateFromPassword([]byte("correct horse"), bcrypt.MinCost) // fast: tests log in hundreds of times
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := New(h, filepath.Join(dir, "tokens.json"))
+	a, err := New(string(h), filepath.Join(dir, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,10 +34,10 @@ func TestNewRefusesEmptyOrBadHash(t *testing.T) {
 
 func TestLoginSessions(t *testing.T) {
 	a := newAuth(t, t.TempDir())
-	if _, err := a.Login("wrong"); !errors.Is(err, ErrBadPassword) {
+	if _, err := a.Login("wrong", "ip 192.0.2.1", false); !errors.Is(err, ErrBadPassword) {
 		t.Fatalf("wrong password: %v", err)
 	}
-	id, err := a.Login("correct horse")
+	id, err := a.Login("correct horse", "ip 192.0.2.1", false)
 	if err != nil {
 		t.Fatal(err)
 	}

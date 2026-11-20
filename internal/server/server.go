@@ -11,7 +11,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
 	"path"
 	"strconv"
 	"strings"
@@ -24,8 +26,9 @@ import (
 )
 
 const (
-	cookieName  = "nixmgr_session"
-	maxBodySize = 32 << 20
+	cookieName    = "nixmgr_session"
+	browserCookie = "nixmgr_browser" // marks a browser that logged in before, for the login limits
+	maxBodySize   = 32 << 20
 )
 
 type Server struct {
@@ -350,15 +353,52 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	id, err := s.Auth.Login(in.Password)
+	source, known := "ip "+clientIP(r), false
+	if c, err := r.Cookie(browserCookie); err == nil {
+		if id, ok := s.Auth.CheckKnownBrowser(c.Value); ok {
+			source, known = "browser "+id, true
+		}
+	}
+	id, err := s.Auth.Login(in.Password, source, known)
+	var limited *auth.LimitError
+	if errors.As(err, &limited) { // not logged: refusals cost nothing and would flood the journal
+		w.Header().Set("Retry-After", strconv.Itoa(int((limited.Wait+time.Second-1)/time.Second)))
+		writeError(w, http.StatusTooManyRequests, limited.Error())
+		return
+	}
 	if err != nil {
-		slog.Warn("failed login", "remote", r.RemoteAddr)
+		slog.Warn("failed login", "remote", r.RemoteAddr, "source", source)
 		writeError(w, http.StatusUnauthorized, "wrong password")
 		return
 	}
+	slog.Info("login", "session", auth.SessionLabel(id), "remote", r.RemoteAddr, "source", source)
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: id, Path: "/", HttpOnly: true, Secure: secure(r),
 		SameSite: http.SameSiteStrictMode, MaxAge: int(auth.SessionTTL / time.Second)})
+	http.SetCookie(w, &http.Cookie{Name: browserCookie, Value: s.Auth.KnownBrowser(), Path: "/api/login", HttpOnly: true,
+		Secure: secure(r), SameSite: http.SameSiteStrictMode, MaxAge: 400 * 24 * 3600})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// clientIP is the address the login limits count by: the peer, or behind a
+// proxy on this machine (tailscale serve, Caddy, nginx) the address the proxy
+// appended to X-Forwarded-For. IPv6 counts by /64, which one host can fill.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip, perr := netip.ParseAddr(host)
+	if err != nil || perr != nil {
+		return r.RemoteAddr
+	}
+	if xff := r.Header.Values("X-Forwarded-For"); ip.IsLoopback() && len(xff) > 0 {
+		last := xff[len(xff)-1]
+		if fwd, err := netip.ParseAddr(strings.TrimSpace(last[strings.LastIndex(last, ",")+1:])); err == nil {
+			ip = fwd
+		}
+	}
+	if ip = ip.Unmap(); ip.Is6() {
+		p, _ := ip.Prefix(64)
+		return p.String()
+	}
+	return ip.String()
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

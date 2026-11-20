@@ -461,6 +461,15 @@ clients cannot override. Writes and restores need the `base_hash` from
 
 Sessions last 7 days and are kept in memory, so a restart logs you out.
 
+Logins are limited before the password is checked: 10 attempts per 10
+minutes from one address, and 50 per 10 minutes from all addresses together.
+More get `429 Too Many Requests` with `Retry-After`; successful logins do not
+count. A browser that has logged in before keeps a cookie that gives it its own
+limit of 10, outside the shared one, so someone guessing from elsewhere cannot
+lock you out of a browser you already use. Behind a proxy on the same machine
+(`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
+to `X-Forwarded-For`. The counts are kept in memory.
+
 ## Visual editing on an existing repository
 
 The starter flake loads each machine's `managed.json`. In a repository you

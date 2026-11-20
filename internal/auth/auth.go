@@ -18,10 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const (
-	SessionTTL = 7 * 24 * time.Hour
-	failDelay  = time.Second
-)
+const SessionTTL = 7 * 24 * time.Hour
 
 var (
 	ErrBadPassword = errors.New("wrong password")
@@ -52,7 +49,11 @@ type Auth struct {
 	mu       sync.Mutex
 	sessions map[string]time.Time
 	tokens   []Token
-	fail     sync.Mutex // serialises failed logins to slow down guessing
+
+	limit    limiter
+	slots    chan struct{} // password checks in flight
+	slotWait time.Duration
+	check    func(hash, password []byte) error
 }
 
 // HashPassword returns the bcrypt hash New expects.
@@ -69,7 +70,9 @@ func New(passwordHash, tokensPath string) (*Auth, error) {
 	if _, err := bcrypt.Cost([]byte(passwordHash)); err != nil {
 		return nil, fmt.Errorf("the password hash is missing or not a bcrypt hash (create one with `nixos-manager hash-password`): %w", err)
 	}
-	a := &Auth{hash: []byte(passwordHash), path: tokensPath, sessions: map[string]time.Time{}}
+	a := &Auth{hash: []byte(passwordHash), path: tokensPath, sessions: map[string]time.Time{},
+		limit: limiter{now: time.Now, sources: map[string][]time.Time{}},
+		slots: make(chan struct{}, loginInFlight), slotWait: loginSlotWait, check: bcrypt.CompareHashAndPassword}
 	b, err := os.ReadFile(tokensPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return a, nil
@@ -83,14 +86,27 @@ func New(passwordHash, tokensPath string) (*Auth, error) {
 	return a, nil
 }
 
-// Login returns a new session id for the right password.
-func (a *Auth) Login(password string) (string, error) {
-	if bcrypt.CompareHashAndPassword(a.hash, []byte(password)) != nil {
-		a.fail.Lock()
-		time.Sleep(failDelay)
-		a.fail.Unlock()
+// Login returns a new session id for the right password. source names the
+// client for the attempt limits (an address, or a browser that logged in
+// before); known says it is such a browser, which the global limit spares.
+// Over a limit it returns a *LimitError without checking the password.
+func (a *Auth) Login(password, source string, known bool) (string, error) {
+	undo, wait := a.limit.reserve(source, known)
+	if undo == nil {
+		return "", &LimitError{Wait: wait}
+	}
+	select {
+	case a.slots <- struct{}{}:
+	case <-time.After(a.slotWait):
+		undo()
+		return "", &LimitError{Wait: time.Second}
+	}
+	err := a.check(a.hash, []byte(password))
+	<-a.slots
+	if err != nil {
 		return "", ErrBadPassword
 	}
+	undo()
 	id := rand.Text() + rand.Text()
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -102,6 +118,13 @@ func (a *Auth) Login(password string) (string, error) {
 	}
 	a.sessions[id] = now.Add(SessionTTL)
 	return id, nil
+}
+
+// SessionLabel is a short public name for a session, for logs and commit
+// trailers; the session id itself stays secret.
+func SessionLabel(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(h[:4])
 }
 
 func (a *Auth) Session(id string) bool {
