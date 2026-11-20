@@ -2,6 +2,7 @@
   import ForgejoPanel from '../components/ForgejoPanel.svelte'
   import Icon from '../components/Icon.svelte'
   import NotificationsPanel from '../components/NotificationsPanel.svelte'
+  import SecretsPanel from '../components/SecretsPanel.svelte'
   import TokensPanel from '../components/TokensPanel.svelte'
   import { app } from '../lib/state.svelte'
 
@@ -33,7 +34,7 @@
   <div class="page-inner">
     <div class="page-head">
       <h1>Settings</h1>
-      <span class="sub">The repository this console edits, notifications, API access, and shortcuts</span>
+      <span class="sub">The repository this console edits, notifications, secrets, API access, and shortcuts</span>
     </div>
 
     <div class="cols">
@@ -61,6 +62,8 @@
         <ForgejoPanel />
 
         <NotificationsPanel />
+
+        <SecretsPanel />
 
         <div class="card block"><TokensPanel /></div>
       </div>

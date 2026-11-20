@@ -4,7 +4,7 @@
   import { isRepoFile } from '../../lib/graph'
   import { groupLabel, groupOrder } from '../../lib/matrix'
   import { countUp, spotlight } from '../../lib/motion'
-  import { codeLink, machineLink } from '../../lib/router.svelte'
+  import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
   import DeploymentCard from '../deployments/DeploymentCard.svelte'
 
@@ -61,6 +61,25 @@
         <dd class="fs">{#each host.fileSystems as f (f.mountPoint)}<span><span class="mono">{f.mountPoint}</span> <span class="muted">{f.fsType}</span></span>{/each}</dd>
       </dl>
     </section>
+
+    {#if host.secrets}
+      <section class="section">
+        <h2>Secrets</h2>
+        {#if host.secrets.length}
+          <ul class="files">
+            {#each host.secrets as s (s.name)}
+              <li>
+                <span class="mono" title={s.name}>{s.path}</span>
+                <span class="muted small perm">{s.owner || 'root'} · {s.mode}</span>
+                {#if s.file && isRepoFile(s.file)}<a href={codeLink(s.file)} class="mono small from">{s.file}</a>{/if}
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="muted">None. A machine gets secrets once its SSH host key is in <a href={link('settings')}>Settings → Secrets</a>.</p>
+        {/if}
+      </section>
+    {/if}
 
     <section class="section">
       <h2>Configured by</h2>
@@ -167,6 +186,13 @@
   }
   .files a:hover {
     color: var(--accent);
+  }
+  .files .perm {
+    white-space: nowrap;
+  }
+  .files .from {
+    margin-left: auto;
+    color: var(--fg-muted);
   }
   .files :global(svg) {
     color: var(--fg-muted);

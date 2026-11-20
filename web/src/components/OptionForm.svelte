@@ -4,6 +4,7 @@
   import { fleet, healthy, hostByName, managedValue, setOption, unsetOption, useValues, valueOf } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
   import { controlFor, docsHTML, fillPath, optionSegments, parseNix, pathName, type Scalar } from '../lib/options'
+  import { forUsers, secretPath, takesSecretFile } from '../lib/secrets'
   import { go, machineLink } from '../lib/router.svelte'
   import { quietly, toast } from '../lib/ui.svelte'
   import { copyable, effective, sameValue, showValue } from '../lib/values'
@@ -125,9 +126,28 @@
   const value = $derived(control.kind === 'json' ? (problem ? undefined : JSON.parse(jsonText)) : draft)
   const changed = $derived(touched && JSON.stringify(value) !== JSON.stringify(current))
 
+  // An option that takes a file path is offered the machine's sops-nix secrets, at the path the machine finds them.
+  const secrets = $derived(pathReady && !inList && takesSecretFile(path, option.type) ? (hostByName(host)?.secrets ?? []) : [])
+  /** A secret picked for a user's password hash: sops-nix must decrypt it before users are made. */
+  let forUsersSecret = $state('')
+  function pickSecret(name: string) {
+    const s = secrets.find((x) => x.name === name)
+    if (!s) return
+    const users = forUsers(path)
+    edit(users ? secretPath(name, true) : s.path)
+    forUsersSecret = users ? name : ''
+  }
+
   async function save() {
     busy = true
-    if (await setOption(host, path, value)) touched = false
+    const n = forUsersSecret
+    const needed = n && value === secretPath(n, true) && secrets.find((s) => s.name === n)?.path !== value
+    if (!needed || (await setOption(host, ['sops', 'secrets', n, 'neededForUsers'], true, `Set ${n} to be decrypted before users are made on ${host}`))) {
+      if (await setOption(host, path, value)) {
+        touched = false
+        forUsersSecret = ''
+      }
+    }
     busy = false
   }
   async function reset() {
@@ -280,7 +300,13 @@
             oninput={(e) => edit(e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))} />
           {#if c.min !== undefined || c.max !== undefined}<span class="muted small">{c.min ?? '…'} to {c.max ?? '…'}</span>{/if}
         {:else if c.kind === 'text'}
-          <input class="mono" aria-label="Value of {option.name}" value={asText(draft)} spellcheck="false" oninput={(e) => edit(e.currentTarget.value)} />
+          <input class="mono" aria-label="Value of {option.name}" value={asText(draft)} spellcheck="false" oninput={(e) => ((forUsersSecret = ''), edit(e.currentTarget.value))} />
+          {#if secrets.length}
+            <select class="short" aria-label="Use a secret for {option.name}" value="" onchange={(e) => pickSecret(e.currentTarget.value)}>
+              <option value="">Use a secret…</option>
+              {#each secrets as s (s.name)}<option value={s.name}>{s.name}</option>{/each}
+            </select>
+          {/if}
         {:else if c.kind === 'select'}
           <select class="short" aria-label="Value of {option.name}" value={asText(draft)} onchange={(e) => edit(c.choices.find((x) => String(x) === e.currentTarget.value))}>
             {#if draft === undefined || draft === null}<option value="">Choose…</option>{/if}

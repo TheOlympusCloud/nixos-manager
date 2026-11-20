@@ -3,7 +3,7 @@
   import { installCommand, localOnly, onSharedToken, TOKEN_FILE, urlLine } from '../../lib/deployments'
   import { loadDeployments } from '../../lib/deployments.svelte'
   import { fleet } from '../../lib/fleet.svelte'
-  import { codeLink, machineLink } from '../../lib/router.svelte'
+  import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import { confirmBox, report } from '../../lib/ui.svelte'
   import { copyText } from '../../lib/util'
   import Icon from '../Icon.svelte'
@@ -132,8 +132,9 @@
         <p class="muted small">The machines show here once the fleet is evaluated.</p>
       {/if}
       <p class="muted small">
-        Logs in as root, and the token travels on stdin. With sudo instead, use your user and <span class="mono">sudo install</span> (sudo must not ask for a password). With sops-nix or agenix, set
-        <span class="mono">fleet.deployReport.tokenFile</span> to the secret's path instead of <span class="mono">{TOKEN_FILE}</span>.
+        Logs in as root, and the token travels on stdin. With sudo instead, use your user and <span class="mono">sudo install</span> (sudo must not ask for a password). Or, with no
+        SSH at all, store every machine's token as its secret in <a href={link('settings')}>Settings → Secrets</a> (the starter fleet's sops-nix setup uses it); with agenix or
+        your own sops-nix setup, set <span class="mono">fleet.deployReport.tokenFile</span> to the secret's path instead of <span class="mono">{TOKEN_FILE}</span>.
       </p>
       <div class="row-end"><button class="small ghost" onclick={regenerate}><Icon name="refresh" size={13} />New tokens for every machine</button></div>
       {#if ov?.sharedToken}
