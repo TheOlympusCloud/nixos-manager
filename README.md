@@ -662,7 +662,9 @@ risky changes (network, firewall, VPN, SSH) are best tried first.
 - During a trial: **End the trial** first, then reboot the machine (power
   cycle, or its console). The trial was applied with `test`, so it boots what
   `main` gave it; comin then finds the testing branch back on `main` and stays
-  there. Reboot before ending the trial and comin deploys the trial again.
+  there. Rebooting first also brings back `main`'s configuration, but comin
+  most likely does not notice (it skips a system it last deployed) and keeps
+  the trial as its last deployment until the trial ends.
 - On `main`: push the fix first (the revert above, or one from History), then
   get the machine back on the network from its console or the boot menu: pick
   the previous generation in the boot menu, or run `nixos-rebuild switch

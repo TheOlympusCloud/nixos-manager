@@ -249,7 +249,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	}) (core.Trial, error) {
 		return svc.TryOn(ctx, in.Host, in.Message, in.Replace)
 	})
-	tool(s, "end_trial", "Send a machine back to its main branch after a trial: its testing branch on the remote is pointed at the main branch's last commit, which comin then deploys there. The working copy's branches are left as they are.", func(ctx context.Context, in struct {
+	tool(s, "end_trial", "Send a machine back to its main branch after a trial: its testing branch on the remote is pointed at the main branch's last commit, which comin then deploys there. The working copy's branches are left as they are: when it is on the testing branch, switch_branch to the main branch afterwards, as a push from the testing branch would put the trial back.", func(ctx context.Context, in struct {
 		Host string `json:"host"`
 	}) (map[string]string, error) {
 		msg, err := svc.EndTrial(ctx, in.Host)
