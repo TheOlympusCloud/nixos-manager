@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/TheOlympusCloud/nixos-manager/internal/auth"
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
 )
 
@@ -35,11 +37,55 @@ type jobOut struct {
 	Output string `json:"output" jsonschema:"the end of the command output"`
 }
 
-func tool[In, Out any](s *mcp.Server, name, desc string, fn func(context.Context, In) (Out, error)) {
-	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc}, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
-		out, err := fn(ctx, in)
+// toolScope is the token scope each tool needs. A tool missing here needs full.
+var toolScope = map[string]auth.Scope{
+	"list_files": auth.ScopeRead, "read_file": auth.ScopeRead, "format_nix": auth.ScopeRead, "status": auth.ScopeRead,
+	"diff": auth.ScopeRead, "log": auth.ScopeRead, "show_commit": auth.ScopeRead, "read_file_at": auth.ScopeRead,
+	"list_branches": auth.ScopeRead, "fleet_overview": auth.ScopeRead, "fleet_insights": auth.ScopeRead,
+	"deployments": auth.ScopeRead, "compare_option": auth.ScopeRead, "host_details": auth.ScopeRead,
+	"model_diff": auth.ScopeRead, "search_packages": auth.ScopeRead, "search_options": auth.ScopeRead,
+	"list_targets": auth.ScopeRead,
+
+	"write_file": auth.ScopeEdit, "create_folder": auth.ScopeEdit, "move_path": auth.ScopeEdit, "delete_path": auth.ScopeEdit,
+	"stage": auth.ScopeEdit, "unstage": auth.ScopeEdit, "discard": auth.ScopeEdit, "commit": auth.ScopeEdit,
+	"restore_file": auth.ScopeEdit, "create_branch": auth.ScopeEdit, "switch_branch": auth.ScopeEdit,
+	"revert_commit": auth.ScopeEdit, "merge_branch": auth.ScopeEdit, "pull": auth.ScopeEdit,
+	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
+	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
+	"flake_lock": auth.ScopeEdit, "flake_update": auth.ScopeEdit,
+
+	"push": auth.ScopeFull,
+}
+
+// server is an MCP server with the tools one token scope allows.
+type server struct {
+	*mcp.Server
+	scope auth.Scope
+}
+
+// tool adds a tool when the scope allows it. Every call names the token, from
+// the request's token info, as the caller.
+func tool[In, Out any](s server, name, desc string, fn func(context.Context, In) (Out, error)) {
+	need, ok := toolScope[name]
+	if !ok {
+		need = auth.ScopeFull
+	}
+	if !s.scope.Allows(need) {
+		return
+	}
+	mcp.AddTool(s.Server, &mcp.Tool{Name: name, Description: desc}, func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+		c := core.Caller{}
+		if req != nil && req.Extra != nil && req.Extra.TokenInfo != nil {
+			c.Via, _ = req.Extra.TokenInfo.Extra["via"].(string)
+		}
+		out, err := fn(core.WithCaller(ctx, c), in)
 		return nil, out, err
 	})
+}
+
+var scopeNote = map[auth.Scope]string{
+	auth.ScopeRead: "\nThis token is read-only: it can look at everything but change nothing.",
+	auth.ScopeEdit: "\nThis token cannot push: its commits stay on the server until a person or a token with full access pushes them.",
 }
 
 // waitJob waits for a job to finish (or the call to be cancelled) and returns its output tail.
@@ -70,9 +116,9 @@ func ready[T any](ctx context.Context, f func() (T, *core.Job, error)) (T, error
 	}
 }
 
-// New builds the MCP server. Every tool calls the shared service.
-func New(svc *core.Service, version string) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "nixos-manager", Version: version}, &mcp.ServerOptions{Instructions: instructions})
+// New builds the MCP server for a token scope. Every tool calls the shared service.
+func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
+	s := server{mcp.NewServer(&mcp.Implementation{Name: "nixos-manager", Version: version}, &mcp.ServerOptions{Instructions: instructions + scopeNote[scope]}), scope}
 
 	tool(s, "list_files", "List every file and folder in the working copy.", func(ctx context.Context, _ struct{}) (map[string][]core.Entry, error) {
 		e, err := svc.Tree()
@@ -355,13 +401,22 @@ func New(svc *core.Service, version string) *mcp.Server {
 		}
 		return waitJob(ctx, j), nil
 	})
-	return s
+	return s.Server
 }
 
-// Handler serves the server over Streamable HTTP. Callers must authenticate
-// requests first; DNS-rebinding protection is off because a reverse proxy
-// (e.g. tailscale serve) forwards from localhost and the bearer token already
-// blocks browsers.
-func Handler(s *mcp.Server) http.Handler {
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
+// Handler serves MCP over Streamable HTTP, with the tools of the request
+// token's scope. Callers must check the token first (mcpauth.RequireBearerToken);
+// DNS-rebinding protection is off because a reverse proxy (e.g. tailscale
+// serve) forwards from localhost and the bearer token already blocks browsers.
+func Handler(svc *core.Service, version string) http.Handler {
+	servers := map[string]*mcp.Server{}
+	for _, sc := range []auth.Scope{auth.ScopeRead, auth.ScopeEdit, auth.ScopeFull} {
+		servers[string(sc)] = New(svc, version, sc)
+	}
+	return mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		if ti := mcpauth.TokenInfoFromContext(r.Context()); ti != nil && len(ti.Scopes) == 1 {
+			return servers[ti.Scopes[0]]
+		}
+		return nil // no token: refused
+	}, &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
 }

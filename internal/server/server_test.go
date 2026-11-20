@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/TheOlympusCloud/nixos-manager/internal/auth"
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
@@ -71,6 +72,7 @@ type env struct {
 	client *http.Client
 	auth   *auth.Auth
 	svc    *core.Service
+	s      *Server
 }
 
 func newEnv(t *testing.T) *env {
@@ -83,18 +85,18 @@ func newEnv(t *testing.T) *env {
 	nix := filepath.Join(t.TempDir(), "nix")
 	os.WriteFile(nix, []byte("#!/bin/sh\necho \"nix $*\"\n"), 0o755)
 	svc.Jobs.Nix = nix
-	hash, _ := auth.HashPassword("pw")
-	a, err := auth.New(hash, filepath.Join(t.TempDir(), "tokens.json"))
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost) // tests log in often; -race slows bcrypt a lot
+	a, err := auth.New(string(hash), filepath.Join(t.TempDir(), "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	exe, _ := os.Executable()
-	s := &Server{Svc: svc, Auth: a, MCP: mcpserver.Handler(mcpserver.New(svc, "test")), Nixd: []string{exe},
+	s := &Server{Svc: svc, Auth: a, MCP: mcpserver.Handler(svc, "test"), Nixd: []string{exe},
 		UI: fstest.MapFS{"index.html": {Data: []byte("<!doctype html>app")}, "assets/app.js": {Data: []byte("js")}}}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
-	return &env{srv: srv, client: &http.Client{Jar: jar}, auth: a, svc: svc}
+	return &env{srv: srv, client: &http.Client{Jar: jar}, auth: a, svc: svc, s: s}
 }
 
 // do sends a request; a non-nil body is sent as JSON. It decodes JSON replies into out.
@@ -246,7 +248,7 @@ func TestTokensAndMCPOverHTTP(t *testing.T) {
 	e := newEnv(t)
 	e.login(t)
 	var tok struct{ ID, Token string }
-	if code := e.do(t, "POST", "/api/tokens", map[string]string{"name": "argus"}, &tok); code != 200 || tok.Token == "" {
+	if code := e.do(t, "POST", "/api/tokens", map[string]string{"name": "argus", "scope": "full"}, &tok); code != 200 || tok.Token == "" {
 		t.Fatalf("create token: %d", code)
 	}
 
@@ -266,9 +268,20 @@ func TestTokensAndMCPOverHTTP(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("write over MCP: %v %+v", err, res)
 	}
-	cs.Close()
 	if _, _, err := e.svc.Read("a.nix"); err != nil {
 		t.Fatal("MCP write not visible to the service")
+	}
+	for _, step := range []struct {
+		tool string
+		args map[string]any
+	}{{"stage", nil}, {"run_check", nil}, {"commit", map[string]any{"message": "feat: a"}}} {
+		if res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: step.tool, Arguments: step.args}); err != nil || res.IsError {
+			t.Fatalf("%s over MCP: %v %+v", step.tool, err, res)
+		}
+	}
+	cs.Close()
+	if via := lastVia(t, e.svc.Repo.Dir); via != "token argus ("+tok.ID+")" {
+		t.Fatalf("MCP commit Via %q", via)
 	}
 
 	if code := e.do(t, "DELETE", "/api/tokens/"+tok.ID, struct{}{}, nil); code != 204 {

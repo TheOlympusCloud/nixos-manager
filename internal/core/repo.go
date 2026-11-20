@@ -33,6 +33,7 @@ var (
 	ErrNothingStaged = errors.New("nothing is staged")
 	ErrNotChecked    = errors.New("not checked")
 	ErrSyntax        = errors.New("syntax error")
+	ErrForbidden     = errors.New("forbidden")
 )
 
 // Error is a user-facing message tagged with one of the Err* kinds above.
@@ -611,7 +612,20 @@ func (r *Repo) commit(ctx context.Context, message string) (string, error) {
 	if _, err := r.git(ctx, "diff", "--cached", "--quiet"); err == nil {
 		return "", errorf(ErrNothingStaged, "nothing is staged to commit")
 	}
-	if _, _, err := r.gitRun(ctx, nil, []byte(message), "commit", "-q", "-F", "-"); err != nil {
+	args := []string{"commit", "-q", "-F", "-"}
+	if c, ok := callerOf(ctx); ok && c.Via != "" {
+		trailers, _, err := r.gitRun(ctx, nil, []byte(message), "interpret-trailers", "--parse")
+		if err != nil {
+			return "", err
+		}
+		for line := range strings.Lines(strings.ToLower(trailers)) {
+			if strings.HasPrefix(line, "via:") {
+				return "", errorf(ErrInvalid, "the Via trailer is added by nixos-manager; remove it from the message")
+			}
+		}
+		args = append(args, "--trailer", "Via: "+c.Via)
+	}
+	if _, _, err := r.gitRun(ctx, nil, []byte(message), args...); err != nil {
 		return "", err
 	}
 	sha, err := r.git(ctx, "rev-parse", "HEAD")

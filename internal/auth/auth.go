@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -25,12 +26,30 @@ var (
 	ErrNoToken     = errors.New("no such token")
 )
 
+// Scope is what a token may do; each scope includes the ones before it.
+type Scope string
+
+const (
+	ScopeRead Scope = "read" // look at the repository, the fleet, checks and deployments
+	ScopeEdit Scope = "edit" // also change files, check, commit, branch and pull; never push
+	ScopeFull Scope = "full" // also push, which deploys
+)
+
+var scopeRank = map[Scope]int{ScopeRead: 1, ScopeEdit: 2, ScopeFull: 3}
+
+// Allows says whether a token of scope s may do what needs scope need.
+func (s Scope) Allows(need Scope) bool {
+	return scopeRank[s] > 0 && scopeRank[need] > 0 && scopeRank[s] >= scopeRank[need]
+}
+
 // Token is an agent credential. Only the SHA-256 of the secret is kept.
 type Token struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
 	Hash     string    `json:"hash"`
+	Scope    Scope     `json:"scope"`
 	Created  time.Time `json:"created"`
+	Expires  time.Time `json:"expires,omitzero"`
 	LastUsed time.Time `json:"last_used,omitzero"`
 }
 
@@ -38,8 +57,21 @@ type Token struct {
 type TokenInfo struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
+	Scope    Scope     `json:"scope"`
 	Created  time.Time `json:"created"`
+	Expires  time.Time `json:"expires,omitzero"`
 	LastUsed time.Time `json:"last_used,omitzero"`
+}
+
+// Via names the token in the Via trailer of the commits it makes.
+func (t TokenInfo) Via() string {
+	name := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, t.Name)
+	return fmt.Sprintf("token %s (%s)", name, t.ID)
 }
 
 type Auth struct {
@@ -82,6 +114,11 @@ func New(passwordHash, tokensPath string) (*Auth, error) {
 	}
 	if err := json.Unmarshal(b, &a.tokens); err != nil {
 		return nil, fmt.Errorf("reading %s: %w", tokensPath, err)
+	}
+	for i := range a.tokens {
+		if a.tokens[i].Scope == "" { // made before scopes existed, when every token could do everything
+			a.tokens[i].Scope = ScopeFull
+		}
 	}
 	return a, nil
 }
@@ -145,14 +182,22 @@ func hashToken(secret string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CreateToken returns the new token and its secret, which is never shown again.
-func (a *Auth) CreateToken(name string) (TokenInfo, string, error) {
+// CreateToken returns the new token and its secret, which is never shown
+// again. A zero expires means the token does not expire.
+func (a *Auth) CreateToken(name string, scope Scope, expires time.Time) (TokenInfo, string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 64 {
-		return TokenInfo{}, "", errors.New("a token needs a name of 1 to 64 characters")
+	if name == "" || len(name) > 64 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return TokenInfo{}, "", errors.New("a token needs a name of 1 to 64 characters, without line breaks or tabs")
+	}
+	if scopeRank[scope] == 0 {
+		return TokenInfo{}, "", errors.New("a token's scope is read, edit or full")
+	}
+	if !expires.IsZero() && !expires.After(time.Now()) {
+		return TokenInfo{}, "", errors.New("the expiry date must be in the future")
 	}
 	secret := "nxm_" + rand.Text() + rand.Text()
-	t := Token{ID: rand.Text()[:12], Name: name, Hash: hashToken(secret), Created: time.Now().UTC().Truncate(time.Second)}
+	t := Token{ID: rand.Text()[:12], Name: name, Hash: hashToken(secret), Scope: scope,
+		Created: time.Now().UTC().Truncate(time.Second), Expires: expires.UTC().Truncate(time.Second)}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.tokens = append(a.tokens, t)
@@ -164,7 +209,7 @@ func (a *Auth) CreateToken(name string) (TokenInfo, string, error) {
 }
 
 func info(t Token) TokenInfo {
-	return TokenInfo{ID: t.ID, Name: t.Name, Created: t.Created, LastUsed: t.LastUsed}
+	return TokenInfo{ID: t.ID, Name: t.Name, Scope: t.Scope, Created: t.Created, Expires: t.Expires, LastUsed: t.LastUsed}
 }
 
 func (a *Auth) Tokens() []TokenInfo {
@@ -193,7 +238,8 @@ func (a *Auth) RevokeToken(id string) error {
 	return ErrNoToken
 }
 
-// VerifyToken checks a bearer secret and records when it was last used.
+// VerifyToken checks a bearer secret, refuses an expired token, and records
+// when it was last used.
 func (a *Auth) VerifyToken(secret string) (TokenInfo, bool) {
 	h := hashToken(secret)
 	a.mu.Lock()
@@ -201,6 +247,9 @@ func (a *Auth) VerifyToken(secret string) (TokenInfo, bool) {
 	for i := range a.tokens {
 		t := &a.tokens[i]
 		if subtle.ConstantTimeCompare([]byte(t.Hash), []byte(h)) == 1 {
+			if !t.Expires.IsZero() && !time.Now().Before(t.Expires) {
+				return TokenInfo{}, false
+			}
 			if time.Since(t.LastUsed) > time.Minute {
 				t.LastUsed = time.Now().UTC().Truncate(time.Second)
 				a.save() // best effort: last_used is informational

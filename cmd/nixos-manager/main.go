@@ -116,7 +116,7 @@ func run() error {
 
 	s := &server.Server{
 		Svc: svc, Auth: a, UI: web.UI,
-		MCP:  mcpserver.Handler(mcpserver.New(svc, version)),
+		MCP:  mcpserver.Handler(svc, version),
 		Nixd: strings.Fields(env("NIXMGR_NIXD", "nixd")),
 
 		Forgejo: &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE")},

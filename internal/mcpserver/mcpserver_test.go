@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/TheOlympusCloud/nixos-manager/internal/auth"
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
 )
 
@@ -33,7 +34,7 @@ func session(t *testing.T) (*mcp.ClientSession, *core.Service) {
 
 	ctx := context.Background()
 	ct, st := mcp.NewInMemoryTransports()
-	if _, err := New(svc, "test").Connect(ctx, st, nil); err != nil {
+	if _, err := New(svc, "test", auth.ScopeFull).Connect(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
@@ -246,5 +247,26 @@ func TestCreateMachinePlatform(t *testing.T) {
 	}
 	if r := call(t, cs, "create_machine", map[string]any{"name": "x", "system": "x86_64-linux", "role": "minimal", "platform": "xen"}, nil); !r.IsError {
 		t.Fatal("an unknown platform was accepted")
+	}
+}
+
+// Every tool has a deliberate scope, and the table names no tool that is gone.
+func TestEveryToolHasAScope(t *testing.T) {
+	cs, _ := session(t)
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, tl := range res.Tools {
+		seen[tl.Name] = true
+		if _, ok := toolScope[tl.Name]; !ok {
+			t.Errorf("%s has no scope", tl.Name)
+		}
+	}
+	for name := range toolScope {
+		if !seen[name] {
+			t.Errorf("toolScope names %s, which does not exist", name)
+		}
 	}
 }
