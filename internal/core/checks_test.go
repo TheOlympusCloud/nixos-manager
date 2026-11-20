@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/TheOlympusCloud/nixos-manager/templates"
 )
 
 // buildNix plays nix for checks that build. Every file hosts/<name> of the
@@ -342,4 +345,72 @@ func TestParseDryRun(t *testing.T) {
 	if got := describeDryRun(&CheckSummary{ToBuild: 1}); got != "Nix builds 1 derivation." {
 		t.Errorf("one build: %q", got)
 	}
+}
+
+// With real Nix, on the starter fleet plus a container: a check builds the one
+// machine an edit changes and keeps its system from the garbage collector, and
+// a system that evaluates but does not build fails the check and the push.
+func TestCheckBuildsTheChangedMachineWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	s := NewService(newRepo(t))
+	s.Jobs.GCRoots = filepath.Join(t.TempDir(), "gcroots")
+	if _, err := s.Repo.Seed(templates.Fleet); err != nil {
+		t.Fatal(err)
+	}
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "ct", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-lxc"}))
+	finish := func(j *Job) JobInfo {
+		t.Helper()
+		select {
+		case <-j.Done():
+		case <-time.After(40 * time.Minute):
+			t.Fatal("the job did not finish")
+		}
+		return j.Info(true)
+	}
+	if info := finish(must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "machines", true))
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	gitOut(t, s.Repo.Dir, "init", "-q", "--bare", "-b", "main", bare)
+	gitOut(t, s.Repo.Dir, "remote", "add", "origin", bare)
+	must[string](t)(s.Push(ctx, true))
+
+	def := fileText(t, s.Repo, "hosts/example/default.nix")
+	edit := func(line string) JobInfo {
+		t.Helper()
+		write(t, s.Repo, "hosts/example/default.nix",
+			strings.Replace(strings.Replace(def, "{ ... }:", "{ config, ... }:", 1), "system.stateVersion", line+"\n  system.stateVersion", 1))
+		ok(t, s.Stage(ctx, nil))
+		return finish(must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"})))
+	}
+
+	info := edit(`boot.kernel.sysctl."vm.swappiness" = 10;`)
+	if info.State != "passed" || !slices.Equal(info.Summary.Built, []string{"example"}) || !slices.Equal(info.Summary.Changed, []string{"example"}) {
+		t.Fatalf("check %s %+v:\n%s", info.State, info.Summary, tail(info.Output, 60))
+	}
+	root, err := os.Readlink(filepath.Join(s.Jobs.GCRoots, "example"))
+	if err != nil || !strings.Contains(root, "-nixos-system-example-") {
+		t.Fatalf("GC root of example: %q %v", root, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "activate")); err != nil {
+		t.Fatalf("the built system has no activate script: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(s.Jobs.GCRoots, "ct")); !os.IsNotExist(err) {
+		t.Fatalf("ct does not change but was built: %v", err)
+	}
+	must[string](t)(s.Commit(ctx, "example: swappiness", false))
+	must[string](t)(s.Push(ctx, false))
+
+	info = edit(`environment.etc.nixmgr-broken.source = derivation { name = "nixmgr-broken"; system = config.nixpkgs.hostPlatform.system; builder = "/bin/sh"; args = [ "-c" "exit 1" ]; };`)
+	if info.State != "failed" || !slices.Equal(info.Summary.Failed, []string{"example"}) || !strings.Contains(info.Output, "nixmgr-broken") {
+		t.Fatalf("a system that does not build: check %s %+v:\n%s", info.State, info.Summary, tail(info.Output, 60))
+	}
+	must[string](t)(s.Commit(ctx, "example: broken", true))
+	_, err = s.Push(ctx, false)
+	isErr(t, err, ErrNotChecked)
 }
