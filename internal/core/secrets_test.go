@@ -256,18 +256,19 @@ func TestSecretsRemoveMachine(t *testing.T) {
 	}
 }
 
-// A file encrypted for other keys than the machines' (a key added by hand, a
-// .sops.yaml edited) shows as stale until Re-encrypt; one this server cannot
-// open is never overwritten.
+// A file encrypted for other keys than the approved ones (one restored by
+// hand, a .sops.yaml or .pub edited) shows as stale until Re-encrypt; one this
+// server cannot open is never overwritten.
 func TestSecretsStaleAndLocked(t *testing.T) {
 	s, _ := newSecrets(t)
 	ctx := context.Background()
+	ok(t, s.Set(ctx, "", "wifi", "w"))
+	before, _, _ := s.Repo.Read("secrets/common.json") // for the server alone
 	webPub, _ := fakesops.HostKey(t)
 	must[SecretMachine](t)(s.SetMachineKey(ctx, "web", webPub))
-	ok(t, s.Set(ctx, "", "wifi", "w"))
-	// A key added by hand, as if pi's .pub came in a pull: common.json lacks it.
-	piPub, _ := fakesops.HostKey(t)
-	write(t, s.Repo, "secrets/hosts/pi.pub", piPub+"\n")
+	write(t, s.Repo, "secrets/common.json", before)
+	write(t, s.Repo, ".sops.yaml", "creation_rules: []\n")
+	ok(t, s.Repo.Delete("secrets/hosts/web.pub"))
 	st := must[SecretsStatus](t)(s.Status(ctx))
 	if !st.Stale || !st.Files[0].Stale {
 		t.Fatalf("not stale: %+v", st)
@@ -275,6 +276,9 @@ func TestSecretsStaleAndLocked(t *testing.T) {
 	ok(t, s.Reencrypt(ctx))
 	if st := must[SecretsStatus](t)(s.Status(ctx)); st.Stale {
 		t.Fatalf("still stale: %+v", st)
+	}
+	if got, _, _ := s.Repo.Read("secrets/hosts/web.pub"); got != webPub+"\n" {
+		t.Fatalf("web.pub not written back: %q", got)
 	}
 
 	// Encrypted by another server's key only.
@@ -298,11 +302,67 @@ func TestSecretsStaleAndLocked(t *testing.T) {
 	if st.Files[0].Error == "" {
 		t.Fatalf("no error for a broken file: %+v", st.Files)
 	}
-	write(t, s.Repo, "secrets/hosts/pi.pub", "nonsense\n")
-	if st := must[SecretsStatus](t)(s.Status(ctx)); st.Machines[0].Error == "" {
-		t.Fatalf("no error for a broken key: %+v", st.Machines)
+}
+
+// Only keys approved through SetMachineKey are recipients. A key someone
+// writes into the working copy (an edit, a pull) is only proposed: neither
+// Re-encrypt nor another machine's key change encrypts for it, and a .pub
+// changed for an approved machine does not change whom its secrets are for.
+func TestSecretsOnlyApprovedKeysAreRecipients(t *testing.T) {
+	s, tools := newSecrets(t)
+	ctx := context.Background()
+	webPub, webPriv := fakesops.HostKey(t)
+	must[SecretMachine](t)(s.SetMachineKey(ctx, "web", webPub))
+	ok(t, s.Set(ctx, "", "wifi", "w"))
+	ok(t, s.Set(ctx, "web", "api", "a"))
+
+	evilPub, evilPriv := fakesops.HostKey(t)
+	evil := asMachine(s, fakesops.MachineIdentity(t, tools, evilPriv))
+	write(t, s.Repo, "secrets/hosts/evil.pub", evilPub+"\n")
+	write(t, s.Repo, "secrets/hosts/web.pub", evilPub+"\n")
+	write(t, s.Repo, "secrets/hosts/bad.pub", "nonsense\n")
+	st := must[SecretsStatus](t)(s.Status(ctx))
+	names := []string{}
+	for _, m := range st.Proposed {
+		names = append(names, m.Name)
 	}
-	isErr(t, s.Set(ctx, "web", "a", "b"), ErrInvalid) // until the broken key is fixed or removed
+	if len(st.Machines) != 1 || st.Machines[0].Key != webPub || !slices.Equal(names, []string{"bad", "evil", "web"}) || st.Proposed[0].Error == "" || !st.Stale {
+		t.Fatalf("%+v", st)
+	}
+	ok(t, s.Reencrypt(ctx))
+	piPub, _ := fakesops.HostKey(t)
+	must[SecretMachine](t)(s.SetMachineKey(ctx, "pi", piPub))
+	ok(t, s.Set(ctx, "", "token", "t"))
+	for _, p := range []string{"secrets/common.json", "secrets/hosts/web.json"} {
+		if _, opened := canOpen(t, evil, p, "wifi"); opened {
+			t.Fatalf("a key written into the working copy opens %s", p)
+		}
+	}
+	web := asMachine(s, fakesops.MachineIdentity(t, tools, webPriv))
+	if v, opened := canOpen(t, web, "secrets/hosts/web.json", "api"); !opened || v != "a" {
+		t.Fatal("web lost its own secrets")
+	}
+	if got, _, _ := s.Repo.Read("secrets/hosts/web.pub"); got != webPub+"\n" {
+		t.Fatalf("web.pub not written back: %q", got)
+	}
+	if conf, _, _ := s.Repo.Read(".sops.yaml"); strings.Contains(conf, "evil") {
+		t.Fatalf(".sops.yaml names an unapproved key:\n%s", conf)
+	}
+
+	// Approving it (a person, in Settings) makes it a recipient; the approval is kept outside the working copy.
+	must[SecretMachine](t)(s.SetMachineKey(ctx, "evil", evilPub))
+	if _, opened := canOpen(t, evil, "secrets/common.json", "wifi"); !opened {
+		t.Fatal("an approved key cannot open common.json")
+	}
+	fi := must[os.FileInfo](t)(os.Stat(s.TrustFile))
+	if fi.Mode().Perm() != 0o600 || strings.HasPrefix(s.TrustFile, s.Repo.Dir) {
+		t.Fatalf("trust file %s mode %v", s.TrustFile, fi.Mode())
+	}
+	again := OpenSecrets(filepath.Dir(s.TrustFile), s.Repo)
+	again.Sops, again.AgeKeygen, again.SSHToAge = s.Sops, s.AgeKeygen, s.SSHToAge
+	if st := must[SecretsStatus](t)(again.Status(ctx)); len(st.Machines) != 3 {
+		t.Fatalf("approvals not kept: %+v", st.Machines)
+	}
 }
 
 // The setup step stores each machine's own report token as its secret.

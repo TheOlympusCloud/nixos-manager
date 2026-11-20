@@ -329,7 +329,7 @@ export const api = {
   forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
 
   secrets: () => get<SecretsStatus>('/api/secrets'),
-  /** Adds or replaces a machine's SSH host key (the .pub file, or an ssh-keyscan line). */
+  /** Approves a machine's SSH host key, new or replacing its last one (the .pub file, or an ssh-keyscan line); needs full access. */
   setMachineKey: (host: string, key: string) => request<SecretMachine>('PUT', `/api/secrets/machines/${encodeURIComponent(host)}`, { key }),
   /** Removes a machine's key and its own secrets; the shared ones are encrypted again without it. */
   removeMachineKey: (host: string) => request<void>('DELETE', `/api/secrets/machines/${encodeURIComponent(host)}`, {}),
@@ -353,7 +353,10 @@ export type SecretsStatus = {
   /** This server's age key (public half), and where its private half is. */
   recipient: string
   keyFile: string
+  /** Machines with an approved key: only these can decrypt. */
   machines: SecretMachine[]
+  /** Keys in secrets/hosts/*.pub not approved here (a pull, an edit): nothing is encrypted for them. */
+  proposed: SecretMachine[]
   /** secrets/common.json first, then each machine's file. */
   files: SecretFile[]
   /** A file or .sops.yaml is not encrypted for exactly the machines' keys: re-encrypt. */

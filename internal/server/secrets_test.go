@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -99,6 +100,8 @@ func TestSecretsFollowTheTokenScope(t *testing.T) {
 		{read, "GET", "/api/secrets", nil, 200},
 		{read, "PUT", "/api/secrets", set, 403},
 		{read, "PUT", "/api/secrets/machines/pi", map[string]string{"key": pub}, 403},
+		{edit, "PUT", "/api/secrets/machines/pi", map[string]string{"key": pub}, 403},
+		{edit, "DELETE", "/api/secrets/machines/web", struct{}{}, 403},
 		{edit, "PUT", "/api/secrets", set, 204},
 		{read, "POST", "/api/secrets/reveal", reveal, 403},
 		{edit, "POST", "/api/secrets/reveal", reveal, 403},
@@ -106,10 +109,39 @@ func TestSecretsFollowTheTokenScope(t *testing.T) {
 		{full, "POST", "/api/secrets/report-tokens", struct{}{}, 403},
 		{read, "POST", "/api/secrets/delete", reveal, 403},
 		{edit, "POST", "/api/secrets/delete", reveal, 204},
+		{full, "PUT", "/api/secrets/machines/pi", map[string]string{"key": pub}, 200},
 	} {
 		if code := e.bearer(t, c.secret, c.method, c.path, c.body, nil); code != c.want {
 			t.Errorf("%s %s: %d, want %d", c.method, c.path, code, c.want)
 		}
+	}
+
+	// An edit token that writes its own key into the working copy and asks for
+	// a re-encryption gets nothing encrypted for it.
+	if code := e.bearer(t, edit, "PUT", "/api/secrets", set, nil); code != 204 {
+		t.Fatalf("set: %d", code)
+	}
+	evil, _ := fakesops.HostKey(t)
+	for _, p := range []string{"secrets/hosts/evil.pub", "secrets/hosts/web.pub"} {
+		var f struct{ Hash string }
+		e.bearer(t, edit, "GET", "/api/file?path="+p, nil, &f)
+		if code := e.bearer(t, edit, "PUT", "/api/file", map[string]string{"path": p, "content": evil + "\n", "base_hash": f.Hash}, nil); code != 200 {
+			t.Fatalf("plant %s: %d", p, code)
+		}
+	}
+	if code := e.bearer(t, edit, "POST", "/api/secrets/reencrypt", struct{}{}, nil); code != 204 {
+		t.Fatalf("re-encrypt: %d", code)
+	}
+	var f struct{ Content string }
+	e.bearer(t, edit, "GET", "/api/file?path=secrets/common.json", nil, &f)
+	cmd := exec.Command(e.svc.Secrets.SSHToAge)
+	cmd.Stdin = strings.NewReader(evil + "\n")
+	evilAge, err := cmd.Output()
+	if err != nil || !strings.HasPrefix(string(evilAge), "age1") {
+		t.Fatalf("ssh-to-age: %v %q", err, evilAge)
+	}
+	if !strings.Contains(f.Content, `"recipient"`) || strings.Contains(f.Content, strings.TrimSpace(string(evilAge))) {
+		t.Fatalf("common.json is encrypted for a key the edit token wrote:\n%s", f.Content)
 	}
 }
 

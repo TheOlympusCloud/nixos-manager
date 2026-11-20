@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type SecretFile, type SecretsStatus } from '../lib/api'
+  import { api, type SecretFile, type SecretMachine, type SecretsStatus } from '../lib/api'
   import { fleet } from '../lib/fleet.svelte'
   import { go } from '../lib/router.svelte'
   import { cominSecret, reportSecret, secretNameProblem } from '../lib/secrets'
@@ -62,11 +62,19 @@
     const host = keyFor
     if (await run('key', () => api.setMachineKey(host, keyText), `${host} gets its secrets once this is committed and pushed`)) keyFor = keyText = ''
   }
+  async function approve(m: SecretMachine) {
+    const ok = await confirmBox({
+      title: `Approve ${m.name}'s key`,
+      message: `${m.fingerprint}: is this ${m.name}'s SSH host key? Compare it with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the machine. Whoever holds this key can read every secret ${m.name} gets.${keyed.has(m.name) ? ` It replaces the key approved for ${m.name} now.` : ''}`,
+      ok: 'Approve',
+    })
+    if (ok) await run('key', () => api.setMachineKey(m.name, m.key), `Approved ${m.name}'s key`)
+  }
   async function removeKey(host: string) {
     const own = st?.files.find((f) => f.host === host)?.names.length ?? 0
     const ok = await confirmBox({
       title: `Remove ${host}'s key`,
-      message: `${host} no longer gets secrets${own ? `, and its ${own} own secret${own === 1 ? ' is' : 's are'} deleted` : ''}. The secrets of every machine are encrypted again without it, with a new key, so it cannot open what is added later. Change the values it knew if it is not to be trusted.`,
+      message: `${host} no longer gets secrets${own ? `, and its ${own} own secret${own === 1 ? ' is' : 's are'} deleted` : ''}. The secrets of every machine are encrypted again without it, with a new key, so it cannot open what is added later. Change the values it knew if it is not to be trusted. Settings of ${host} that use a secret (an option set to its path) fail its check until you remove them.`,
       ok: 'Remove',
       danger: true,
     })
@@ -160,6 +168,26 @@
         {#if !st.machines.length && !withoutKey.length}<tr><td colspan="3" class="muted">No machines yet.</td></tr>{/if}
       </tbody>
     </table>
+    {#if st.proposed.length}
+      <div class="sub" role="note">
+        <strong>Keys waiting for approval</strong>
+        <span class="muted small">
+          In <span class="mono">secrets/hosts/</span> but not approved here (they came with a pull or an edit): nothing is encrypted for them until you approve one, and
+          Re-encrypt writes back the approved key of a machine that has one.
+        </span>
+        <ul class="plain">
+          {#each st.proposed as m (m.name)}
+            <li>
+              <span>{m.name}</span>
+              {#if m.error}<span class="error-text small">{m.error}</span>{:else}<span class="mono small">{m.fingerprint}</span>{/if}
+              {#if keyed.has(m.name)}<span class="badge">differs from its approved key</span>{/if}
+              <span class="spacer"></span>
+              {#if !m.error}<button class="small" onclick={() => approve(m)} disabled={!!busy}>Approve</button>{/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
     {#if keyFor}
       <form class="sub" onsubmit={saveKey}>
         <label class="label" for="machine-key">SSH host key of {keyFor}</label>
@@ -341,6 +369,18 @@
     gap: 8px;
     padding: 5px 0;
     border-bottom: 1px solid var(--border);
+  }
+  .plain {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .plain li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
   }
   .value {
     flex: 1;

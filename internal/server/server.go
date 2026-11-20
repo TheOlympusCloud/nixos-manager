@@ -97,11 +97,12 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/merge": auth.ScopeEdit, "POST /api/pull": auth.ScopeEdit, "POST /api/hosts/{host}/packages": auth.ScopeEdit,
 	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
 	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
-	"PUT /api/secrets/machines/{host}": auth.ScopeEdit, "DELETE /api/secrets/machines/{host}": auth.ScopeEdit,
 
 	"POST /api/push": auth.ScopeFull, // a push is a deploy
 	"POST /api/try":  auth.ScopeFull, "POST /api/try/end": auth.ScopeFull,
 	"POST /api/secrets/reveal": auth.ScopeFull, // a value, in plain text
+	// A machine key decides who can decrypt every secret.
+	"PUT /api/secrets/machines/{host}": auth.ScopeFull, "DELETE /api/secrets/machines/{host}": auth.ScopeFull,
 }
 
 func (s *Server) apiMux() *http.ServeMux {

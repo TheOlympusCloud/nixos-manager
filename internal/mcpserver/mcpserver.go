@@ -394,7 +394,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 			Host string `json:"host,omitempty" jsonschema:"the machine that alone gets it; empty for every machine with a key"`
 			Name string `json:"name" jsonschema:"its name: the file /run/secrets/<name> on the machine"`
 		}
-		tool(s, "list_secrets", "The fleet's secrets, kept with sops-nix: this server's age key, each machine's key (from its SSH host key; a machine without one gets no secrets), and the names in secrets/common.json (every machine with a key) and secrets/hosts/<machine>.json, never a value. stale: re-encrypting is needed (Settings → Secrets).", func(ctx context.Context, _ struct{}) (core.SecretsStatus, error) {
+		tool(s, "list_secrets", "The fleet's secrets, kept with sops-nix: this server's age key, each machine's approved key (from its SSH host key; a machine without one gets no secrets; a person approves keys in Settings → Secrets, and proposed lists keys in secrets/hosts/ waiting for that), and the names in secrets/common.json (every machine with a key) and secrets/hosts/<machine>.json, never a value. stale: re-encrypting is needed (Settings → Secrets).", func(ctx context.Context, _ struct{}) (core.SecretsStatus, error) {
 			return svc.Secrets.Status(ctx)
 		})
 		tool(s, "set_secret", "Add or replace a secret, encrypted before it is written: for every machine with a key (no host) or one machine. It is a change in the working copy, like any other: run_check, commit and push deploy it. Values are never shown back over MCP.", func(ctx context.Context, in struct {

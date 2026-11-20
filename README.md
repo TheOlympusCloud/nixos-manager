@@ -698,14 +698,22 @@ secrets/hosts/<name>.json  what that machine alone gets
   repository, never logged and never sent to the browser. **Back it up**:
   without it nobody can change the secrets (the machines keep decrypting
   theirs), and a server set up again from scratch makes a new one that opens
-  nothing. To move the console, copy the file to the new server.
-- **Machine keys.** A machine gets secrets once its SSH host key is there:
+  nothing. To move the console, copy it and `sops-machines.json` (the approved
+  machine keys) to the new server; without the latter, approve each machine's
+  key again under Keys waiting for approval.
+- **Machine keys.** A machine gets secrets once its SSH host key is approved:
   paste `/etc/ssh/ssh_host_ed25519_key.pub` from the machine (or an
   `ssh-keyscan -t ed25519 <machine>` line, after comparing its fingerprint with
   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine: whoever
   holds that key gets the secrets). The console turns it into an age key with
-  `ssh-to-age`, writes `.sops.yaml` and encrypts the files again for the new
-  set of keys. A machine without a key gets no secrets at all, so adding a
+  `ssh-to-age`, writes `secrets/hosts/<name>.pub` and `.sops.yaml`, and
+  encrypts the files again for the new set of keys. Approving, changing and
+  removing keys needs the web login or a full token. The approved keys are kept
+  on the server, in `$NIXMGR_DATA/sops-machines.json`, never taken from the
+  repository: a key that arrives in `secrets/hosts/` another way (a pull, an
+  edit in Code, a token that can only edit) is listed under **Keys waiting for
+  approval**, and nothing is encrypted for it until a person approves it there.
+  Re-encrypt writes back the approved key of a machine whose `.pub` was changed. A machine without a key gets no secrets at all, so adding a
   secret for every machine never fails a deployment on one that cannot
   decrypt it. The starter fleet makes an SSH host key on every machine, even
   without an SSH server (`services.openssh.generateHostKeys`). **Remove**
@@ -718,11 +726,13 @@ secrets/hosts/<name>.json  what that machine alone gets
   letters, digits, `.`, `_` and `-` (not ending in `_unencrypted`, which sops
   would leave readable). **Show** decrypts one value for the person who asked,
   and nothing keeps it. Over the API that needs a token with full access; no
-  MCP tool reads a value. Listing the names needs read access, writing a value or a
-  key needs edit access.
-- **Re-encrypt** appears when a file is not encrypted for exactly the machines'
-  keys, after a key or a file changed outside this page (a pull, an edit in
+  MCP tool reads a value. Listing the names needs read access, writing a value
+  needs edit access.
+- **Re-encrypt** appears when a file, `.sops.yaml` or a `.pub` does not match
+  the approved keys, after it changed outside this page (a pull, an edit in
   Code). A file this server's key cannot open is never overwritten.
+- **Removing a key** makes the machine's settings that use a secret (an option
+  set to its path, `neededForUsers`) fail its check: remove them too.
 
 Every change here is a change of the working copy: stage it in **Changes**, run
 the check (it builds the machines whose secrets changed, and sops-nix checks the
@@ -939,8 +949,8 @@ Each token gets a scope when it is created, and optionally an expiry date:
 | Scope | What it can do |
 |---|---|
 | Read only | Read files, history, the fleet model, checks, jobs, deployments and the secrets' names; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
-| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, and write secrets and machine keys |
-| Full | Also push, which deploys, and read a secret's value (`POST /api/secrets/reveal`) |
+| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, and write secrets |
+| Full | Also push, which deploys, read a secret's value (`POST /api/secrets/reveal`), and approve or remove machine keys, which decide who can decrypt |
 
 The MCP endpoint offers only the tools of the token's scope. The same token
 works on the HTTP API, on the routes its scope covers:
@@ -966,7 +976,7 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, deployment reports, and the age key of the secrets (`sops-age-key`: back it up) (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, deployment reports, the age key of the secrets (`sops-age-key`: back it up) and the approved machine keys (`sops-machines.json`) (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |

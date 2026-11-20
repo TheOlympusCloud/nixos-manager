@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -42,9 +43,15 @@ var secretName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 // sops-nix makes it on the machine. Values are in plain text only in this
 // process and the pipes to sops: never in a file, a log line or a reply, except
 // Reveal's.
+//
+// Which machines may decrypt is decided here, never by the working copy: only
+// the keys in TrustFile are recipients, and only SetMachineKey and
+// RemoveMachineKey change them. Anyone who can edit files could otherwise add
+// a key of their own (secrets/hosts/<name>.pub) and read every secret.
 type Secrets struct {
-	Repo    *Repo
-	KeyFile string // this server's age identity, made on first use (mode 0600)
+	Repo      *Repo
+	KeyFile   string // this server's age identity, made on first use (mode 0600)
+	TrustFile string // the approved machine keys, by machine (mode 0600)
 	// The tools, from PATH unless set to a path.
 	Sops, AgeKeygen, SSHToAge string
 
@@ -55,7 +62,8 @@ type Secrets struct {
 }
 
 func OpenSecrets(dataDir string, repo *Repo) *Secrets {
-	return &Secrets{Repo: repo, KeyFile: filepath.Join(dataDir, "sops-age-key"), Sops: "sops", AgeKeygen: "age-keygen", SSHToAge: "ssh-to-age"}
+	return &Secrets{Repo: repo, KeyFile: filepath.Join(dataDir, "sops-age-key"), TrustFile: filepath.Join(dataDir, "sops-machines.json"),
+		Sops: "sops", AgeKeygen: "age-keygen", SSHToAge: "ssh-to-age"}
 }
 
 // SecretsStatus is what Settings → Secrets shows; never a value.
@@ -63,15 +71,18 @@ type SecretsStatus struct {
 	Missing   []string        `json:"missing"`   // tools not found on the server: nothing works without them
 	Recipient string          `json:"recipient"` // this server's age key (its public half)
 	KeyFile   string          `json:"keyFile"`   // its private half, to back up
-	Machines  []SecretMachine `json:"machines"`  // machines with a key, by name
-	Files     []SecretFile    `json:"files"`     // common.json first
+	Machines  []SecretMachine `json:"machines"`  // machines with an approved key, by name
+	// Proposed: keys in secrets/hosts/*.pub that are not approved here (added
+	// outside Settings, by a pull or an edit); nothing is encrypted for them.
+	Proposed []SecretMachine `json:"proposed"`
+	Files    []SecretFile    `json:"files"` // common.json first
 	// Stale: .sops.yaml or a file is not encrypted for exactly the keys it should be: Re-encrypt.
 	Stale bool `json:"stale"`
 }
 
 type SecretMachine struct {
 	Name        string `json:"name"`
-	Key         string `json:"key"`         // its SSH host key, from secrets/hosts/<name>.pub
+	Key         string `json:"key"`         // its SSH host key
 	Fingerprint string `json:"fingerprint"` // SHA256:…, as ssh-keygen -l prints it
 	Recipient   string `json:"recipient"`   // the age key made of it
 	Error       string `json:"error,omitempty"`
@@ -199,31 +210,64 @@ func (s *Secrets) machine(ctx context.Context, name, text string) SecretMachine 
 	return m
 }
 
-// machines reads every secrets/hosts/<name>.pub, by name.
-func (s *Secrets) machines(ctx context.Context) ([]SecretMachine, error) {
-	out := []SecretMachine{}
-	entries, err := fs.ReadDir(s.Repo.root.FS(), hostSecrets)
+// trusted reads the approved machine keys.
+func (s *Secrets) trusted() (map[string]string, error) {
+	keys := map[string]string{}
+	b, err := os.ReadFile(s.TrustFile)
 	if errors.Is(err, fs.ErrNotExist) {
-		return out, nil
+		return keys, nil
 	} else if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		name, ok := strings.CutSuffix(e.Name(), ".pub")
-		if !ok || e.IsDir() {
-			continue
-		}
-		b, err := s.Repo.root.ReadFile(hostSecrets + "/" + e.Name())
+	if err := json.Unmarshal(b, &keys); err != nil {
+		return nil, fmt.Errorf("%s: %w", s.TrustFile, err)
+	}
+	return keys, nil
+}
+
+func (s *Secrets) saveTrusted(keys map[string]string) error {
+	b, err := json.MarshalIndent(keys, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(s.TrustFile, append(b, '\n'))
+}
+
+// machines are the machines with an approved key, by name.
+func (s *Secrets) machines(ctx context.Context) ([]SecretMachine, error) {
+	keys, err := s.trusted()
+	if err != nil {
+		return nil, err
+	}
+	out := []SecretMachine{}
+	for _, name := range slices.Sorted(maps.Keys(keys)) {
+		out = append(out, s.machine(ctx, name, keys[name]))
+	}
+	return out, nil
+}
+
+// pubFile is where the working copy names a machine's key, for modules/secrets.nix.
+func pubFile(host string) string { return hostSecrets + "/" + host + ".pub" }
+
+// proposed reads the secrets/hosts/<name>.pub that do not hold the approved key.
+func (s *Secrets) proposed(ctx context.Context, st secretsState) []SecretMachine {
+	out := []SecretMachine{}
+	matches, _ := fs.Glob(s.Repo.root.FS(), hostSecrets+"/*.pub")
+	for _, p := range matches {
+		name := strings.TrimSuffix(path.Base(p), ".pub")
+		b, err := s.Repo.root.ReadFile(p)
 		switch {
 		case !machineName.MatchString(name):
 			out = append(out, SecretMachine{Name: name, Error: "not a machine name"})
 		case err != nil:
 			out = append(out, SecretMachine{Name: name, Error: err.Error()})
 		default:
-			out = append(out, s.machine(ctx, name, string(b)))
+			if m := s.machine(ctx, name, string(b)); m.Error != "" || !slices.ContainsFunc(st.machines, func(o SecretMachine) bool { return o.Name == name && o.Key == m.Key }) {
+				out = append(out, m)
+			}
 		}
 	}
-	return out, nil
+	return out
 }
 
 // secretsState is what every change starts from.
@@ -244,12 +288,12 @@ func (s *Secrets) state(ctx context.Context) (secretsState, error) {
 	return secretsState{admin, ms}, err
 }
 
-// usable refuses changes while a machine's key file is broken: encrypting
-// without it would lock that machine out.
+// usable refuses changes while an approved key cannot be used (ssh-to-age
+// failed): encrypting without it would lock that machine out.
 func (st secretsState) usable() error {
 	for _, m := range st.machines {
 		if m.Error != "" {
-			return errorf(ErrInvalid, "%s/%s.pub: %s; fix or remove it first", hostSecrets, m.Name, m.Error)
+			return errorf(ErrInvalid, "the key of %s: %s; change or remove it first", m.Name, m.Error)
 		}
 	}
 	return nil
@@ -295,6 +339,19 @@ func (st secretsState) sopsYAML() string {
 		}
 	}
 	return b.String()
+}
+
+// pubs adds each approved machine's .pub when the working copy lacks it or
+// holds another key: modules/secrets.nix gives a machine its secrets by it.
+func (s *Secrets) pubs(st secretsState, w writes) {
+	for _, m := range st.machines {
+		if _, ok := w[pubFile(m.Name)]; ok || m.Key == "" {
+			continue
+		}
+		if cur, err := s.Repo.root.ReadFile(pubFile(m.Name)); err != nil || string(cur) != m.Key+"\n" {
+			w[pubFile(m.Name)] = []byte(m.Key + "\n")
+		}
+	}
 }
 
 // sopsDoc is what a sops JSON file shows without decrypting it.
@@ -430,11 +487,13 @@ func hostOf(p string) string {
 // any is written.
 type writes map[string][]byte
 
-// reconcile adds .sops.yaml and every file whose recipients are not the ones
-// it should have, encrypted again (which also gives it a new data key). A
-// machine's file without its key is left alone: nothing declares it.
+// reconcile adds .sops.yaml, the approved keys' .pub files, and every file
+// whose recipients are not the ones it should have, encrypted again (which
+// also gives it a new data key). A machine's file without an approved key is
+// left alone.
 func (s *Secrets) reconcile(ctx context.Context, st secretsState, w writes) error {
 	s.config(st, w)
+	s.pubs(st, w)
 	for _, p := range s.files() {
 		host := hostOf(p)
 		if _, ok := w[p]; ok || (host != "" && !st.has(host)) {
@@ -492,7 +551,7 @@ func (s *Secrets) Status(ctx context.Context) (SecretsStatus, error) {
 	if err != nil {
 		return out, err
 	}
-	out.Recipient, out.Machines = st.admin, st.machines
+	out.Recipient, out.Machines, out.Proposed = st.admin, st.machines, s.proposed(ctx, st)
 	for _, p := range s.files() {
 		f := SecretFile{Path: p, Host: hostOf(p), Names: []string{}}
 		b, err := s.Repo.root.ReadFile(p)
@@ -512,13 +571,15 @@ func (s *Secrets) Status(ctx context.Context) (SecretsStatus, error) {
 	if len(out.Files) > 0 || len(out.Machines) > 0 {
 		w := writes{}
 		s.config(st, w)
+		s.pubs(st, w)
 		out.Stale = out.Stale || len(w) > 0
 	}
 	return out, nil
 }
 
-// SetMachineKey adds or replaces a machine's SSH host key, so it gets
-// common.json and its own file, which are encrypted again for it.
+// SetMachineKey approves a machine's SSH host key, new or replacing its last
+// one, so it gets common.json and its own file, which are encrypted again for
+// it. Only a person or a full token may: the key decides who reads the secrets.
 func (s *Secrets) SetMachineKey(ctx context.Context, host, key string) (SecretMachine, error) {
 	if !machineName.MatchString(host) {
 		return SecretMachine{}, errorf(ErrInvalid, "invalid machine name %q", host)
@@ -542,11 +603,28 @@ func (s *Secrets) SetMachineKey(ctx context.Context, host, key string) (SecretMa
 	}
 	st.machines = append(st.machines, m)
 	slices.SortFunc(st.machines, func(a, b SecretMachine) int { return strings.Compare(a.Name, b.Name) })
-	w := writes{hostSecrets + "/" + host + ".pub": []byte(m.Key + "\n")}
+	w := writes{}
 	if err := s.reconcile(ctx, st, w); err != nil {
 		return m, err
 	}
+	if err := s.setTrusted(host, m.Key); err != nil {
+		return m, err
+	}
 	return m, s.apply(w)
+}
+
+// setTrusted approves host's key ("" removes it).
+func (s *Secrets) setTrusted(host, key string) error {
+	keys, err := s.trusted()
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		delete(keys, host)
+	} else {
+		keys[host] = key
+	}
+	return s.saveTrusted(keys)
 }
 
 // RemoveMachineKey removes a machine's key and its own secrets; common.json
@@ -565,8 +643,11 @@ func (s *Secrets) RemoveMachineKey(ctx context.Context, host string) error {
 	if err := st.usable(); err != nil {
 		return err
 	}
-	w := writes{hostSecrets + "/" + host + ".pub": nil, secretsFile(host): nil}
+	w := writes{pubFile(host): nil, secretsFile(host): nil}
 	if err := s.reconcile(ctx, st, w); err != nil {
+		return err
+	}
+	if err := s.setTrusted(host, ""); err != nil {
 		return err
 	}
 	return s.apply(w)
