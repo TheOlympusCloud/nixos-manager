@@ -8,6 +8,9 @@
   openssh,
   nixd,
   nixfmt,
+  sops,
+  age,
+  ssh-to-age,
   version ? "dev",
 }:
 
@@ -58,6 +61,10 @@ buildGoModule {
         openssh
         nixd
         nixfmt
+        # The fleet's secrets (Settings → Secrets).
+        sops
+        age
+        ssh-to-age
       ]
     }
   '';

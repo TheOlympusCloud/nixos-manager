@@ -117,6 +117,12 @@ model=$(ready '/api/model?at=working')
 [ -z "$(not_owned)" ] || fail "Nix left files nixos-manager does not own: $(not_owned)"
 echo "ok   real Nix locks and evaluates the starter flake as nixos-manager"
 
+secrets=$(api GET /api/secrets)
+[ "$(echo "$secrets" | json '["missing"]')" = "[]" ] || fail "the image lacks a tool the secrets need: $secrets"
+case "$(echo "$secrets" | json '["recipient"]')" in age1*) ;; *) fail "no age key for the secrets: $secrets" ;; esac
+[ -z "$(not_owned)" ] || fail "the age key is not nixos-manager's: $(not_owned)"
+echo "ok   sops, age and ssh-to-age are in the image, and the server made its age key"
+
 # The user swaps both Nix profiles for wrappers that log who runs them, then the stack
 # restarts with the container's files kept: nothing may run them as root. One log per uid
 # ($EUID: bash is /bin/sh, and id would be a wrapper too), as the kernel's protected_regular

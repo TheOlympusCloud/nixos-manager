@@ -283,4 +283,32 @@ if [ "${E2E_STUB_NIX:-}" != 1 ]; then # the stub cannot evaluate the edit
 fi
 echo "ok   package added by clicking shows up as a change"
 
+# Secrets, when sops, age and ssh-to-age are on PATH (CI's Real Nix job): the
+# example machine's key, a value for every machine and one for it alone, its
+# report token; nothing in plain text on disk, and with real Nix the check builds
+# the machine with them (sops-nix checks the files) and the model lists them.
+if command -v sops > /dev/null && command -v age-keygen > /dev/null && command -v ssh-to-age > /dev/null; then
+  case "$(api GET /api/secrets | json '["recipient"]')" in age1*) ;; *) fail "no age key: $(api GET /api/secrets)" ;; esac
+  ssh-keygen -q -t ed25519 -N '' -C root@example -f "$work/example_host_key"
+  key=$(python3 -c 'import json, sys; print(json.dumps({"key": open(sys.argv[1]).read()}))' "$work/example_host_key.pub")
+  [ "$(code PUT /api/secrets/machines/example -d "$key")" = 200 ] || fail "the example machine's key"
+  [ "$(code PUT /api/secrets -d '{"name":"wifi","value":"e2e-wifi-value"}')" = 204 ] || fail "a secret for every machine"
+  [ "$(code PUT /api/secrets -d '{"host":"example","name":"api-key","value":"e2e-api-value"}')" = 204 ] || fail "a secret for example"
+  [ "$(api POST /api/secrets/report-tokens -d '{}' | json '["hosts"]')" = "['example']" ] || fail "report tokens as secrets"
+  ! grep -rqsF -e e2e-wifi-value -e e2e-api-value "$work/data" || fail "a value is in plain text under \$NIXMGR_DATA"
+  [ "$(api POST /api/secrets/reveal -d '{"name":"wifi"}' | json '["value"]')" = e2e-wifi-value ] || fail "reveal"
+  ssh-to-age -private-key < "$work/example_host_key" > "$work/example_age_key"
+  SOPS_AGE_KEY_FILE=$work/example_age_key sops --config /dev/null decrypt --input-type json --output-type json < "$repo_dir/secrets/hosts/example.json" |
+    grep -qF e2e-api-value || fail "the example machine cannot open its secrets with its own key"
+  [ "$(code POST /api/stage -d '{"paths":[]}')" = 204 ] || fail "stage the secrets"
+  [ "$(run_job '{"kind":"check"}')" = passed ] || fail "check with secrets: $(cat "$work/events-$(cat "$work/last-job")")"
+  if [ "${E2E_STUB_NIX:-}" != 1 ]; then
+    [ "$(built)" = "['example']" ] || fail "the check did not build the machine with its secrets: $(built)"
+    names=$(ready '/api/model?at=working' | python3 -c "import sys, json; print(sorted((s['name'], s['path']) for s in json.load(sys.stdin)['model']['hosts'][0]['secrets']))")
+    [ "$names" = "[('api-key', '/run/secrets/api-key'), ('nixos-manager-report', '/run/secrets/nixos-manager-report'), ('wifi', '/run/secrets/wifi')]" ] ||
+      fail "the model's secrets for example: $names"
+  fi
+  echo "ok   secrets: encrypted for the server and the machine, checked, and listed"
+fi
+
 echo "PASS"

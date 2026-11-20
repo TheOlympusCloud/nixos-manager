@@ -1,4 +1,4 @@
-# Web editor + MCP server for a Nix flake repository, with Nix, nixd and nixfmt inside.
+# Web editor + MCP server for a Nix flake repository, with Nix, nixd, nixfmt and sops inside.
 FROM node:24.22.3-trixie-slim AS ui
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
@@ -24,7 +24,7 @@ FROM nixos/nix:2.35.6
 # own, is the one root step.)
 RUN printf 'experimental-features = nix-command flakes\n' >> /etc/nix/nix.conf \
  && nix build --profile /nix/var/nix/profiles/tools --impure --expr \
-      'with import (builtins.getFlake "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-26.05.tar.gz") { }; buildEnv { name = "tools"; paths = [ nixd nixfmt git openssh ]; }' \
+      'with import (builtins.getFlake "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-26.05.tar.gz") { }; buildEnv { name = "tools"; paths = [ nixd nixfmt git openssh sops age ssh-to-age ]; }' \
  && nix-collect-garbage \
  && for f in passwd group; do cp --remove-destination "$(readlink -f /etc/$f)" /etc/$f; done \
  && echo 'nixos-manager:x:10001:10001:nixos-manager:/home/nixos-manager:/bin/sh' >> /etc/passwd \
