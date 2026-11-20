@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -152,8 +153,10 @@ func run() error {
 		return err
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	s := &server.Server{
-		Svc: svc, Auth: a, UI: web.UI,
+		Svc: svc, Auth: a, UI: web.UI, Stopping: ctx.Done(),
 		MCP:  mcpserver.Handler(svc, version),
 		Nixd: strings.Fields(env("NIXMGR_NIXD", "nixd")),
 
@@ -163,20 +166,28 @@ func run() error {
 	}
 	// No write timeout: job streams, the editor socket and MCP calls are long-lived.
 	hs := &http.Server{Addr: env("NIXMGR_LISTEN", "127.0.0.1:8080"), Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ln, err := net.Listen("tcp", hs.Addr)
+	if err != nil {
+		return err
+	}
 	go notifier.Run(ctx)
 	go svc.Updates.Run(ctx) // after forgejo.Resume: an update's check is reported to Forgejo too
+	slog.Info("nixos-manager listening", "addr", hs.Addr, "repo", repo.Dir, "version", version)
+	return serve(ctx, hs, ln)
+}
+
+// serve answers on ln until ctx ends, then lets the requests under way (a
+// commit, a push) finish, for up to 10 seconds, before it returns.
+func serve(ctx context.Context, hs *http.Server, ln net.Listener) error {
+	drained := make(chan error, 1)
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		hs.Shutdown(sctx)
+		drained <- hs.Shutdown(sctx)
 	}()
-	slog.Info("nixos-manager listening", "addr", hs.Addr, "repo", repo.Dir, "version", version)
-	if err := hs.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	if err := hs.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
-	return nil
+	return <-drained
 }

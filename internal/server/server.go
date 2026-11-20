@@ -51,6 +51,10 @@ type Server struct {
 	// names the client for the login limits (e.g. the Docker gateway).
 	TrustedProxies []netip.Prefix
 
+	// Stopping closes when the server shuts down: job streams end then, so that
+	// only the requests under way hold up the shutdown. nil: never.
+	Stopping <-chan struct{}
+
 	lspSlots chan struct{}
 	gz       sync.Map // static path -> gzipped bytes
 }
@@ -664,6 +668,8 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-wait:
 		case <-r.Context().Done():
+			return
+		case <-s.Stopping: // the browser reconnects; a stream must not hold up the shutdown
 			return
 		}
 	}
