@@ -278,6 +278,15 @@ The alternative, on any host with Docker. The image carries its own Nix.
    identity of every commit).
 3. `docker compose up -d --build`, then open `http://<server>:8080`.
 
+The server and its Nix run as the unprivileged `nixos-manager` user (uid and gid
+10001). The container starts as root only to give the data volume to that user,
+then switches to it, as systemd does for the LXC module. A volume from an earlier
+image, which ran everything as root, is handed over the same way on the first
+start. Files you mount (the password hash, a key in `~/.ssh`) must be readable by
+uid 10001. To run nothing as root at all, add `user: nixos-manager` to the service
+in `compose.yaml`; the volume must then already belong to the user (a new volume
+does). Use `docker compose exec -u nixos-manager` for commands inside the container.
+
 Either way, without a remote the app starts a new repository with a starter
 flake (an example host, a home-manager user and comin). Run **Lock** once to
 create `flake.lock`, then stage, check and commit. Connect Forgejo in
@@ -324,8 +333,9 @@ another host, port or http under **Web address** if Forgejo's web UI is elsewher
 
 Other setups keep working:
 
-- A key you mount at `~/.ssh` (`/root/.ssh` in the container, see
-  `compose.yaml`) is used as before, until you choose **Create a deploy key** in
+- A key you mount at `~/.ssh` (`/home/nixos-manager/.ssh` in the container,
+  see `compose.yaml`; it was `/root/.ssh` before the image ran as its own user)
+  is used as before, until you choose **Create a deploy key** in
   Settings. A `GIT_SSH_COMMAND` in the environment always wins.
 - HTTPS: put `https://<user>:<token>@forgejo.lan` in a git credentials file,
   mount it, and add `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=credential.helper`,

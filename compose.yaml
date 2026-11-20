@@ -14,6 +14,6 @@ services:
     volumes:
       - nixmgr-data:/var/lib/nixos-manager
       - ./secrets:/run/secrets/nixmgr:ro
-      # - ./secrets/ssh:/root/.ssh:ro   # id_ed25519 + known_hosts for the Forgejo remote
+      # - ./secrets/ssh:/home/nixos-manager/.ssh:ro   # id_ed25519 + known_hosts for the Forgejo remote, readable by uid 10001
 volumes:
   nixmgr-data:

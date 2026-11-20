@@ -17,14 +17,23 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"
 
 FROM nixos/nix:2.35.6
 # The tools live in their own profile, separate from the image's nix-env profile.
+# The server runs as nixos-manager (uid 10001), a single-user Nix install of its own:
+# it owns the store folder (not the paths already in it) and Nix's state.
 RUN printf 'experimental-features = nix-command flakes\n' >> /etc/nix/nix.conf \
  && nix build --profile /nix/var/nix/profiles/tools --impure --expr \
       'with import (builtins.getFlake "github:NixOS/nixpkgs/nixos-26.05") { }; buildEnv { name = "tools"; paths = [ nixd nixfmt git openssh ]; }' \
- && nix-collect-garbage
+ && nix-collect-garbage \
+ && for f in passwd group; do cp --remove-destination "$(readlink -f /etc/$f)" /etc/$f; done \
+ && echo 'nixos-manager:x:10001:10001:nixos-manager:/home/nixos-manager:/bin/sh' >> /etc/passwd \
+ && echo 'nixos-manager:x:10001:' >> /etc/group \
+ && mkdir -p -m 0700 /home/nixos-manager /var/lib/nixos-manager \
+ && chown nixos-manager:nixos-manager /nix/store /home/nixos-manager /var/lib/nixos-manager \
+ && chown -R nixos-manager:nixos-manager /nix/var
 COPY --from=build /out/nixos-manager /usr/local/bin/nixos-manager
-ENV PATH=/nix/var/nix/profiles/tools/bin:/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin \
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
+ENV PATH=/nix/var/nix/profiles/tools/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin \
     NIXMGR_LISTEN=0.0.0.0:8080 \
     NIXMGR_DATA=/var/lib/nixos-manager
 VOLUME /var/lib/nixos-manager
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/nixos-manager"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
