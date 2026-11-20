@@ -152,3 +152,14 @@ func TestParseTrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+// An anonymous login reads a few KiB at most, before any limit is checked.
+func TestLoginBodyIsSmall(t *testing.T) {
+	e := newEnv(t)
+	if code := e.loginAs(t, &http.Client{}, strings.Repeat("a", maxLoginBody), "").StatusCode; code != 400 {
+		t.Fatalf("a login body over %d bytes: %d", maxLoginBody, code)
+	}
+	if code := e.loginAs(t, &http.Client{}, "pw", "").StatusCode; code != 204 {
+		t.Fatalf("a normal login: %d", code)
+	}
+}

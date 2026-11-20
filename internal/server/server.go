@@ -34,6 +34,7 @@ const (
 	cookieName    = "nixmgr_session"
 	browserCookie = "nixmgr_browser" // marks a browser that logged in before, for the login limits
 	maxBodySize   = 32 << 20
+	maxLoginBody  = 4 << 10 // read before the login limits are checked
 )
 
 type Server struct {
@@ -450,6 +451,7 @@ func secure(r *http.Request) bool {
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Password string }
+	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBody)
 	if err := decode(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
