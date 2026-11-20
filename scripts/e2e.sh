@@ -56,9 +56,12 @@ export NIXMGR_DATA=$work/data NIXMGR_LISTEN=127.0.0.1:$port NIXMGR_REMOTE=$work/
   NIXMGR_NIX=$nix_bin NIXMGR_NIXFMT=$nixfmt_bin
 NIXMGR_PASSWORD_HASH=$(printf 'pw\n' | "$work/nixos-manager" hash-password)
 export NIXMGR_PASSWORD_HASH
-"$work/nixos-manager" > "$work/server.log" 2>&1 &
-pid=$!
-for _ in $(seq 100); do curl -s -o /dev/null "$base/" && break; sleep 0.1; done
+start() {
+  "$work/nixos-manager" >> "$work/server.log" 2>&1 &
+  pid=$!
+  for _ in $(seq 100); do curl -s -o /dev/null "$base/" && break; sleep 0.1; done
+}
+start
 
 jar=$work/cookies
 api() { local m=$1 p=$2; shift 2; curl -s -b "$jar" -c "$jar" -X "$m" -H 'Content-Type: application/json' "$base$p" "$@"; }
@@ -106,6 +109,12 @@ state=$(run_job "{\"kind\":\"check\",\"targets\":[\"$attr\"]}")
 [ "$state" = passed ] || fail "check $state: $(cat "$work"/events-*)"
 [ "$(api GET /api/status | json '["staged_checked"]')" = True ] || fail "staged changes not marked checked"
 echo "ok   check passed (flake check + dry build)"
+
+kill "$pid"; wait "$pid" 2>/dev/null || true
+start
+[ "$(code GET /api/status)" = 200 ] || fail "the restart logged the session out"
+[ "$(api GET /api/status | json '["staged_checked"]')" = True ] || fail "the restart forgot the passed check"
+echo "ok   a restart keeps the session and the passed check"
 
 sha=$(api POST /api/commit -d '{"message":"feat: initial machines"}' | json '["sha"]') || fail "commit"
 api POST /api/push -d '{}' > /dev/null
