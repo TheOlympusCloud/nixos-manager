@@ -505,7 +505,8 @@ restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking
 win without dropping the hand-written users and SSH settings around them, the
-deployment reporter wires into comin, new LXC and VM machines evaluate, and
+deployment reporter wires into comin, new LXC and VM machines evaluate, a
+standalone home-manager configuration shows its packages and programs, and
 the flake builds the package and passes `nix flake check`.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
