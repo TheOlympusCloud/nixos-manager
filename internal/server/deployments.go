@@ -2,7 +2,6 @@ package server
 
 import (
 	"cmp"
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -16,7 +15,8 @@ import (
 // deploymentRoutes are the session routes of the Deployments view.
 func (s *Server) deploymentRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/deployments", get(func(r *http.Request) (any, error) {
-		return s.Svc.Deploys.Overview(r.Context(), s.fleetHosts(r.Context()), time.Now())
+		m, _, _ := s.Svc.Jobs.Model(r.Context(), "working") // nil while it is evaluated
+		return s.Svc.Deploys.Overview(r.Context(), m, time.Now())
 	}))
 	api.HandleFunc("GET /api/deployments/token", get(func(r *http.Request) (any, error) {
 		return map[string]string{"token": s.Svc.Deploys.Token()}, nil
@@ -25,12 +25,6 @@ func (s *Server) deploymentRoutes(api *http.ServeMux) {
 		t, err := s.Svc.Deploys.RegenerateToken()
 		return map[string]string{"token": t}, err
 	}))
-}
-
-// fleetHosts names the machines of the last evaluation, or none while it runs.
-func (s *Server) fleetHosts(ctx context.Context) []string {
-	m, _, _ := s.Svc.Jobs.Model(ctx, "working")
-	return core.HostNames(m)
 }
 
 // deployReport is what a machine calls after comin deployed (no session: the

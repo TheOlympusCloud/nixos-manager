@@ -259,7 +259,7 @@ func (s *Server) apiMux() *http.ServeMux {
 			respondCode(w, http.StatusAccepted, map[string]string{"state": "computing", "job": j.ID})
 		default:
 			// Deployment findings are extra: Health still answers when git cannot tell them.
-			ov, _ := s.Svc.Deploys.Overview(r.Context(), core.HostNames(m), time.Now())
+			ov, _ := s.Svc.Deploys.Overview(r.Context(), m, time.Now())
 			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, ov.Machines, s.Svc.Remote(r.Context()), time.Now())}, nil)
 		}
 	})

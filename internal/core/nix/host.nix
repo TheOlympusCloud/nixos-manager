@@ -133,6 +133,17 @@ in
     zram = try config.zramSwap.enable false;
     comin = try config.services.comin.enable false;
     cominRemotes = try (map (r: r.url) config.services.comin.remotes) [ ];
+    # The branches comin follows on each remote. deepSeq: tryEval alone would
+    # not catch an error inside the list, and the machine would fail to show.
+    cominBranches =
+      let
+        branches = map (r: {
+          inherit (r) url;
+          main = r.branches.main.name or "main";
+          testing = r.branches.testing.name or "";
+        }) config.services.comin.remotes;
+      in
+      try (builtins.deepSeq branches branches) [ ];
     # Keys that let a normal user in over SSH: without one, keys-only SSH locks everyone out.
     sshUserKeys = try (lib.length (
       lib.concatMap (u: u.openssh.authorizedKeys.keys ++ u.openssh.authorizedKeys.keyFiles) (

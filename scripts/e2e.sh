@@ -153,6 +153,11 @@ model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
 [ "$(echo "$model" | json '["model"].get("error", "")')" = "" ] || fail "the starter flake does not evaluate: $model"
 [ "$(echo "$model" | json '["model"]["hosts"][0].get("error", "")')" = "" ] || fail "the example machine does not evaluate: $model"
+if [ "${E2E_STUB_NIX:-}" != 1 ]; then # read from services.comin.remotes in modules/common.nix
+  branches=$(echo "$model" | json '["model"]["hosts"][0]["checks"]["cominBranches"]')
+  [ "$branches" = "[{'url': 'https://forgejo.example.lan/pablo/nixos-config.git', 'main': 'main', 'testing': 'testing-example'}]" ] ||
+    fail "comin's branches: $branches"
+fi
 echo "ok   fleet model: the example machine evaluates"
 
 [ "$(code POST /api/hosts/example/packages -d '{"add":["ripgrep"]}')" = 200 ] || fail "add a package by clicking"

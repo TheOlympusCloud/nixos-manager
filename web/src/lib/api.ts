@@ -285,7 +285,7 @@ export type DeployState = 'current' | 'behind' | 'failed' | 'silent' | 'unknown'
 export type MachineDeployment = {
   host: string
   state: DeployState
-  /** main, or testing-<host> when comin follows that. */
+  /** The main branch its comin follows, or its testing branch when that is on top of it. */
   branch: string
   target?: string
   /** The last commit it deployed (or built and found unchanged). */

@@ -121,7 +121,7 @@ func TestDeploymentOverview(t *testing.T) {
 	at(2*time.Minute, "pc", c2, "", "done", "")
 	at(time.Minute, "pc", c3, "build", "built", "") // built, but comin has not switched to it yet
 
-	ov := must[DeployOverview](t)(d.Overview(ctx, []string{"homeserver", "newbox", "pi"}, now))
+	ov := must[DeployOverview](t)(d.Overview(ctx, fleet("homeserver", "newbox", "pi"), now))
 	if !ov.Reporting || ov.Branch != "main" || len(ov.Commits) != 3 || ov.Commits[0].SHA != c3 {
 		t.Fatalf("overview: %+v", ov)
 	}
@@ -158,14 +158,73 @@ func TestDeploymentOverview(t *testing.T) {
 		t.Errorf("a build that is not deployed yet is not what pc runs: %+v", p)
 	}
 	at(0, "pc", c3, "deploy", "done", "")
-	ov = must[DeployOverview](t)(d.Overview(ctx, []string{"pc"}, now))
+	ov = must[DeployOverview](t)(d.Overview(ctx, fleet("pc"), now))
 	if i := slices.IndexFunc(ov.Machines, func(m MachineDeployment) bool { return m.Host == "pc" }); i < 0 || ov.Machines[i].State != "current" || ov.Machines[i].Commit != c3 {
 		t.Errorf("pc after deploying c3: %+v", ov.Machines)
 	}
 
 	var nilD *Deployments
-	if ov := must[DeployOverview](t)(nilD.Overview(ctx, []string{"pi"}, now)); ov.Reporting || len(ov.Machines) != 0 {
+	if ov := must[DeployOverview](t)(nilD.Overview(ctx, fleet("pi"), now)); ov.Reporting || len(ov.Machines) != 0 {
 		t.Fatalf("no store: %+v", ov)
+	}
+}
+
+// fleet is an evaluated fleet of these machines, without comin settings.
+func fleet(hosts ...string) *Model {
+	m := &Model{Hosts: []Host{}}
+	for _, h := range hosts {
+		m.Hosts = append(m.Hosts, Host{Name: h})
+	}
+	return m
+}
+
+// Each machine is compared with the branch its own comin follows: the one set
+// for the remote this console pushes to, else for its first remote. Machines
+// without comin settings follow the branch most of the fleet follows.
+func TestDeploymentOverviewFollowsCominBranches(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	write(t, r, "flake.nix", "2\n")
+	c2 := commitAll(t, r, "second")
+	gitOut(t, r.Dir, "switch", "-q", "-c", "try-a", c1)
+	write(t, r, "a.nix", "try\n")
+	ct := commitAll(t, r, "try on a")
+	gitOut(t, r.Dir, "switch", "-q", "main")
+	gitOut(t, r.Dir, "remote", "add", "origin", "ssh://git@forgejo.lan:2222/pablo/fleet.git")
+	for ref, c := range map[string]string{"main": c2, "stable": c1, "try-a": ct} {
+		gitOut(t, r.Dir, "update-ref", "refs/remotes/origin/"+ref, c)
+	}
+
+	m := fleet("a", "b", "c", "d")
+	m.Hosts[0].Checks.CominBranches = []CominBranches{
+		{URL: "https://elsewhere.example/x.git", Main: "main", Testing: "testing-a"},
+		{URL: "https://forgejo.lan/pablo/fleet", Main: "stable", Testing: "try-a"}, // origin, over HTTPS
+	}
+	m.Hosts[1].Checks.CominBranches = []CominBranches{{URL: "https://elsewhere.example/x.git", Main: "stable", Testing: "testing-b"}}
+	m.Hosts[3].Checks.CominBranches = []CominBranches{{URL: "https://forgejo.lan/pablo/fleet.git", Main: "main", Testing: "testing-d"}}
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	now := time.Now()
+	for _, h := range []string{"a", "b", "c", "d", "gone"} {
+		ok(t, d.Record(ReportIn{Host: h, Commit: c1, Status: "done"}, now))
+	}
+
+	ov := must[DeployOverview](t)(d.Overview(ctx, m, now))
+	if ov.Branch != "stable" || len(ov.Commits) != 1 || ov.Commits[0].SHA != c1 {
+		t.Fatalf("the fleet follows %q: %+v", ov.Branch, ov.Commits)
+	}
+	got := map[string]MachineDeployment{}
+	for _, md := range ov.Machines {
+		got[md.Host] = md
+	}
+	for h, want := range map[string][3]string{
+		"a": {"try-a", ct, "behind"}, "b": {"stable", c1, "current"}, "c": {"stable", c1, "current"},
+		"d": {"main", c2, "behind"}, "gone": {"stable", c1, "current"},
+	} {
+		if g := got[h]; g.Branch != want[0] || g.Target != want[1] || g.State != want[2] {
+			t.Errorf("%s follows %q at %.7s (%s), want %v", h, g.Branch, g.Target, g.State, want)
+		}
 	}
 }
 

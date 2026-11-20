@@ -405,8 +405,12 @@ ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
 
 A push is a deploy: every machine's comin pulls the branch and switches to it.
 With reporting on, each machine tells nixos-manager what comin did, and the
-**Deployments** view shows the latest commits of `main` with the machines that
-run each one, so after a push you watch them catch up. Per machine it shows the
+**Deployments** view shows the latest commits of the branch with the machines
+that run each one, so after a push you watch them catch up. Each machine is
+compared with the branch its own comin follows, read from
+`services.comin.remotes` (the remote this console pushes to, else the first
+one): its `branches.main.name`, or its `branches.testing.name`
+(`testing-<hostname>` by default) when that branch is on top of the main one. Per machine it shows the
 commit, when it was deployed, and comin's error when a build or switch failed;
 the machine page has the same in its **Deployment** card, and the fleet graph
 marks each machine deployed, behind or failed. **Health** flags a failed

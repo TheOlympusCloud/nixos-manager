@@ -34,7 +34,7 @@
   </header>
 
   {#if r.testing.length}
-    <ul class="lane testing" aria-label="Machines on a testing branch">
+    <ul class="lane testing" aria-label="Machines on another branch">
       {#each r.testing as m (m.host)}
         <li>
           <span class="lane-name mono">{m.branch}</span>

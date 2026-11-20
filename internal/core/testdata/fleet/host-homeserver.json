@@ -270,6 +270,13 @@
   "comin": true,
   "cominRemotes": [
    "https://forgejo.home.lan/pablo/nixos-config.git"
+  ],
+  "cominBranches": [
+   {
+    "url": "https://forgejo.home.lan/pablo/nixos-config.git",
+    "main": "main",
+    "testing": "testing-homeserver"
+   }
   ]
  },
  "managedPackages": {

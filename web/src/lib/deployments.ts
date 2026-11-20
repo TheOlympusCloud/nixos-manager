@@ -51,7 +51,7 @@ export function stateDetail(m: MachineDeployment): string {
 export type Rollout = {
   /** The newest commits of the branch, newest first, with the machines that run each. */
   rows: { commit: Commit; machines: MachineDeployment[] }[]
-  /** Machines that follow their own testing branch. */
+  /** Machines that follow another branch: their testing branch, or another main branch. */
   testing: MachineDeployment[]
   /** Machines on a commit older than the rows, or none that is known. */
   older: MachineDeployment[]
