@@ -4,6 +4,7 @@ package core
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -733,7 +734,7 @@ func (r *Repo) Log(ctx context.Context, p, rev string, limit int) ([]Commit, err
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	args := []string{"log", "--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x1e", fmt.Sprintf("-n%d", limit)}
+	args := []string{"log", logFormat, fmt.Sprintf("-n%d", limit)}
 	if rev != "" {
 		sha, err := r.resolve(ctx, rev)
 		if err != nil {
@@ -750,6 +751,13 @@ func (r *Repo) Log(ctx context.Context, p, rev string, limit int) ([]Commit, err
 	if err != nil {
 		return nil, err
 	}
+	return parseLog(out), nil
+}
+
+// logFormat makes git log print what parseLog reads.
+const logFormat = "--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x1e"
+
+func parseLog(out string) []Commit {
 	commits := []Commit{}
 	for _, rec := range strings.Split(out, "\x1e") {
 		f := strings.Split(strings.TrimLeft(rec, "\n"), "\x00")
@@ -757,7 +765,7 @@ func (r *Repo) Log(ctx context.Context, p, rev string, limit int) ([]Commit, err
 			commits = append(commits, Commit{SHA: f[0], Short: f[1], Author: f[2], Email: f[3], Date: f[4], Subject: f[5]})
 		}
 	}
-	return commits, nil
+	return commits
 }
 
 type CommitInfo struct {
@@ -923,23 +931,48 @@ func (r *Repo) isAncestor(ctx context.Context, a, b string) bool {
 	return err == nil
 }
 
-// Revert stages the inverse of a commit; the user checks and commits it like any change.
-func (r *Repo) Revert(ctx context.Context, rev string) error {
+// Revert stages the inverse of a commit; the user checks and commits it like
+// any change. With since, it stages the inverse of every commit after since up
+// to rev, newest first, as one change: what brings rev's changes back to since.
+// The commits must be on the current branch.
+func (r *Repo) Revert(ctx context.Context, rev, since string) error {
 	sha, err := r.resolve(ctx, rev)
 	if err != nil {
 		return err
+	}
+	from := ""
+	if since != "" {
+		if from, err = r.resolve(ctx, since); err != nil {
+			return err
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.clean(ctx); err != nil {
 		return err
 	}
-	if parents, _ := r.git(ctx, "rev-list", "--parents", "-n", "1", sha); len(strings.Fields(parents)) > 2 {
-		return errorf(ErrInvalid, "%.12s is a merge commit; revert the commits it brought in instead", sha)
+	if !r.isAncestor(ctx, sha, "HEAD") {
+		cur, _ := r.git(ctx, "symbolic-ref", "--short", "-q", "HEAD")
+		return errorf(ErrConflict, "%.7s is not on %s in this working copy: pull first if it was pushed from elsewhere, or switch to the branch it is on", sha, cmp.Or(strings.TrimSpace(cur), "the current commit"))
+	}
+	what := fmt.Sprintf("%.12s", sha)
+	if from == "" {
+		if parents, _ := r.git(ctx, "rev-list", "--parents", "-n", "1", sha); len(strings.Fields(parents)) > 2 {
+			return errorf(ErrInvalid, "%.12s is a merge commit; revert the commits it brought in instead", sha)
+		}
+	} else {
+		if from == sha || !r.isAncestor(ctx, from, sha) {
+			return errorf(ErrInvalid, "%.7s does not come before %.7s", from, sha)
+		}
+		if merges, _ := r.git(ctx, "rev-list", "--merges", "--count", from+".."+sha); strings.TrimSpace(merges) != "0" {
+			return errorf(ErrInvalid, "the commits after %.7s up to %.7s include a merge; revert them one by one instead", from, sha)
+		}
+		what = fmt.Sprintf("the commits after %.12s up to %.12s", from, sha)
+		sha = from + ".." + sha // git reverts a range newest first
 	}
 	if _, err := r.git(ctx, "revert", "--no-commit", sha); err != nil {
 		r.git(ctx, "revert", "--abort")
-		return errorf(ErrConflict, "%.12s cannot be reverted cleanly; later commits changed the same lines.\n%v", sha, err)
+		return errorf(ErrConflict, "%s cannot be reverted cleanly; later commits changed the same lines.\n%v", what, err)
 	}
 	_, err = r.git(ctx, "revert", "--quit") // keep the staged changes, drop git's "revert in progress"
 	return err

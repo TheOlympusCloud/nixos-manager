@@ -297,6 +297,12 @@ func TestDeploymentOverviewFollowsCominBranches(t *testing.T) {
 	}
 
 	ov := must[DeployOverview](t)(d.Overview(ctx, m, now))
+	for _, x := range ov.Machines {
+		want := map[string][2]string{"a": {"stable", "try-a"}, "b": {"stable", "testing-b"}, "c": {"stable", "testing-c"}, "d": {"main", "testing-d"}, "gone": {"stable", "testing-gone"}}[x.Host]
+		if x.Main != want[0] || x.Testing != want[1] {
+			t.Errorf("%s follows %s and %s, want %v", x.Host, x.Main, x.Testing, want)
+		}
+	}
 	if ov.Branch != "stable" || len(ov.Commits) != 1 || ov.Commits[0].SHA != c1 {
 		t.Fatalf("the fleet follows %q: %+v", ov.Branch, ov.Commits)
 	}
@@ -641,5 +647,69 @@ func TestDrift(t *testing.T) {
 	}
 	if _, ok := src.asked[sha('e')]; ok {
 		t.Error("asked to evaluate a commit the working copy does not have")
+	}
+}
+
+// A machine whose deployment failed on its main branch names the commits
+// since its last successful deployment, newest first: reverting them brings it
+// back to what it ran. None when that is not known, not on the main branch, a
+// merge is among them, or there are more than 10.
+func TestDeploymentOverviewCulprits(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	var c []string
+	for i := range 12 {
+		write(t, r, "flake.nix", fmt.Sprintf("%d\n", i))
+		c = append(c, commitAll(t, r, fmt.Sprintf("c%d", i)))
+	}
+	gitOut(t, r.Dir, "switch", "-q", "-c", "side", c[5])
+	write(t, r, "side.nix", "side\n")
+	commitAll(t, r, "side")
+	gitOut(t, r.Dir, "switch", "-q", "main")
+	gitOut(t, r.Dir, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "merge", "--no-ff", "-q", "-m", "merge side", "side")
+	write(t, r, "flake.nix", "12\n")
+	c12 := commitAll(t, r, "c12")
+	gitOut(t, r.Dir, "switch", "-q", "-c", "testing-trial")
+	write(t, r, "trial.nix", "trial\n")
+	ct := commitAll(t, r, "trial")
+	gitOut(t, r.Dir, "switch", "-q", "main")
+
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	now := time.Now()
+	report := func(host string, good, failed string) {
+		t.Helper()
+		if good != "" {
+			ok(t, d.Record(ReportIn{Host: host, Commit: good, Status: "done"}, now.Add(-time.Hour)))
+		}
+		ok(t, d.Record(ReportIn{Host: host, Commit: failed, Phase: "build", Status: "failed", Error: "boom"}, now))
+	}
+	report("one", c[10], c[11])
+	report("three", c[8], c[11])
+	report("ten", c[1], c[11])
+	report("many", c[0], c[11])
+	report("merged", c[11], c12)
+	report("never", "", c[11])
+	report("trial", c12, ct)
+	ok(t, d.Record(ReportIn{Host: "fine", Commit: c12, Status: "done"}, now))
+
+	ov := must[DeployOverview](t)(d.Overview(ctx, fleet("one", "three", "ten", "many", "merged", "never", "trial", "fine"), now))
+	want := map[string][]string{"one": {c[11]}, "three": {c[11], c[10], c[9]}, "ten": slices.Collect(func(yield func(string) bool) {
+		for i := 11; i > 1; i-- {
+			if !yield(c[i]) {
+				return
+			}
+		}
+	})}
+	for _, m := range ov.Machines {
+		var got []string
+		for _, x := range m.Culprits {
+			got = append(got, x.SHA)
+		}
+		if !slices.Equal(got, want[m.Host]) {
+			t.Errorf("%s: culprits %v, want %v", m.Host, got, want[m.Host])
+		}
+	}
+	if i := slices.IndexFunc(ov.Machines, func(m MachineDeployment) bool { return m.Host == "one" }); ov.Machines[i].Culprits[0].Subject != "c11" {
+		t.Errorf("culprit %+v", ov.Machines[i].Culprits[0])
 	}
 }

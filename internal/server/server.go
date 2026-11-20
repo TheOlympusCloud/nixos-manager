@@ -182,8 +182,8 @@ func (s *Server) apiMux() *http.ServeMux {
 	api.HandleFunc("POST /api/switch", post(func(r *http.Request, in struct{ Name string }) (any, error) {
 		return nil, s.Svc.Switch(r.Context(), in.Name)
 	}))
-	api.HandleFunc("POST /api/revert", post(func(r *http.Request, in struct{ Rev string }) (any, error) {
-		return nil, s.Svc.Revert(r.Context(), in.Rev)
+	api.HandleFunc("POST /api/revert", post(func(r *http.Request, in struct{ Rev, Since string }) (any, error) {
+		return nil, s.Svc.Revert(r.Context(), in.Rev, in.Since)
 	}))
 	api.HandleFunc("POST /api/merge", post(func(r *http.Request, in struct{ Branch string }) (any, error) {
 		msg, err := s.Svc.Merge(r.Context(), in.Branch)

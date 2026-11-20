@@ -226,10 +226,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	}) (done, error) {
 		return done{true}, svc.Switch(ctx, in.Name)
 	})
-	tool(s, "revert_commit", "Stage the inverse of a commit (nothing is committed): run_check, then commit, like any change. Refused if there are local changes or it would conflict.", func(ctx context.Context, in struct {
-		Rev string `json:"rev"`
+	tool(s, "revert_commit", "Stage the inverse of a commit (nothing is committed): run_check, then commit, like any change. With since, the inverse of every commit after since up to rev, as one change: deployments names them as culprits for a machine whose deployment failed, to bring it back to what it last deployed. Refused if there are local changes, the commits are not on the current branch (pull first), the range has a merge, or it would conflict.", func(ctx context.Context, in struct {
+		Rev   string `json:"rev"`
+		Since string `json:"since,omitempty" jsonschema:"optional: revert every commit after this one, up to rev"`
 	}) (done, error) {
-		return done{true}, svc.Revert(ctx, in.Rev)
+		return done{true}, svc.Revert(ctx, in.Rev, in.Since)
 	})
 	tool(s, "merge_branch", "Stage another branch (e.g. testing-<host>) squashed into the current one and return a suggested commit message; run_check, then commit.", func(ctx context.Context, in struct {
 		Branch string `json:"branch"`

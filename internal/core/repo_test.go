@@ -491,7 +491,7 @@ func TestRevertStagesTheInverse(t *testing.T) {
 	commitAll(t, r, "first")
 	write(t, r, "a.nix", "two\n")
 	bad := commitAll(t, r, "second")
-	ok(t, r.Revert(ctx, bad))
+	ok(t, r.Revert(ctx, bad, ""))
 	if c, _, _ := r.Read("a.nix"); c != "one\n" {
 		t.Fatalf("after revert a.nix = %q", c)
 	}
@@ -502,7 +502,7 @@ func TestRevertStagesTheInverse(t *testing.T) {
 	if head := gitOut(t, r.Dir, "rev-parse", "HEAD"); head != bad {
 		t.Fatal("revert made a commit")
 	}
-	isErr(t, r.Revert(ctx, bad), ErrConflict) // local changes in the way
+	isErr(t, r.Revert(ctx, bad, ""), ErrConflict) // local changes in the way
 	_, err := r.FileAt(ctx, "nope", "a.nix")
 	isErr(t, err, ErrNotFound)
 }
@@ -561,8 +561,69 @@ func TestRevertRefusesAMergeCommit(t *testing.T) {
 	commitAll(t, r, "side")
 	ok(t, r.Switch(ctx, "main"))
 	gitOut(t, r.Dir, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "merge", "--no-ff", "-m", "merge side", "side")
-	isErr(t, r.Revert(ctx, "HEAD"), ErrInvalid)
+	isErr(t, r.Revert(ctx, "HEAD", ""), ErrInvalid)
 	if st := must[Status](t)(r.Status(ctx)); len(st.Files) != 0 {
 		t.Fatalf("a refused revert must leave git clean: %+v", st.Files)
 	}
+}
+
+// Reverting since a commit stages the inverse of every commit after it, up to
+// rev, newest first, as one change: what rolls a machine back to since.
+func TestRevertSince(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "a.nix", "one\n")
+	good := commitAll(t, r, "first")
+	write(t, r, "a.nix", "two\n")
+	commitAll(t, r, "second")
+	write(t, r, "a.nix", "three\n")
+	write(t, r, "b.nix", "new\n")
+	bad := commitAll(t, r, "third")
+	write(t, r, "c.nix", "later\n")
+	later := commitAll(t, r, "later")
+
+	isErr(t, r.Revert(ctx, good, bad), ErrInvalid) // since after rev
+	isErr(t, r.Revert(ctx, bad, bad), ErrInvalid)
+	ok(t, r.Revert(ctx, bad, good))
+	if a, _, _ := r.Read("a.nix"); a != "one\n" {
+		t.Fatalf("a.nix = %q", a)
+	}
+	if _, _, err := r.Read("b.nix"); err == nil {
+		t.Fatal("b.nix, added by the third commit, is still there")
+	}
+	if c, _, _ := r.Read("c.nix"); c != "later\n" {
+		t.Fatal("the commit after rev was reverted too")
+	}
+	if head := gitOut(t, r.Dir, "rev-parse", "HEAD"); head != later {
+		t.Fatal("revert made a commit")
+	}
+	if _, err := r.git(ctx, "rev-parse", "-q", "--verify", "REVERT_HEAD"); err == nil {
+		t.Fatal("git was left mid-revert")
+	}
+
+	gitOut(t, r.Dir, "reset", "-q", "--hard")
+	ok(t, r.CreateBranch(ctx, "side", good))
+	write(t, r, "d.nix", "side\n")
+	commitAll(t, r, "side")
+	ok(t, r.Switch(ctx, "main"))
+	gitOut(t, r.Dir, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "merge", "--no-ff", "-q", "-m", "merge side", "side")
+	isErr(t, r.Revert(ctx, "HEAD", good), ErrInvalid) // a merge in the range
+	if st := must[Status](t)(r.Status(ctx)); len(st.Files) != 0 {
+		t.Fatalf("a refused revert must leave git clean: %+v", st.Files)
+	}
+}
+
+// A commit the current branch does not contain (pushed elsewhere and fetched,
+// not pulled) cannot be reverted on it: pull first.
+func TestRevertRefusesACommitNotOnTheBranch(t *testing.T) {
+	ctx := context.Background()
+	r, other := remotePair(t)
+	otherCommit(t, other, "a.nix", "2\n")
+	gitOut(t, r.Dir, "fetch", "-q", "origin")
+	err := r.Revert(ctx, "origin/main", "")
+	isErr(t, err, ErrConflict)
+	if !strings.Contains(err.Error(), "pull") {
+		t.Fatalf("got %v", err)
+	}
+	ok(t, r.Revert(ctx, "HEAD", ""))
 }
