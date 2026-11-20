@@ -16,7 +16,12 @@
       url = "github:Mic92/sops-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # Add more inputs here (disko, nixos-hardware, ...), then run "Lock".
+    # Disk layouts (hosts/<name>/disk-config.nix) for machines nixos-anywhere installs.
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    # Add more inputs here (nixos-hardware, ...), then run "Lock".
   };
 
   outputs =

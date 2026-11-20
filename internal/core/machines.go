@@ -16,6 +16,8 @@ type MachineSpec struct {
 	Role     string `json:"role"`               // minimal, server or desktop
 	Hardware string `json:"hardware,omitempty"` // nixos-generate-config output; a placeholder when empty
 	Platform string `json:"platform,omitempty" jsonschema:"hardware (default: a physical machine), proxmox-lxc (a NixOS container on Proxmox: no hardware configuration) or proxmox-vm (a Proxmox virtual machine: QEMU guest support plus the hardware configuration)"`
+	Disk     string `json:"disk,omitempty" jsonschema:"a disk layout for disko, for a machine nixos-anywhere installs (hardware or proxmox-vm only): ext4, or btrfs (subvolumes for /, /home and /nix). nixos-anywhere then writes hardware-configuration.nix, so leave hardware out. Empty: NixOS is installed by hand"`
+	Device   string `json:"device,omitempty" jsonschema:"with a disk layout, the disk nixos-anywhere erases and installs on, such as /dev/sda, /dev/nvme0n1 or /dev/disk/by-id/..."`
 }
 
 type MachineCreated struct {
@@ -25,6 +27,9 @@ type MachineCreated struct {
 	// line to add to its nixosConfigurations.
 	Registered bool   `json:"registered"`
 	Snippet    string `json:"snippet,omitempty"`
+	// InputSnippet: the machine has a disk layout but flake.nix declares no
+	// disko input; these lines go in its inputs, then Lock.
+	InputSnippet string `json:"inputSnippet,omitempty"`
 }
 
 var systems = map[string]bool{"x86_64-linux": true, "aarch64-linux": true}
@@ -70,9 +75,12 @@ func gcSettings() map[string]any {
 	}
 }
 
+// %[3]s is the import of disk-config.nix, for a machine with a disk layout.
 const defaultNixTemplate = `{ ... }:
 {
-  imports = [ ./hardware-configuration.nix ];
+  imports = [
+    ./hardware-configuration.nix%[3]s
+  ];
 
   networking.hostName = %[1]q;
 
@@ -102,7 +110,7 @@ const proxmoxLXCTemplate = `{ modulesPath, ... }:
 const proxmoxVMTemplate = `{ modulesPath, ... }:
 {
   imports = [
-    ./hardware-configuration.nix
+    ./hardware-configuration.nix%[3]s
     (modulesPath + "/profiles/qemu-guest.nix")
   ];
 
@@ -129,6 +137,128 @@ const hardwarePlaceholder = `# Placeholder: replace with the output of nixos-gen
   };
 }
 `
+
+// The hardware file of a machine with a disk layout until nixos-anywhere
+// writes the real one: no file systems or boot loader, which disk-config.nix sets.
+const diskoHardwarePlaceholder = `# Placeholder: nixos-anywhere writes the real one when it installs this machine
+# (--generate-hardware-config). disk-config.nix sets the disks and the boot loader.
+{ lib, ... }:
+{
+  nixpkgs.hostPlatform = lib.mkDefault %q;
+}
+`
+
+// disk-config.nix: %[1]q is the disk, %[2]s the boot loader for the system,
+// %[3]s the BIOS boot partition (x86_64 only), %[4]s the root partition's content.
+const diskConfigTemplate = `# The disks: disko partitions and formats them when nixos-anywhere installs this
+# machine, erasing everything on %[1]s, and mounts them from then on. A change
+# here does not repartition an installed machine.
+{ inputs, ... }:
+{
+  imports = [ inputs.disko.nixosModules.disko ];
+%[2]s
+  disko.devices.disk.main = {
+    type = "disk";
+    device = %[1]q;
+    content = {
+      type = "gpt";
+      partitions = {%[3]s
+        ESP = {
+          size = "1G";
+          type = "EF00";
+          content = {
+            type = "filesystem";
+            format = "vfat";
+            mountpoint = "/boot";
+            mountOptions = [ "umask=0077" ];
+          };
+        };
+        root = {
+          size = "100%%";
+          content = {%[4]s
+          };
+        };
+      };
+    };
+  };
+}
+`
+
+const grubBIOSAndUEFI = `
+  # GRUB boots BIOS and UEFI machines alike: disko installs it on the disk with
+  # the BIOS boot partition, and UEFI firmware finds it at the removable-media path.
+  boot.loader.grub = {
+    efiSupport = true;
+    efiInstallAsRemovable = true;
+  };
+`
+
+const grubUEFI = `
+  # GRUB on UEFI, found at the removable-media path.
+  boot.loader.grub = {
+    device = "nodev";
+    efiSupport = true;
+    efiInstallAsRemovable = true;
+  };
+`
+
+const biosBootPartition = `
+        boot = {
+          size = "1M";
+          type = "EF02";
+        };`
+
+const ext4Root = `
+            type = "filesystem";
+            format = "ext4";
+            mountpoint = "/";`
+
+const btrfsRoot = `
+            type = "btrfs";
+            extraArgs = [ "-f" ];
+            subvolumes = {
+              "/root" = {
+                mountpoint = "/";
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
+              };
+              "/home" = {
+                mountpoint = "/home";
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
+              };
+              "/nix" = {
+                mountpoint = "/nix";
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
+              };
+            };`
+
+var diskLayouts = map[string]string{"ext4": ext4Root, "btrfs": btrfsRoot}
+
+// diskDevice is a disk's path: plain characters only, as it goes into Nix and is shown in a shell command.
+var diskDevice = regexp.MustCompile(`^/dev/[A-Za-z0-9][A-Za-z0-9._:+/-]*$`)
+
+const diskoInputSnippet = `disko = {
+  url = "github:nix-community/disko";
+  inputs.nixpkgs.follows = "nixpkgs";
+};`
+
+// hasDiskoInput tells whether flake.nix declares an input named disko (disko = …, disko.url = …), outside comments.
+func hasDiskoInput(flake string) bool {
+	return diskoInput.MatchString(nixComment.ReplaceAllString(flake, ""))
+}
+
+var (
+	diskoInput = regexp.MustCompile(`(^|[\s.{;])disko(\.url)?\s*=`)
+	nixComment = regexp.MustCompile(`#[^\n]*`)
+)
 
 // machineName becomes networking.hostName, so it follows NixOS's host name rule (lowercase here).
 var machineName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
@@ -160,10 +290,29 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 	if lxc && strings.TrimSpace(spec.Hardware) != "" {
 		return MachineCreated{}, errorf(ErrInvalid, "a Proxmox LXC has no hardware configuration: leave it out")
 	}
+	root, disko := diskLayouts[spec.Disk]
+	switch {
+	case spec.Disk == "" && spec.Device != "":
+		return MachineCreated{}, errorf(ErrInvalid, "a disk is only used with a disk layout")
+	case spec.Disk == "":
+	case !disko:
+		return MachineCreated{}, errorf(ErrInvalid, "unknown disk layout %q (ext4 or btrfs)", spec.Disk)
+	case lxc:
+		return MachineCreated{}, errorf(ErrInvalid, "a Proxmox LXC has no disk to lay out")
+	case !diskDevice.MatchString(spec.Device) || strings.Contains(spec.Device, "..") || len(spec.Device) > 200:
+		return MachineCreated{}, errorf(ErrInvalid, "the disk to install on is a path in /dev, such as /dev/sda or /dev/disk/by-id/…")
+	case strings.TrimSpace(spec.Hardware) != "":
+		return MachineCreated{}, errorf(ErrInvalid, "with a disk layout, nixos-anywhere writes the hardware configuration: leave it out")
+	}
 	dir := "hosts/" + spec.Name
 	hardware := spec.Hardware
 	if strings.TrimSpace(hardware) == "" {
 		hardware = fmt.Sprintf(hardwarePlaceholder, spec.System)
+	}
+	diskImport := ""
+	if disko {
+		hardware = fmt.Sprintf(diskoHardwarePlaceholder, spec.System)
+		diskImport = "\n    ./disk-config.nix"
 	}
 	var managed bytes.Buffer
 	enc := json.NewEncoder(&managed)
@@ -172,12 +321,19 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 		return MachineCreated{}, err
 	}
 	files := []struct{ path, content string }{
-		{dir + "/default.nix", fmt.Sprintf(template, spec.Name, spec.System)},
+		{dir + "/default.nix", fmt.Sprintf(template, spec.Name, spec.System, diskImport)},
 		{dir + "/hardware-configuration.nix", hardware},
 		{dir + "/managed.json", managed.String()},
 	}
 	if lxc {
 		files = slices.Delete(files, 1, 2)
+	}
+	if disko {
+		grub, bios := grubBIOSAndUEFI, biosBootPartition
+		if spec.System != "x86_64-linux" {
+			grub, bios = grubUEFI, "" // GRUB's BIOS target is x86 only
+		}
+		files = slices.Insert(files, 2, struct{ path, content string }{dir + "/disk-config.nix", fmt.Sprintf(diskConfigTemplate, spec.Device, grub, bios, root)})
 	}
 	// Check every file first: stopping halfway would leave a machine the flake picks up.
 	for _, f := range files {
@@ -196,6 +352,9 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 	res.Registered = strings.Contains(flake, "readDir ./hosts")
 	if !res.Registered {
 		res.Snippet = fmt.Sprintf("%s = mkHost %q;", spec.Name, spec.Name)
+	}
+	if disko && !hasDiskoInput(flake) {
+		res.InputSnippet = diskoInputSnippet
 	}
 	return res, nil
 }
