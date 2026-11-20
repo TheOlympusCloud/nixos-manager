@@ -386,6 +386,16 @@ func TestChangeDetectionWithRealNix(t *testing.T) {
 	} {
 		must[MachineCreated](t)(s.CreateMachine(spec))
 	}
+	// Locked, so nixpkgs cannot move between the evaluations compared.
+	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+	select {
+	case <-lock.Done():
+	case <-time.After(10 * time.Minute):
+		t.Fatal("the lock did not finish")
+	}
+	if info := lock.Info(true); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
 	ok(t, s.Stage(ctx, nil))
 	must[string](t)(s.Commit(ctx, "machines", true))
 	model := func(at string) *Model {
