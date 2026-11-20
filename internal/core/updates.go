@@ -160,8 +160,12 @@ func (u *Updates) Status(ctx context.Context) UpdateStatus {
 	}
 	u.mu.Unlock()
 	if up := st.Update; up != nil && (up.State == "ready" || up.State == "failed" || up.State == "checking") {
-		tip, _ := u.Svc.Repo.git(ctx, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+up.Branch)
-		st.Outdated = strings.TrimSpace(tip) != up.Base
+		r := u.Svc.Repo
+		tip, _ := r.git(ctx, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+up.Branch)
+		tip = strings.TrimSpace(tip)
+		if st.Outdated = tip != up.Base; st.Outdated && tip != "" && r.isAncestor(ctx, up.Commit, tip) {
+			up.State, st.Outdated = "merged", false // in Forgejo, say, or before a restart recorded it
+		}
 	}
 	return st
 }
@@ -315,9 +319,10 @@ func (u *Updates) run(up *Update, via string) {
 	inputs := DiffInputs(before, after)
 
 	r.mu.Lock()
+	made, _ := r.git(ctx, "rev-parse", "--verify", "-q", updateRef) // the last update made, pushed or not
 	sha, err := r.commitLock(ctx, base, updateMessage(inputs, via), lock)
 	if err == nil {
-		err = u.pushUpdate(ctx, sha, pushed)
+		err = u.pushUpdate(ctx, sha, pushed, strings.TrimSpace(made))
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -425,14 +430,15 @@ func (r *Repo) commitLock(ctx context.Context, base, message string, lock []byte
 }
 
 // pushUpdate pushes sha to flake-update on the remote, which holds remote
-// ("" for no such branch): only when that is the commit this console pushed
-// there last, so a branch of that name someone else made is never lost.
-// Needs r.mu.
-func (u *Updates) pushUpdate(ctx context.Context, sha, remote string) error {
+// ("" for no such branch): only when that is a commit this console pushed
+// there, so a branch of that name someone else made is never lost. made is
+// the last update made before sha: pushed by a server that stopped before it
+// recorded the push. Needs r.mu.
+func (u *Updates) pushUpdate(ctx context.Context, sha, remote, made string) error {
 	u.mu.Lock()
-	mine := u.f.Pushed
+	pushed := u.f.Pushed
 	u.mu.Unlock()
-	if remote != "" && remote != mine {
+	if remote != "" && remote != pushed && remote != made {
 		return errorf(ErrConflict, "the remote has a branch %s that this console did not push there (%.7s): rename or delete it, as the update goes there", updateBranch, remote)
 	}
 	nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), netTimeout)
@@ -627,7 +633,7 @@ func (u *Updates) merge(ctx context.Context, commit, branch, base string) (msg s
 	tip, _ := r.git(ctx, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+branch)
 	if tip = strings.TrimSpace(tip); tip != base {
 		if tip != "" && r.isAncestor(ctx, commit, tip) {
-			return "", false, errorf(ErrConflict, "%s already has the update", branch)
+			return fmt.Sprintf("%s already has the update.", branch), false, nil
 		}
 		return "", false, errorf(ErrConflict, "%s moved on since the update was made (it is at %.7s now): update again, on top of it", branch, cmpOr(tip, "nothing"))
 	}

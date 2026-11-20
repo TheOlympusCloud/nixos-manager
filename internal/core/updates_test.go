@@ -533,3 +533,42 @@ func TestUpdateWithRealNix(t *testing.T) {
 		t.Fatal("main is not the update")
 	}
 }
+
+// An update merged elsewhere (Forgejo, or before a restart could record the
+// merge) shows as merged, and Merge says so instead of failing.
+func TestUpdateMergedElsewhere(t *testing.T) {
+	ctx := context.Background()
+	s, u, next := updateService(t)
+	ok(t, os.WriteFile(next, []byte(lockAt(newRev, 1794000000, "")), 0o644))
+	up := runUpdate(t, ctx, u)
+	clone := laptop(t, s)
+	gitOut(t, clone, "fetch", "-q", "origin", "flake-update")
+	gitOut(t, clone, "push", "-q", "origin", "FETCH_HEAD:main")
+	gitOut(t, s.Repo.Dir, "fetch", "-q", "origin")
+	if st := u.Status(ctx); st.Update.State != "merged" || st.Outdated {
+		t.Fatalf("status %+v %+v", st, st.Update)
+	}
+	msg := must[string](t)(u.Merge(ctx, up.Commit))
+	if !strings.Contains(msg, "main already has the update") {
+		t.Fatalf("merge: %s", msg)
+	}
+	if st := u.Status(ctx); st.Update.State != "merged" || len(u.events()) != 0 {
+		t.Fatalf("after %+v", st.Update)
+	}
+}
+
+// When the server stopped after pushing flake-update but before it recorded
+// the push, the next update still knows the branch is its own.
+func TestUpdateKnowsItsBranchAfterACrashedSave(t *testing.T) {
+	ctx := context.Background()
+	s, u, next := updateService(t)
+	ok(t, os.WriteFile(next, []byte(lockAt(newRev, 1794000000, "")), 0o644))
+	runUpdate(t, ctx, u)
+	u.mu.Lock()
+	u.f.Pushed = "" // as if updates.json was not saved after the push
+	u.mu.Unlock()
+	ok(t, os.WriteFile(next, []byte(lockAt("ccccccc3333333333333333333333333333333333", 1795000000, "")), 0o644))
+	if up := runUpdate(t, ctx, u); up.State != "ready" || remoteRef(t, s, "flake-update") != up.Commit {
+		t.Fatalf("update %+v", up)
+	}
+}
