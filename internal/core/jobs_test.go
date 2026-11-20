@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,76 @@ func TestCheckRunsOnStagedSnapshotAndGatesCommit(t *testing.T) {
 	_, err = s.Commit(ctx, "feat: b", false)
 	isErr(t, err, ErrNotChecked)
 	must[string](t)(s.Commit(ctx, "feat: b", true))
+}
+
+// A restart (comin redeploying the console, say) must not forget which trees
+// passed: commit and push would be refused until the checks ran again.
+func TestPassedChecksSurviveARestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "checks.json")
+	s := newService(t)
+	ok(t, s.Jobs.PersistChecks(path))
+	write(t, s.Repo, "a.nix", "x\n")
+	ok(t, s.Stage(ctx, nil))
+	check(t, s)
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("checks.json: %v %v", fi, err)
+	}
+
+	again := NewService(s.Repo)
+	ok(t, again.Jobs.PersistChecks(path))
+	if st := must[Status](t)(again.Status(ctx)); !st.StagedChecked {
+		t.Fatal("the passed check was forgotten after a restart")
+	}
+	must[string](t)(again.Commit(ctx, "feat: a", false))
+
+	ok(t, os.WriteFile(path, []byte(`{"passed":["`), 0o600)) // torn by hand: the writes themselves are atomic
+	broken := NewService(s.Repo)
+	broken.Jobs.Nix = s.Jobs.Nix
+	ok(t, broken.Jobs.PersistChecks(path))
+	write(t, s.Repo, "b.nix", "y\n")
+	ok(t, s.Stage(ctx, nil))
+	if st := must[Status](t)(broken.Status(ctx)); st.StagedChecked {
+		t.Fatal("an unreadable file passed a tree")
+	}
+	check(t, broken)
+	tree := must[Status](t)(broken.Status(ctx)).StagedTree
+	if b := must[[]byte](t)(os.ReadFile(path)); !strings.Contains(string(b), tree) {
+		t.Fatalf("the unreadable file was not replaced: %s", b)
+	}
+}
+
+// A check that passed stays passed when the file cannot be written, and says so.
+func TestPassedCheckThatCannotBeSaved(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t)
+	ok(t, s.Jobs.PersistChecks(filepath.Join(t.TempDir(), "gone", "checks.json")))
+	write(t, s.Repo, "a.nix", "x\n")
+	ok(t, s.Stage(ctx, nil))
+	info := wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"})))
+	if info.State != "passed" || !strings.Contains(info.Output, "could not be saved") {
+		t.Fatalf("job %s:\n%s", info.State, info.Output)
+	}
+	if st := must[Status](t)(s.Status(ctx)); !st.StagedChecked {
+		t.Fatal("the pass was lost with the file")
+	}
+}
+
+// The list is capped; a tree that passes again counts as new.
+func TestPassedChecksKeepTheNewest(t *testing.T) {
+	s := newService(t)
+	js := s.Jobs
+	for i := range keepChecks + 1 {
+		js.pass(fmt.Sprintf("%040x", i))
+	}
+	js.pass(fmt.Sprintf("%040x", 1))
+	js.pass(fmt.Sprintf("%040x", keepChecks+1))
+	if js.Passed(fmt.Sprintf("%040x", 0)) || js.Passed(fmt.Sprintf("%040x", 2)) {
+		t.Fatal("the oldest passed trees were kept past the cap")
+	}
+	if !js.Passed(fmt.Sprintf("%040x", 1)) || !js.Passed(fmt.Sprintf("%040x", keepChecks+1)) || len(js.passedOrder) != keepChecks {
+		t.Fatalf("kept %d trees; the newest are missing", len(js.passedOrder))
+	}
 }
 
 func TestFailingCheckDoesNotPass(t *testing.T) {

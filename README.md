@@ -48,7 +48,8 @@ An MCP server gives automation the same features.
   run on exactly the staged changes, with live output. A commit needs a passing
   check of the staged changes, and a push needs a passing check of the commit
   being pushed. In the web UI you can override both explicitly; MCP clients
-  cannot.
+  cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so a restart
+  does not ask for them again.
 - **Git**: stage, commit, branches, push and pull, revert a commit, merge a
   `testing-<host>` branch, repository and per-file history with diffs and
   restore. Every commit uses the configured person's name and email.
@@ -505,14 +506,16 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy and tokens (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks and deployment reports (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
 | `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
 
-Sessions last 7 days and are kept in memory, so a restart logs you out.
+Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
+a keyed hash of each one, never the session itself. Changing the password ends
+every session.
 
 Logins are limited before the password is checked: 10 attempts per 10
 minutes from one address, and 50 per 10 minutes from all addresses together.

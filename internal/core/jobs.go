@@ -3,12 +3,15 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,11 +22,13 @@ const (
 	jobTimeout  = 30 * time.Minute
 	maxOutput   = 8 << 20 // per job; nix -L can be chatty
 	keepJobs    = 50
-	queueLength = 256 // skipped model jobs keep their slot until the worker drains them
+	queueLength = 256  // skipped model jobs keep their slot until the worker drains them
+	keepChecks  = 1000 // passed trees remembered; the oldest are forgotten first
 )
 
 // Jobs runs Nix commands one at a time, in submission order, and keeps their
-// output for the UI and MCP. It remembers which staged trees passed a check.
+// output for the UI and MCP. It remembers which staged trees passed a check,
+// in checks.json once PersistChecks has named it.
 type Jobs struct {
 	Repo   *Repo
 	Nix    string // nix binary
@@ -33,6 +38,8 @@ type Jobs struct {
 	jobs        []*Job // oldest first
 	nextID      int
 	passed      map[string]bool
+	passedOrder []string // the passed trees, oldest first
+	checksPath  string   // "" keeps them in memory only
 	queue       chan *Job
 	models      map[string]*Model // by git tree
 	modelOrder  []string
@@ -231,6 +238,48 @@ func (js *Jobs) Passed(tree string) bool {
 	return js.passed[tree]
 }
 
+type checksFile struct {
+	Passed []string `json:"passed"` // trees that passed a check, oldest first
+}
+
+// PersistChecks loads the trees that passed a check from path and saves every
+// new one there, so a restart does not ask for the checks again. An unreadable
+// file only means running checks again, so it is reported and then replaced.
+func (js *Jobs) PersistChecks(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	var f checksFile
+	if err == nil {
+		if err := json.Unmarshal(b, &f); err != nil {
+			slog.Warn("cannot read the passed checks; they must run again", "file", path, "err", err)
+			f.Passed = nil
+		}
+	}
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	js.checksPath = path
+	for _, t := range f.Passed {
+		js.pass(t)
+	}
+	return nil
+}
+
+// pass records a passed tree as the newest and returns the list to save; js.mu
+// must be held.
+func (js *Jobs) pass(tree string) []string {
+	js.passedOrder = append(slices.DeleteFunc(js.passedOrder, func(t string) bool { return t == tree }), tree)
+	js.passed[tree] = true
+	if n := len(js.passedOrder) - keepChecks; n > 0 {
+		for _, t := range js.passedOrder[:n] {
+			delete(js.passed, t)
+		}
+		js.passedOrder = slices.Delete(js.passedOrder, 0, n)
+	}
+	return slices.Clone(js.passedOrder)
+}
+
 func (js *Jobs) worker() {
 	for job := range js.queue {
 		if job.skip.Load() {
@@ -247,8 +296,13 @@ func (js *Jobs) worker() {
 		}
 		if err == nil && job.Req.Kind == "check" {
 			js.mu.Lock()
-			js.passed[job.tree] = true
+			passed, path := js.pass(job.tree), js.checksPath
 			js.mu.Unlock()
+			if path != "" { // only this worker saves, so the writes cannot overtake each other
+				if b, err := json.Marshal(checksFile{Passed: passed}); err != nil || writeAtomic(path, b) != nil {
+					fmt.Fprintf(job, "\nThe check passed, but %s could not be saved: after a restart it must run again.\n", path)
+				}
+			}
 		}
 		job.finish(err == nil)
 	}
