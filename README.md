@@ -49,7 +49,10 @@ An MCP server gives automation the same features.
   that sets it, compared across the fleet, with "copy to" other machines.
 - **New machines**: a wizard creates `hosts/<name>/` with a role preset
   (server, desktop or minimal) and the hardware configuration; the starter
-  flake picks up every folder in `hosts/`.
+  flake picks up every folder in `hosts/`. A physical machine or VM can get a
+  disk layout instead (ext4 or Btrfs, with disko): its page then fetches the
+  installer's SSH host key for its secrets and gives the `nixos-anywhere`
+  command that installs it. The console never runs the install itself.
 - **Fleet matrices**: which package and which service runs on which machine.
 - **Flake inputs**: each input's revision and age; update one or all and see
   what moved (with compare links) and which package versions change on which
@@ -572,6 +575,87 @@ login or a full token; the schedule is a setting, for the web login only. The
 schedule and the latest update are kept in `$NIXMGR_DATA/updates.json`; an
 update a restart interrupts during its check is checked again.
 
+### Add a machine
+
+**New machine** in Machines writes `hosts/<name>/`: `default.nix` for the
+platform (a physical machine, a Proxmox VM or a Proxmox LXC), `managed.json`
+with the role's preset, and the hardware configuration. Nothing is committed
+until you review it in Changes. A physical machine or a VM gets NixOS in one of
+two ways:
+
+- **Installed by hand**: install NixOS from the installer as usual and paste
+  the output of `nixos-generate-config --show-hardware-config` (or leave it
+  empty and replace the placeholder before the first deploy). Then switch it
+  once from a checkout, `nixos-rebuild switch --flake .#<name>`; comin keeps
+  it up to date from then on.
+- **nixos-anywhere**: pick a disk layout and the disk to erase, and
+  [nixos-anywhere](https://github.com/nix-community/nixos-anywhere) installs
+  the machine over SSH, its disks laid out by
+  [disko](https://github.com/nix-community/disko) from
+  `hosts/<name>/disk-config.nix`:
+  - **ext4**: one ext4 file system. **Btrfs**: subvolumes for `/`, `/home` and
+    `/nix`, compressed with zstd.
+  - Both have a 1 GiB EFI system partition on `/boot` and boot with GRUB. On
+    x86_64 a 1 MiB BIOS boot partition lets the same disk boot on BIOS and
+    UEFI; aarch64 boots UEFI only.
+  - `hardware-configuration.nix` is a placeholder without file systems:
+    nixos-anywhere writes the real one.
+
+The page of a machine with a disk layout then shows **Install with
+nixos-anywhere**, open until the machine has reported a deployment:
+
+1. Commit and push `hosts/<name>/`.
+2. Boot the machine from the NixOS installer and let root log in over SSH
+   (`sudo passwd`, or your key in `/root/.ssh/authorized_keys`). Any Linux
+   reachable as root works too: nixos-anywhere replaces it with its own
+   installer, which keeps the host key.
+3. Enter its address and **Fetch host key**. The server opens an SSH
+   connection, reads the host key the machine proves it holds, and closes the
+   connection before any login: it sends no credential and runs nothing.
+   Compare the fingerprint with `ssh-keygen -lf
+   /etc/ssh/ssh_host_ed25519_key.pub` on the machine, since anyone between the
+   server and the machine could answer with a key of their own. **Use it for
+   secrets** then approves it, as [Settings → Secrets](#secrets) does, and
+   encrypts the secrets for it: commit and push them. Fetching needs the web
+   login or a full token.
+4. In a clone of the repository, on a computer with Nix (flakes on), run the
+   command it shows:
+
+   ```sh
+   git pull --ff-only && nix run github:nix-community/nixos-anywhere -- --flake .#nas --target-host root@192.168.1.50 --copy-host-keys --generate-hardware-config nixos-generate-config ./hosts/nas/hardware-configuration.nix && git commit -m "nas: hardware configuration from nixos-anywhere" -- hosts/nas/hardware-configuration.nix && git push
+   ```
+
+   It erases the disk, installs the machine with the installer's host key
+   (`--copy-host-keys`: the key approved in step 3, so its secrets, comin's
+   pull token for a private repository included, decrypt from the first
+   boot), and reboots it. Then it commits and pushes the hardware
+   configuration nixos-anywhere wrote, so that comin deploys the same system.
+   Once `hardware-configuration.nix` is no longer the placeholder, the
+   command keeps it and stops after the install.
+
+The console never runs nixos-anywhere, or anything else, on the machine: the
+fetch in step 3 is its only connection to it, and only when you click. Booting
+the installer again makes a new host key, so fetch it again before
+installing; after the install, a fetch shows whether the machine kept the
+approved key.
+
+A fleet made before this has no disko input. The wizard says so and gives the
+lines to add to `flake.nix`, then run **Lock**:
+
+```nix
+disko = {
+  url = "github:nix-community/disko";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+`disk-config.nix` takes `inputs` as a module argument, as `modules/secrets.nix`
+does, which the starter flake passes (`specialArgs = { inherit inputs; }`).
+
+An encrypted disk (LUKS) is not one of the layouts, as it asks for a passphrase
+at every boot: edit `disk-config.nix` following disko's `luks-*` examples, and
+give nixos-anywhere the passphrase with `--disk-encryption-keys`.
+
 ## Deployments
 
 A push is a deploy: every machine's comin pulls the branch and switches to it.
@@ -748,7 +832,9 @@ secrets/hosts/<name>.json  what that machine alone gets
   paste `/etc/ssh/ssh_host_ed25519_key.pub` from the machine (or an
   `ssh-keyscan -t ed25519 <machine>` line, after comparing its fingerprint with
   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine: whoever
-  holds that key gets the secrets). The console turns it into an age key with
+  holds that key gets the secrets). A machine that nixos-anywhere installs
+  gets its key from its page before the install ([Add a
+  machine](#add-a-machine)). The console turns it into an age key with
   `ssh-to-age`, writes `secrets/hosts/<name>.pub` and `.sops.yaml`, and
   encrypts the files again for the new set of keys. Approving, changing and
   removing keys needs the web login or a full token. The approved keys are kept
@@ -997,7 +1083,7 @@ Each token gets a scope when it is created, and optionally an expiry date:
 |---|---|
 | Read only | Read files, history, the fleet model, checks, jobs, deployments, the secrets' names and the scheduled update; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
 | Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, write secrets, and discard a scheduled update |
-| Full | Also push, which deploys, run a scheduled update now (it pushes `flake-update`) and merge one (it deploys), read a secret's value (`POST /api/secrets/reveal`), and approve or remove machine keys, which decide who can decrypt |
+| Full | Also push, which deploys, run a scheduled update now (it pushes `flake-update`) and merge one (it deploys), read a secret's value (`POST /api/secrets/reveal`), approve or remove machine keys, which decide who can decrypt, and fetch a machine's SSH host key (`POST /api/hostkey`), which connects from the server to an address |
 
 The MCP endpoint offers only the tools of the token's scope. The same token
 works on the HTTP API, on the routes its scope covers:
