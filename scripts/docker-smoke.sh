@@ -117,16 +117,17 @@ model=$(ready '/api/model?at=working')
 [ -z "$(not_owned)" ] || fail "Nix left files nixos-manager does not own: $(not_owned)"
 echo "ok   real Nix locks and evaluates the starter flake as nixos-manager"
 
-# The user swaps both Nix profiles for wrappers that log who runs them ($EUID: bash is /bin/sh,
-# and id would be a wrapper too), then the stack restarts with the container's files kept:
-# nothing may run them as root.
+# The user swaps both Nix profiles for wrappers that log who runs them, then the stack
+# restarts with the container's files kept: nothing may run them as root. One log per uid
+# ($EUID: bash is /bin/sh, and id would be a wrapper too), as the kernel's protected_regular
+# stops root from writing to the user's file in /tmp.
 docker exec "$cid" sh -c '
   set -e
   for p in default tools; do
     real=$(readlink -f /nix/var/nix/profiles/$p)
     mkdir -p /tmp/swap/$p/bin
     for t in "$real"/bin/*; do
-      printf "#!/bin/sh\necho \"\$EUID %s\" >> /tmp/ran\nexec %s \"\$@\"\n" "${t##*/}" "$t" > /tmp/swap/$p/bin/${t##*/}
+      printf "#!/bin/sh\necho %s >> /tmp/ran-\$EUID\nexec %s \"\$@\"\n" "${t##*/}" "$t" > /tmp/swap/$p/bin/${t##*/}
       chmod +x /tmp/swap/$p/bin/${t##*/}
     done
     ln -sfn /tmp/swap/$p /nix/var/nix/profiles/$p
@@ -137,9 +138,10 @@ compose up -d
 up
 login
 has_starter || fail "no starter flake after the restart"
-ran=$(docker exec "$cid" cat /tmp/ran 2> /dev/null || true)
-grep -q '^10001 ' <<< "$ran" || fail "the swapped profile never ran, so this check proves nothing"
-! grep -q '^0 ' <<< "$ran" || fail "root ran programs the user controls: $(grep '^0 ' <<< "$ran" | sort -u)"
+docker exec "$cid" test -s /tmp/ran-10001 || fail "the swapped profile never ran, so this check proves nothing"
+if docker exec "$cid" test -e /tmp/ran-0; then
+  fail "root ran programs the user controls: $(docker exec "$cid" sort -u /tmp/ran-0 | tr '\n' ' ')"
+fi
 echo "ok   programs swapped into the user's profile never run as root"
 compose down
 
