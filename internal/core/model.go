@@ -44,7 +44,10 @@ type Host struct {
 	FileSystems     []FileSystem      `json:"fileSystems"`
 	Files           []string          `json:"files"`
 	Checks          Checks            `json:"checks"`
-	Error           string            `json:"error,omitempty"`
+	// Secrets are the sops-nix secrets it decrypts (never their values); nil
+	// when sops-nix is not in its configuration.
+	Secrets []HostSecret `json:"secrets"`
+	Error   string       `json:"error,omitempty"`
 	// What the per-machine diff compares beyond the fleet views; left out of
 	// the model's JSON, which every view polls. nil: not evaluated.
 	Detail *HostDetail `json:"-"`
@@ -88,6 +91,17 @@ type CominBranches struct {
 	URL     string `json:"url"`
 	Main    string `json:"main"`
 	Testing string `json:"testing"` // deployed with switch-to-configuration test when on top of Main
+}
+
+// HostSecret is one of sops.secrets: where the machine finds it and the sops
+// file it comes from (relative to the flake, "nixos" outside it).
+type HostSecret struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	File  string `json:"file"`
+	Owner string `json:"owner"`
+	Group string `json:"group"`
+	Mode  string `json:"mode"`
 }
 
 type Package struct {

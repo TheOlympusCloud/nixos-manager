@@ -229,6 +229,19 @@ in
   etc = try (builtins.deepSeq etc etc) null;
   managedFile = if managed == null then null else rel managed;
   inherit managedPackages;
+  # The sops-nix secrets it decrypts, never their values; null without sops-nix.
+  secrets =
+    if options ? sops then
+      lib.mapAttrsToList (n: s: {
+        name = n;
+        path = try s.path "";
+        file = try (rel s.sopsFile) "";
+        owner = try (if s.owner == null then "" else s.owner) "";
+        group = try (if s.group == null then "" else s.group) "";
+        mode = try s.mode "";
+      }) (try config.sops.secrets { })
+    else
+      null;
   checks = {
     ssh = try config.services.openssh.enable false;
     sshPasswordAuthentication = try config.services.openssh.settings.PasswordAuthentication null;

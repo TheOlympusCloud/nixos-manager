@@ -63,7 +63,13 @@ func TestModelOfAFleet(t *testing.T) {
 	if !strings.Contains(old.Error, "infinite recursion") || old.Packages == nil || old.Features == nil {
 		t.Fatalf("a failing machine must carry its error and empty lists: %+v", old)
 	}
+	if hs := m.Hosts[0].Secrets; len(hs) != 2 || hs[1] != (HostSecret{"wifi", "/run/secrets/wifi", "secrets/common.json", "root", "root", "0400"}) {
+		t.Fatalf("homeserver's secrets %+v", hs)
+	}
 	ws := m.Hosts[3]
+	if ws.Secrets != nil {
+		t.Fatalf("workstation has no sops-nix, yet secrets %+v", ws.Secrets)
+	}
 	if ws.ManagedFile == nil || *ws.ManagedFile != "hosts/workstation/managed.json" || len(ws.Packages) < 20 {
 		t.Fatalf("workstation %+v", ws)
 	}
