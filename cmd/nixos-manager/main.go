@@ -141,12 +141,17 @@ func run() error {
 		return err
 	}
 
+	forgejo := &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE"), Jobs: svc.Jobs}
+	if err := forgejo.Resume(); err != nil { // checks the pushed commits that waited when it stopped
+		return err
+	}
+
 	s := &server.Server{
 		Svc: svc, Auth: a, UI: web.UI,
 		MCP:  mcpserver.Handler(svc, version),
 		Nixd: strings.Fields(env("NIXMGR_NIXD", "nixd")),
 
-		Forgejo:        &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE")},
+		Forgejo:        forgejo,
 		Notify:         notifier,
 		TrustedProxies: proxies,
 	}

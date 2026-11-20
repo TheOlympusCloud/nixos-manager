@@ -98,12 +98,12 @@ func (s *Service) Push(ctx context.Context, force bool) (string, error) {
 		if !ok {
 			return "", errorf(ErrNotChecked, "the commit to push has not passed a check (it was committed without one, or a pull rebased it onto new remote commits): run the checks with nothing staged or changed, then push, or push without checks")
 		}
-		base, err := s.Repo.pushBase(ctx)
+		base, err := s.Jobs.pushedBase(ctx)
 		if err != nil {
 			return "", err
 		}
 		if pass.Base != "" && pass.Base != base { // "": the check built every machine
-			return "", errorf(ErrNotChecked, "this commit was checked against an earlier state of the branch on the remote, which has moved since, so the push may change machines the check did not build: run the checks again with nothing staged or changed, then push, or push without checks")
+			return "", errorf(ErrNotChecked, "this commit was checked against an earlier state of the branch on the remote (it moved since, or a check of it finished), so the push may change machines the check did not build: run the checks again with nothing staged or changed, then push, or push without checks")
 		}
 	}
 	return s.Repo.push(ctx)

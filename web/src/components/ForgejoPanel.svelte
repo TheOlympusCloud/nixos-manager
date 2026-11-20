@@ -14,12 +14,14 @@
   let url = $state('')
   let urlError = $state('')
   let check = $state<Check | null>(null)
-  let busy = $state<'' | 'remote' | 'test' | 'key' | 'adopt' | 'web'>('')
+  let busy = $state<'' | 'remote' | 'test' | 'key' | 'adopt' | 'web' | 'status'>('')
   let copied = $state('')
   let showSecret = $state(false)
   let editWeb = $state(false)
   let webBase = $state('')
   let webError = $state('')
+  let token = $state('')
+  let tokenError = $state('')
 
   const hook = hookTarget(location.origin)
   const ssh = $derived(st?.kind === 'ssh' || (!st?.remote && st?.kind === ''))
@@ -122,6 +124,20 @@
       editWeb = false
     } catch (err) {
       webError = err instanceof Error ? err.message : String(err)
+    } finally {
+      busy = ''
+    }
+  }
+
+  /** Save (or with '' remove) the status token; the links in Forgejo open this console's address. */
+  async function saveToken(value: string) {
+    busy = 'status'
+    tokenError = ''
+    try {
+      st = await forgejoApi.setStatus(value, value ? location.origin : '')
+      token = ''
+    } catch (err) {
+      tokenError = err instanceof Error ? err.message : String(err)
     } finally {
       busy = ''
     }
@@ -248,7 +264,10 @@
 
       <li class="step">
         <h3>Push webhook <span class="opt">optional</span></h3>
-        <p class="muted">Forgejo tells this console about every push, so a commit pushed from a laptop shows here within seconds instead of at the next Pull.</p>
+        <p class="muted">
+          Forgejo tells this console about every push, so a commit pushed from a laptop or Forgejo's web editor shows here within seconds instead of at the next Pull, and is
+          checked: every machine it changes is built. Its result shows in Changes → Checks, in Health, and with the step below, in Forgejo.
+        </p>
         <dl class="pairs">
           <dt>Target URL</dt>
           <dd class="code-row"><code>{hook.url}</code>{@render copyButton(hook.url, 'url', 'webhook URL')}</dd>
@@ -293,6 +312,48 @@
             <button class="link small" onclick={() => ((webBase = st?.web_base ?? ''), (editWeb = true))}>Change</button>
           </p>
           <p class="hint">Commits in History and files in Code link to Forgejo through this address.</p>
+        {/if}
+      </li>
+
+      <li class="step">
+        <h3>Commit statuses <span class="opt">optional</span></h3>
+        <p class="muted">The check of each pushed commit shows next to it in Forgejo, on branches and pull requests, with a link to its log here. It needs the push webhook.</p>
+        {#if !st.status_api}
+          <p class="muted">The remote needs a Forgejo web address first.</p>
+        {:else}
+          {#if st.status_token}
+            <p class="row">
+              <span class="ok-text"><Icon name="tick" size={14} />Token saved</span>
+              <span class="muted small">{st.status_console ? `links open ${st.status_console}` : 'no links'}</span>
+              <button class="link small" onclick={() => saveToken('')} disabled={!!busy}>Remove</button>
+            </p>
+          {/if}
+          <form class="row" onsubmit={(e) => (e.preventDefault(), saveToken(token.trim()))}>
+            <input
+              class="mono"
+              type="password"
+              bind:value={token}
+              placeholder={st.status_token ? 'Paste a new token to replace it' : 'Access token'}
+              aria-label="Forgejo access token for commit statuses"
+              aria-invalid={!!tokenError}
+              spellcheck="false"
+              autocomplete="off" />
+            <button type="submit" disabled={!token.trim() || !!busy}>{busy === 'status' ? 'Trying…' : 'Save'}</button>
+          </form>
+          {#if tokenError}<p class="error-text" role="alert">{tokenError}</p>{/if}
+          <ol class="how">
+            <li>In Forgejo, as a user who can write to the repository: <b>Settings</b> → <b>Applications</b> → <b>Generate new token</b>.</li>
+            <li>Give it the <b>repository</b> permission <b>Read and write</b>, generate it, and paste it here. It is tried on the repository, then kept on this server only.</li>
+          </ol>
+          <div class="delivery small" role="status">
+            <span class="dot {st.last_status ? (st.last_status.ok ? 'ok' : 'err') : 'off'}"></span>
+            {#if st.last_status}
+              <span><span class="when">Last status <time datetime={st.last_status.time} title={new Date(st.last_status.time).toLocaleString()}>{ago(st.last_status.time)}</time></span> · {st.last_status.result}</span>
+            {:else}
+              <span class="muted">No status sent since the server started.</span>
+            {/if}
+            <button class="link small" onclick={load}>Refresh</button>
+          </div>
         {/if}
       </li>
     </ol>
@@ -399,6 +460,12 @@
   }
   .self-start {
     justify-self: start;
+  }
+  .ok-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--green);
   }
   .hint {
     color: var(--fg-muted);

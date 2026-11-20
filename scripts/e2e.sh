@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end run of the real server against a fresh flake repository and a bare
 # git remote standing in for Forgejo: login, starter flake, lock, check, the
-# commit gate, commit, push, edit, history.
+# commit gate, commit, push, edit, history, and a push from elsewhere checked
+# through the webhook.
 #
 # Uses the real nix and nixfmt from PATH (network needed for the flake inputs).
 # E2E_STUB_NIX=1 replaces them with stubs, for machines without Nix.
@@ -187,6 +188,35 @@ api POST /api/commit -d '{"message":"chore: unchecked change","force":true}' > /
 [ "$(code POST /api/push -d '{}')" = 412 ] || fail "unchecked commit pushed without force"
 [ "$(code POST /api/push -d '{"force":true}')" = 200 ] || fail "forced push"
 echo "ok   push needs a checked commit unless forced"
+
+# finding <id> prints Health's finding with that id, or nothing.
+finding() { ready /api/insights | python3 -c "import sys, json; print(next((json.dumps(i) for i in json.load(sys.stdin)['insights'] if i['id'] == '$1'), ''))"; }
+forced=$(git -C "$work/remote.git" rev-parse main)
+[ "$(finding unchecked-commit | json '["fix"]["check"]')" = "$forced" ] || fail "Health does not name the unchecked commit on main: $(finding unchecked-commit)"
+echo "ok   Health names the unchecked commit on main"
+
+# A commit pushed from another clone, announced by the signed webhook, is checked.
+git clone -q "$work/remote.git" "$work/laptop"
+echo '{ }' > "$work/laptop/modules/laptop.nix"
+git -C "$work/laptop" add -A
+git -C "$work/laptop" -c user.name=Laptop -c user.email=laptop@example.invalid commit -q -m "laptop: a new module"
+git -C "$work/laptop" push -q
+outside=$(git -C "$work/remote.git" rev-parse main)
+secret=$(api GET /api/forgejo | json '["hook_secret"]')
+body="{\"ref\":\"refs/heads/main\",\"before\":\"$forced\",\"after\":\"$outside\"}"
+sig=$(python3 -c 'import hashlib, hmac, sys; print(hmac.new(sys.argv[1].encode(), sys.argv[2].encode(), hashlib.sha256).hexdigest())' "$secret" "$body")
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-Forgejo-Event: push' \
+  -H "X-Forgejo-Signature: $sig" -d "$body" "$base/api/hooks/forgejo")" = 202 ] || fail "the push webhook"
+state=
+for _ in $(seq 1200); do
+  state=$(api GET /api/jobs | python3 -c "import sys, json; print(next((j['state'] for j in json.load(sys.stdin)['jobs'] if j.get('commit') == '$outside'), ''))")
+  case "$state" in passed | failed) break ;; esac
+  sleep 0.5
+done
+[ "$state" = passed ] || fail "the check of the pushed commit: ${state:-never queued}"
+[ "$(git -C "$repo_dir" rev-parse HEAD)" = "$outside" ] || fail "the console did not fast-forward to the pushed commit"
+[ -z "$(finding unchecked-commit)" ] || fail "Health still names a commit: $(finding unchecked-commit)"
+echo "ok   a commit pushed elsewhere is checked through the webhook"
 
 model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"

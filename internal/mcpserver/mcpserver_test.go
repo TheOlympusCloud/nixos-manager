@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -269,5 +270,30 @@ func TestEveryToolHasAScope(t *testing.T) {
 		if !seen[name] {
 			t.Errorf("toolScope names %s, which does not exist", name)
 		}
+	}
+}
+
+// run_check takes a commit, for the deployed commit Health says is unchecked.
+func TestRunCheckOfACommit(t *testing.T) {
+	cs, svc := session(t)
+	ctx := context.Background()
+	call(t, cs, "write_file", map[string]any{"path": "hosts/web/default.nix", "content": "{ }\n"}, nil)
+	call(t, cs, "stage", map[string]any{}, nil)
+	sha, err := svc.Commit(ctx, "pushed without a check", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var health struct{ Insights []core.Insight }
+	call(t, cs, "fleet_insights", nil, &health)
+	if !slices.ContainsFunc(health.Insights, func(in core.Insight) bool { return in.ID == "unchecked-commit" && in.Fix != nil && in.Fix.Check == sha }) {
+		t.Fatalf("insights %+v", health.Insights)
+	}
+	var job struct{ State, Output string }
+	call(t, cs, "run_check", map[string]any{"commit": sha}, &job)
+	if job.State != "passed" || !strings.Contains(job.Output, "Checking commit "+sha[:12]) {
+		t.Fatalf("check %+v", job)
+	}
+	if res := call(t, cs, "run_check", map[string]any{"commit": sha}, nil); !res.IsError || !strings.Contains(text(res), "already passed") {
+		t.Fatalf("second check: %s", text(res))
 	}
 }

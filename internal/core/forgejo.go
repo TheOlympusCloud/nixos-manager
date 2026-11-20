@@ -34,10 +34,16 @@ type Forgejo struct {
 	Repo      *Repo
 	DataDir   string // holds the webhook secret; the deploy key lives in Repo.SSHDir
 	EnvRemote string // NIXMGR_REMOTE, which sets origin again at every start
+	// Jobs checks every commit pushed to the repository, and Forgejo hears each
+	// result as a commit status (see Resume); nil only fetches pushes to the
+	// current branch.
+	Jobs *Jobs
 
-	mu      sync.Mutex
-	last    *Delivery
-	pending bool
+	mu         sync.Mutex
+	last       *Delivery
+	pending    bool
+	pushed     map[string]*pushEntry // by commit: waiting for a check, or for its result to reach Forgejo
+	lastStatus *StatusDelivery
 }
 
 // hookDelay gathers a burst of pushes into one fetch.
@@ -237,6 +243,12 @@ type ForgejoState struct {
 	KnownHosts   string     `json:"known_hosts"` // the app's known_hosts file, to remove a changed host key
 	HookSecret   string     `json:"hook_secret"`
 	LastDelivery *Delivery  `json:"last_delivery"`
+	// Commit statuses: whether a token is set (it is never shown), the console's
+	// address their links open, where they are sent, and the last one sent.
+	StatusToken   bool            `json:"status_token"`
+	StatusConsole string          `json:"status_console"`
+	StatusAPI     string          `json:"status_api"`
+	LastStatus    *StatusDelivery `json:"last_status"`
 }
 
 // State gathers the Forgejo settings. Opening them is the deploy key's "first
@@ -261,6 +273,8 @@ func (f *Forgejo) State(ctx context.Context) (ForgejoState, error) {
 	}
 	st.HookSecret, err = f.HookSecret()
 	st.LastDelivery = f.LastDelivery()
+	cfg, _ := f.statusConfig() // an unreadable file reads as no token, so Settings can replace it
+	st.StatusToken, st.StatusConsole, st.StatusAPI, st.LastStatus = cfg.Token != "", cfg.Console, f.apiBase(ctx), f.LastStatus()
 	return st, err
 }
 
@@ -340,12 +354,22 @@ func repoPath(p string) string {
 // https://host/owner/repo (the SSH port is not the web port); HTTP(S) remotes
 // keep their scheme and port. base, when set, replaces scheme, host and port.
 func webURL(remote, base string) string {
-	u, err := ParseRemote(remote)
-	if err != nil || u.Kind == "local" {
+	root, path := webRoot(remote, base)
+	if root == "" {
 		return ""
 	}
+	return root + "/" + path
+}
+
+// webRoot splits webURL into Forgejo's address and owner/repo; "" when the
+// remote has no web side.
+func webRoot(remote, base string) (string, string) {
+	u, err := ParseRemote(remote)
+	if err != nil || u.Kind == "local" {
+		return "", ""
+	}
 	if base != "" {
-		return strings.TrimRight(base, "/") + "/" + u.Path
+		return strings.TrimRight(base, "/"), u.Path
 	}
 	host := u.Host
 	if u.Kind != "ssh" && u.Port != "" {
@@ -357,13 +381,18 @@ func webURL(remote, base string) string {
 	if u.Kind == "http" {
 		scheme = "http"
 	}
-	return scheme + "://" + host + "/" + u.Path
+	return scheme + "://" + host, u.Path
 }
 
-// checkWebBase validates the web address override: http(s), a host, nothing secret.
-func checkWebBase(s string) error {
+// httpBase reports whether s is an http(s) address with a host and nothing secret.
+func httpBase(s string) bool {
 	u, err := url.Parse(s)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+}
+
+// checkWebBase validates the web address override.
+func checkWebBase(s string) error {
+	if !httpBase(s) {
 		return errorf(ErrInvalid, "enter the address you open Forgejo at, like https://forgejo.lan or http://192.168.1.10:3000")
 	}
 	return nil
@@ -692,8 +721,9 @@ func (f *Forgejo) record(event string, ok bool, result string) {
 }
 
 // Hook handles a webhook call whose body was already size-capped. It answers the
-// HTTP status and a short result. Only a correctly signed push to the current
-// branch does anything: a fetch shortly after, and a fast-forward when safe.
+// HTTP status and a short result. Only a correctly signed push does anything:
+// a fetch shortly after, a fast-forward of the current branch when safe, and
+// with Jobs, a check of the pushed commit on any branch.
 func (f *Forgejo) Hook(event, sig string, body []byte) (int, string) {
 	secret, err := f.HookSecret()
 	if err != nil {
@@ -714,20 +744,41 @@ func (f *Forgejo) Hook(event, sig string, body []byte) (int, string) {
 		return 200, "ignored"
 	}
 	var p struct {
-		Ref string `json:"ref"`
+		Ref   string `json:"ref"`
+		After string `json:"after"` // the branch's new commit; zeros when it was deleted
 	}
 	if err := json.Unmarshal(body, &p); err != nil || p.Ref == "" {
 		f.record(event, false, "Refused: the body is not a push event.")
 		return 400, "not a push event"
 	}
 	cur, _ := f.Repo.git(context.Background(), "symbolic-ref", "--short", "-q", "HEAD")
-	if branch := strings.TrimSpace(cur); p.Ref != "refs/heads/"+branch {
-		f.record(event, true, fmt.Sprintf("Ignored: a push to %s; this console is on %s.", strings.TrimPrefix(p.Ref, "refs/heads/"), branch))
+	current := strings.TrimSpace(cur)
+	branch, isBranch := strings.CutPrefix(p.Ref, "refs/heads/")
+	check := f.Jobs != nil && isBranch && strings.Trim(p.After, "0") != ""
+	if check && !fullSHA.MatchString(p.After) {
+		f.record(event, false, "Refused: the push names no valid commit.")
+		return 400, "not a push event"
+	}
+	switch {
+	case check:
+		f.record(event, true, fmt.Sprintf("Push to %s received; fetching, then checking %.7s.", branch, p.After))
+	case isBranch && branch == current:
+		f.record(event, true, fmt.Sprintf("Push to %s received; fetching.", branch))
+	case f.Jobs != nil && isBranch:
+		f.record(event, true, fmt.Sprintf("Ignored: %s was deleted.", branch))
+		return 200, "ignored"
+	case f.Jobs != nil:
+		f.record(event, true, fmt.Sprintf("Ignored: %s is not a branch.", p.Ref))
+		return 200, "ignored"
+	default:
+		f.record(event, true, fmt.Sprintf("Ignored: a push to %s; this console is on %s.", strings.TrimPrefix(p.Ref, "refs/heads/"), current))
 		return 200, "ignored"
 	}
-	f.record(event, true, fmt.Sprintf("Push to %s received; fetching.", strings.TrimPrefix(p.Ref, "refs/heads/")))
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if check {
+		f.queuePush(p.After, branch)
+	}
 	if !f.pending {
 		f.pending = true
 		time.AfterFunc(hookDelay, f.sync)
@@ -737,11 +788,11 @@ func (f *Forgejo) Hook(event, sig string, body []byte) (int, string) {
 
 func (f *Forgejo) sync() {
 	f.mu.Lock()
-	f.pending = false // a push arriving from now on gets its own fetch
+	f.pending = false       // a push arriving from now on gets its own fetch
+	todo := f.claimPushes() // and its own check: this fetch may not bring it
 	f.mu.Unlock()
 	msg, err := f.Repo.FetchForward(context.Background())
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.last != nil {
 		f.last.OK = err == nil
 		if err != nil {
@@ -750,6 +801,8 @@ func (f *Forgejo) sync() {
 			f.last.Result = msg
 		}
 	}
+	f.mu.Unlock()
+	f.checkPushes(todo, err)
 }
 
 // FetchForward fetches origin and fast-forwards the current branch when that

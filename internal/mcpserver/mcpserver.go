@@ -281,13 +281,13 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		}
 		return out, nil
 	})
-	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine, failed, lagging or silent deployments), each with a suggested fix. noSshKey lists machines where no user has an SSH key: do not apply an SSH fix there before adding one, or nobody can log in.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
+	tool(s, "fleet_insights", "Health and consistency findings for the fleet (evaluation errors, firewall, SSH hardening, garbage collection, outdated flake inputs, packages missing on one machine, failed, lagging or silent deployments, and the deployed branch's last commit when it has not passed a check: fix.check is that commit, for run_check), each with a suggested fix. noSshKey lists machines where no user has an SSH key: do not apply an SSH fix there before adding one, or nobody can log in.", func(ctx context.Context, _ struct{}) (map[string][]core.Insight, error) {
 		m, err := working(ctx)
 		if err != nil {
 			return nil, err
 		}
 		ov, _ := svc.Deploys.Overview(ctx, m, time.Now()) // deployment findings are extra
-		return map[string][]core.Insight{"insights": core.Insights(m, ov.Machines, svc.Remote(ctx), time.Now())}, nil
+		return map[string][]core.Insight{"insights": core.Insights(m, ov.Machines, svc.Remote(ctx), svc.TipCheck(ctx, ov.Branch), time.Now())}, nil
 	})
 	tool(s, "deployments", "What each machine runs, as comin reports it after deploying: the last commit it deployed (or built and found unchanged) and when, a failure with comin's error, and how many commits it is behind the branch its comin follows (the main branch set in services.comin.remotes, or its testing branch, testing-<host> by default, when that is on top). States: current, behind, failed, unknown (its commit is not in this working copy: pull first), never (has not reported a deployment: the token or the url in modules/common.nix is missing, unless lastSeen shows its heartbeats). silent, whatever the state: no report or heartbeat for more than silentAfter hours (0: never flagged; 168 and behind for machines without heartbeats). system is what it last said it runs, boots and boots next, and whether a reboot is pending; expected is what its commit builds, as comin evaluates it, and drift is manual (it runs a system no deployment made: nixos-rebuild by hand or a rollback) or unfinished (a switch that stopped or failed partway). branch is the main branch most machines follow and commits are its newest. A push is a deploy: call this after pushing to watch the machines catch up.", func(ctx context.Context, _ struct{}) (core.DeployOverview, error) {
 		m, _, _ := svc.Jobs.Model(ctx, "working") // the machines and their comin branches, when an evaluation is at hand
@@ -379,10 +379,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		t, err := svc.Jobs.Targets(ctx)
 		return map[string][]core.Target{"targets": t}, err
 	})
-	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with what is pushed (every machine when nothing is pushed), then a dry build of each extra target. Commit and push need it to pass. Waits for the result.", func(ctx context.Context, in struct {
+	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with the newest pushed commit that passed a check (every machine when none has), then a dry build of each extra target. Commit and push need it to pass. With commit, check that commit instead, compared with the newest commit before it that passed a check (for a commit pushed without one). Waits for the result.", func(ctx context.Context, in struct {
 		Targets []string `json:"targets,omitempty" jsonschema:"extra attributes from list_targets to dry-build (evaluate only); the changed machines are always built"`
+		Commit  string   `json:"commit,omitempty" jsonschema:"a full commit SHA to check instead of the staged changes; takes no targets"`
 	}) (jobOut, error) {
-		j, err := svc.Jobs.Submit(ctx, core.JobRequest{Kind: "check", Targets: in.Targets})
+		j, err := svc.Jobs.Submit(ctx, core.JobRequest{Kind: "check", Targets: in.Targets, Commit: in.Commit})
 		if err != nil {
 			return jobOut{}, err
 		}

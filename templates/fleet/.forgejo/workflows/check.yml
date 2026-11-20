@@ -1,0 +1,46 @@
+# Checks every push with Forgejo Actions: nix flake check, then a build of
+# every machine. nixos-manager's push webhook already checks each push on its
+# server (building only the machines a commit changes) and shows the result in
+# Forgejo; keep this file to have a runner check them as well, or delete it.
+#
+# It needs Actions turned on for the repository, and a runner with Docker and
+# the label "docker" (change runs-on to your runner's label). Each run starts
+# with an empty Nix store, so it downloads every machine's system; a runner
+# that runs jobs on a host with Nix keeps its store between runs. A machine of
+# another architecture (aarch64 on an x86_64 runner) needs emulation there.
+name: check
+
+on:
+  push:
+    branches: ["**"] # not tags
+
+jobs:
+  check:
+    runs-on: docker
+    container:
+      image: nixos/nix:latest
+    env:
+      NIX_CONFIG: experimental-features = nix-command flakes
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The image has git but not Node, which actions/checkout needs. The whole
+      # history: Nix refuses a shallow git repository as a flake.
+      - name: Check out
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git init -q .
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git -c http.extraHeader="Authorization: Basic $auth" fetch -q "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+      - name: Check
+        run: |
+          nix flake check -L --no-update-lock-file
+          # shellcheck disable=SC2016 # ${n} is Nix's, not the shell's
+          machines=$(nix eval --raw .#nixosConfigurations --apply 'cs: toString (map (n: ".#nixosConfigurations.\"${n}\".config.system.build.toplevel") (builtins.attrNames cs))')
+          if [ -n "$machines" ]; then
+            # shellcheck disable=SC2086 # one installable per machine
+            nix build -L --no-link --no-update-lock-file $machines
+          fi

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type Job } from '../lib/api'
   import { link } from '../lib/router.svelte'
-  import { builtText } from '../lib/checks'
+  import { builtText, jobTitle } from '../lib/checks'
   import { app, checkStaged, refreshJobs, showJob as openJob } from '../lib/state.svelte'
   import { ago } from '../lib/util'
   import Icon from './Icon.svelte'
@@ -43,7 +43,6 @@
   const showJob = (j: Job) => (j.kind === 'check' ? (app.inspect = { kind: 'job', id: j.id }) : openJob(j.id, j.kind))
   // Evaluations and search indexes report in their own views.
   const jobs = $derived(app.jobs.filter((j) => ['check', 'lock', 'update'].includes(j.kind)))
-  const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs' }
   const short = (s?: string) => (s ? s.slice(0, 8) : '')
   const status = $derived(app.status)
 </script>
@@ -93,8 +92,8 @@
     <div class="actions">
       <button class="primary" onclick={checkStaged}><Icon name="play" size={12} /> Check staged changes</button>
       <p class="muted small">
-        Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with what is pushed (every machine
-        while nothing is){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
+        Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with the newest pushed commit
+        that passed a check (every machine while none has){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
       </p>
       <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs<Icon name="right" size={12} /></a>
     </div>
@@ -108,7 +107,7 @@
         <li class="item" class:selected={app.inspect?.kind === 'job' && app.inspect.id === j.id}>
           <button class="item-main job" onclick={() => showJob(j)}>
             <span class="state s-{j.state}">{j.state}</span>
-            <span class="name">{kinds[j.kind]} {j.id}</span>
+            <span class="name" title={j.commit ? `Check of commit ${j.commit}` : undefined}>{jobTitle(j)}</span>
             <span class="dir">{j.tree ? short(j.tree) : ''} {ago(j.started)}</span>
           </button>
         </li>

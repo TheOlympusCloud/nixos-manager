@@ -42,7 +42,7 @@ func TestInsights(t *testing.T) {
 			{Name: "comin", LastModified: now.Unix() - 3*day},
 		},
 	}
-	got := Insights(m, nil, "", now)
+	got := Insights(m, nil, "", nil, now)
 	byID := map[string]Insight{}
 	for _, in := range got {
 		byID[in.ID] = in
@@ -82,7 +82,7 @@ func TestInsights(t *testing.T) {
 		t.Errorf("pi's key count is unknown, so the fix must warn about it: %v", in.NoSSHKey)
 	}
 	m.Hosts[1].Checks.SSHUserKeys = ip(2)
-	if in := insightByID(Insights(m, nil, "", now), "ssh-password"); in.NoSSHKey != nil {
+	if in := insightByID(Insights(m, nil, "", nil, now), "ssh-password"); in.NoSSHKey != nil {
 		t.Errorf("pi has keys now: %v", in.NoSSHKey)
 	}
 	if in := byID["no-auto-gc"]; len(in.Hosts) != 1 || in.Hosts[0] != "pi" || len(in.Fix.Settings) != 3 {
@@ -97,7 +97,7 @@ func TestInsights(t *testing.T) {
 	if _, ok := byID["missing-package:nano"]; ok {
 		t.Error("NixOS default packages are not a consistency issue")
 	}
-	if len(Insights(&Model{}, nil, "", now)) != 0 {
+	if len(Insights(&Model{}, nil, "", nil, now)) != 0 {
 		t.Error("an empty fleet has nothing to report")
 	}
 }
@@ -122,7 +122,7 @@ func TestReleaseInsights(t *testing.T) {
 	}
 	byID := func(m *Model, at time.Time) map[string]Insight {
 		out := map[string]Insight{}
-		for _, in := range Insights(m, nil, "", at) {
+		for _, in := range Insights(m, nil, "", nil, at) {
 			out[in.ID] = in
 		}
 		return out
@@ -192,7 +192,7 @@ func TestDeployInsights(t *testing.T) {
 		{Host: "half", State: "current", Reports: rep, Heartbeats: true, Commit: strings.Repeat("c", 40), Drift: "unfinished"},
 	}
 	m.Hosts = append(m.Hosts, Host{Name: "hand"}, Host{Name: "half"})
-	got := Insights(m, deploys, "", now)
+	got := Insights(m, deploys, "", nil, now)
 	f := insightByID(got, "deploy-failed:pi")
 	if f.Severity != "error" || f.Link != "#/deployments" || f.Title != "pi failed to build bbbbbbb" ||
 		!strings.Contains(f.Detail, "attribute 'foo' missing") || !strings.Contains(f.Detail, "still runs aaaaaaa") {
@@ -227,7 +227,7 @@ func TestDeployInsights(t *testing.T) {
 	}
 	// Nobody reports yet: machines that never reported are not news.
 	quiet := []MachineDeployment{{Host: "new", State: "never", Reports: []DeployReport{}}}
-	if s := insightByID(Insights(m, quiet, "", now), "deploy-never"); s.ID != "" {
+	if s := insightByID(Insights(m, quiet, "", nil, now), "deploy-never"); s.ID != "" {
 		t.Errorf("deploy-never without reporting: %+v", s)
 	}
 }
@@ -248,7 +248,7 @@ func TestCominInsights(t *testing.T) {
 		{Name: "broken", Error: "boom"},
 	}}
 	got := map[string]Insight{}
-	for _, in := range Insights(m, nil, "git@forgejo.home.lan:pablo/nixos-config.git", now) {
+	for _, in := range Insights(m, nil, "git@forgejo.home.lan:pablo/nixos-config.git", nil, now) {
 		got[in.ID] = in
 	}
 	if in := got["no-comin"]; strings.Join(in.Hosts, ",") != "off" || in.Severity != "warning" {
@@ -257,9 +257,38 @@ func TestCominInsights(t *testing.T) {
 	if in := got["comin-other-repo"]; strings.Join(in.Hosts, ",") != "other" || !strings.Contains(in.Detail, "github.com/someone/dotfiles") {
 		t.Errorf("comin-other-repo: %+v", in)
 	}
-	for _, in := range Insights(m, nil, "", now) {
+	for _, in := range Insights(m, nil, "", nil, now) {
 		if in.ID == "comin-other-repo" {
 			t.Error("without a remote there is nothing to compare with")
 		}
+	}
+}
+
+// The last commit of the branch comin deploys shows until it passed a check.
+func TestUncheckedCommitInsight(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	sha := strings.Repeat("ab", 20)
+	at := func(state, job string) Insight {
+		return insightByID(Insights(&Model{}, nil, "", &CommitCheck{Branch: "main", Commit: sha, Subject: "pi: add htop", State: state, Job: job}, now), "unchecked-commit")
+	}
+	in := at("unchecked", "")
+	if in.Severity != "warning" || in.Title != "abababa on main has not passed a check" ||
+		in.Fix == nil || in.Fix.Check != sha || in.Fix.Label != "Check abababa" || in.Link != "" || in.Hosts == nil || !strings.Contains(in.Detail, "“pi: add htop”") {
+		t.Fatalf("unchecked: %+v", in)
+	}
+	for _, state := range []string{"queued", "running"} {
+		if in := at(state, "j4"); in.Severity != "info" || in.Title != "abababa on main is being checked" || in.Fix != nil || in.Link != "#/changes?check="+sha {
+			t.Fatalf("%s: %+v", state, in)
+		}
+	}
+	if in := at("failed", "j4"); in.Severity != "error" || in.Title != "abababa on main failed its check" || in.Fix == nil || in.Fix.Check != sha ||
+		in.Fix.Label != "Check again" || in.Link != "#/changes?check="+sha {
+		t.Fatalf("failed: %+v", in)
+	}
+	if in := at("passed", ""); in.ID != "" {
+		t.Fatalf("passed: %+v", in)
+	}
+	if in := insightByID(Insights(&Model{}, nil, "", nil, now), "unchecked-commit"); in.ID != "" {
+		t.Fatalf("no tip: %+v", in)
 	}
 }

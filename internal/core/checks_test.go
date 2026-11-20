@@ -93,6 +93,7 @@ func runCheck(t *testing.T, s *Service, targets ...string) JobInfo {
 func TestCheckBuildsTheMachinesAChangeTouches(t *testing.T) {
 	ctx := context.Background()
 	s := buildService(t, true)
+	runCheck(t, s) // what is pushed passes
 	pushed := strings.TrimSpace(gitOut(t, s.Repo.Dir, "rev-parse", "origin/main^{tree}"))
 	write(t, s.Repo, "hosts/web", "web kernel=2\n")
 
@@ -109,7 +110,7 @@ func TestCheckBuildsTheMachinesAChangeTouches(t *testing.T) {
 		t.Fatalf("dry run summary %+v", sum)
 	}
 	for _, want := range []string{
-		"flake check", "Comparing every machine with what is pushed", "Building the system of 1 changed machine: web.",
+		"flake check", "Comparing every machine with the newest pushed commit that passed a check", "Building the system of 1 changed machine: web.",
 		"nix --extra-experimental-features nix-command flakes build --keep-going --no-update-lock-file --no-link path:",
 		"Nix builds 2 derivations and downloads 1 path (0.50 MiB, 2.00 MiB unpacked).",
 		"Skipping the dry build of " + systemAttr("web"), "build --dry-run --no-link -L --no-update-lock-file path:",
@@ -152,7 +153,7 @@ func TestCheckWithNothingPushedBuildsEveryMachine(t *testing.T) {
 	write(t, s.Repo, "hosts/web", "web kernel=2\n")
 	info := runCheck(t, s)
 	if info.State != "passed" || !slices.Equal(info.Summary.Built, []string{"db", "web"}) || info.Summary.Base != "" ||
-		!strings.Contains(info.Output, "Nothing is pushed yet to compare with, so every machine is built.") {
+		!strings.Contains(info.Output, "No pushed commit has passed a check, so every machine is built.") {
 		t.Fatalf("check %s %+v:\n%s", info.State, info.Summary, info.Output)
 	}
 	if p, _ := s.Jobs.PassOf(info.Tree); p.Base != "" || len(p.Built) != 2 {
@@ -190,6 +191,7 @@ func TestCheckFailsWhenAChangedMachineDoesNotBuild(t *testing.T) {
 // cause is gone, the next check evaluates again and passes.
 func TestCheckEvaluatesAgainAfterAFailedEvaluation(t *testing.T) {
 	s := buildService(t, true)
+	runCheck(t, s) // what is pushed passes
 	failEval := filepath.Join(t.TempDir(), "fail")
 	t.Setenv("FAILEVAL", failEval)
 	ok(t, os.WriteFile(failEval, nil, 0o644))
@@ -379,6 +381,10 @@ func TestCheckBuildsTheChangedMachineWithRealNix(t *testing.T) {
 	gitOut(t, s.Repo.Dir, "init", "-q", "--bare", "-b", "main", bare)
 	gitOut(t, s.Repo.Dir, "remote", "add", "origin", bare)
 	must[string](t)(s.Push(ctx, true))
+	// What is pushed passed a check before; building both machines for it is not what this test is about.
+	s.Jobs.mu.Lock()
+	s.Jobs.pass(CheckPass{Tree: gitOut(t, s.Repo.Dir, "rev-parse", "HEAD^{tree}"), Built: []string{"ct", "example"}})
+	s.Jobs.mu.Unlock()
 
 	def := fileText(t, s.Repo, "hosts/example/default.nix")
 	edit := func(line string) JobInfo {
@@ -405,6 +411,21 @@ func TestCheckBuildsTheChangedMachineWithRealNix(t *testing.T) {
 	}
 	must[string](t)(s.Commit(ctx, "example: swappiness", false))
 	must[string](t)(s.Push(ctx, false))
+	checked := gitOut(t, s.Repo.Dir, "rev-parse", "HEAD^{tree}")
+
+	// A commit pushed from elsewhere is built against the last checked one.
+	clone := filepath.Join(t.TempDir(), "laptop")
+	gitOut(t, s.Repo.Dir, "clone", "-q", bare, clone)
+	cdef := filepath.Join(clone, "hosts/example/default.nix")
+	ok(t, os.WriteFile(cdef, []byte(strings.Replace(fileText(t, s.Repo, "hosts/example/default.nix"), `"vm.swappiness" = 10;`, `"vm.swappiness" = 20;`, 1)), 0o644))
+	gitOut(t, clone, "-c", "user.name=Laptop", "-c", "user.email=laptop@example.invalid", "commit", "-q", "-am", "example: swappiness 20")
+	gitOut(t, clone, "push", "-q")
+	gitOut(t, s.Repo.Dir, "fetch", "-q", "origin")
+	job, _, err := s.Jobs.CheckCommit(ctx, gitOut(t, clone, "rev-parse", "HEAD"), "main")
+	ok(t, err)
+	if info := finish(job); info.State != "passed" || info.Summary.Base != checked || !slices.Equal(info.Summary.Built, []string{"example"}) {
+		t.Fatalf("check of the pushed commit %s %+v:\n%s", info.State, info.Summary, tail(info.Output, 60))
+	}
 
 	// Both systems are now built here: the diff adds every dependency and the size.
 	write(t, s.Repo, "hosts/example/default.nix",

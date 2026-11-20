@@ -38,6 +38,12 @@ func (s *Server) forgejoRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/forgejo/test", post(func(r *http.Request, _ struct{}) (any, error) {
 		return f.Test(r.Context()), nil
 	}))
+	api.HandleFunc("POST /api/forgejo/status", post(func(r *http.Request, in struct{ Token, Console string }) (any, error) {
+		if err := f.SetStatusToken(r.Context(), in.Token, in.Console); err != nil {
+			return nil, err
+		}
+		return state(r)
+	}))
 	api.HandleFunc("POST /api/forgejo/adopt", post(func(r *http.Request, _ struct{}) (any, error) {
 		out, err := s.Svc.AdoptRemote(r.Context())
 		return map[string]string{"output": out}, err

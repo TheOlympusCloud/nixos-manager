@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type Job } from '../lib/api'
-  import { summaryLines } from '../lib/checks'
+  import { jobTitle, summaryLines } from '../lib/checks'
   import { refreshJobs } from '../lib/state.svelte'
   import { report } from '../lib/ui.svelte'
   import { stripAnsi } from '../lib/util'
@@ -69,16 +69,17 @@
 {#if !compact}
   <div class="view-bar">
     <div class="title">
-      <strong>{kinds[job?.kind ?? ''] ?? 'Job'} {jobId}</strong>
+      <strong>{job?.commit ? `${jobTitle(job)} · ${jobId}` : `${kinds[job?.kind ?? ''] ?? 'Job'} ${jobId}`}</strong>
       <span class="state s-{jobState || 'queued'}" role="status">{jobState || 'connecting'}{running ? '…' : ''}</span>
     </div>
     {#if job?.targets?.length}<div class="muted small">also dry-built: {job.targets.join(', ')}</div>{/if}
+    {#if job?.commit}<div class="muted small">commit <span class="mono">{job.commit.slice(0, 12)}</span>, compared with the last checked commit before it</div>{/if}
     {#if job?.tree}<div class="muted small">tree <span class="mono">{job.tree.slice(0, 12)}</span></div>{/if}
   </div>
 {/if}
 {#if job?.summary}
   <ul class="summary" aria-label="What the check verified">
-    {#each summaryLines(job.summary) as line (line)}<li>{line}</li>{/each}
+    {#each summaryLines(job.summary, !!job.commit) as line (line)}<li>{line}</li>{/each}
   </ul>
 {/if}
 <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scrollable log must be reachable by keyboard) -->

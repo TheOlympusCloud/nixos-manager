@@ -261,7 +261,8 @@ func (s *Server) apiMux() *http.ServeMux {
 		default:
 			// Deployment findings are extra: Health still answers when git cannot tell them.
 			ov, _ := s.Svc.Deploys.Overview(r.Context(), m, time.Now())
-			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, ov.Machines, s.Svc.Remote(r.Context()), time.Now())}, nil)
+			tip := s.Svc.TipCheck(r.Context(), ov.Branch)
+			respond(w, map[string]any{"state": "ready", "insights": core.Insights(m, ov.Machines, s.Svc.Remote(r.Context()), tip, time.Now())}, nil)
 		}
 	})
 	api.HandleFunc("GET /api/fleet/values", func(w http.ResponseWriter, r *http.Request) {

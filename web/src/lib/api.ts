@@ -40,6 +40,9 @@ export type Job = {
   state: JobState
   targets?: string[] | null
   tree?: string
+  /** A check of this commit, not of the staged changes; branch: where a push brought it. */
+  commit?: string
+  branch?: string
   started?: string
   finished?: string
   summary?: CheckSummary
@@ -47,6 +50,7 @@ export type Job = {
 }
 export type JobRequest =
   | { kind: 'check'; targets: string[] }
+  | { kind: 'check'; commit: string }
   | { kind: 'lock' }
   | { kind: 'update'; inputs: string[] }
 export type TokenScope = 'read' | 'edit' | 'full'
@@ -149,8 +153,8 @@ export type Insight = {
   title: string
   detail: string
   hosts: string[]
-  /** settings: managed.json values that resolve it on each affected machine; updateInput: a flake input to update. */
-  fix?: { label: string; settings?: { path: string[]; value: unknown }[]; updateInput?: string }
+  /** settings: managed.json values that resolve it on each affected machine; updateInput: a flake input to update; check: a commit to check. */
+  fix?: { label: string; settings?: { path: string[]; value: unknown }[]; updateInput?: string; check?: string }
   /** A console route with more about it, e.g. #/deployments. */
   link?: string
 }

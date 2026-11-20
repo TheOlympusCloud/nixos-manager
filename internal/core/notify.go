@@ -512,7 +512,7 @@ func (n *Notifier) fleetEvents(ctx context.Context, now time.Time) ([]Event, map
 	}
 	looked["eval"] = true
 	out = append(out, evalEvents(ov.Branch, tip, m)...)
-	for _, in := range Insights(m, nil, "", now) {
+	for _, in := range Insights(m, nil, "", nil, now) {
 		if in.ID == "release-eol" || in.ID == "release-eol-soon" || strings.HasPrefix(in.ID, "input-eol:") {
 			out = append(out, Event{Key: "eol:" + in.ID + ":" + in.Title, Kind: "eol", Severity: in.Severity, Title: in.Title,
 				Message: in.Detail, Hosts: in.Hosts, Link: "#/health"})

@@ -2,6 +2,7 @@ import { tick } from 'svelte'
 import type { Text } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import { ApiError, api, onUnauthorized, type Info, type Job, type JobRequest, type Status, type Target, type TreeEntry } from './api'
+import { jobTitle } from './checks'
 import { scheduleModel } from './fleet.svelte'
 import { codeLink, go } from './router.svelte'
 import { confirmBox, note, promptBox, report, toast } from './ui.svelte'
@@ -347,7 +348,8 @@ export async function refreshJobs() {
     const log = { label: 'Show log', run: () => showJob(j.id, j.kind) }
     const ok = j.state === 'passed'
     const more = ok && j.kind === 'update' ? [{ label: 'See what changed', run: () => go('#/inputs') }, log] : log
-    toast(jobDone[j.kind][ok ? 0 : 1], ok ? 'ok' : 'error', undefined, more, 'job:' + j.id)
+    const text = j.commit ? `${jobTitle(j)} ${ok ? 'passed' : 'failed'} its check` : jobDone[j.kind][ok ? 0 : 1]
+    toast(text, ok ? 'ok' : 'error', undefined, more, 'job:' + j.id)
   }
   if (finished.length) await Promise.all([refresh(), syncOpenTabs()])
   if (app.jobs.some((j) => isActive(j.state))) jobTimer = setTimeout(refreshJobs, 2000)
