@@ -311,7 +311,7 @@
                   <div>
                     <p class="mono k">Checks</p>
                     <p>nix flake check</p>
-                    <p>dry build, every machine</p>
+                    <p>a build of every changed machine</p>
                   </div>
                   <div>
                     <p class="mono k">Access</p>

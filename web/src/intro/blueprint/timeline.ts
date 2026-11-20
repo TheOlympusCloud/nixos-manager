@@ -56,7 +56,7 @@ export const EDGES: [string, string][] = [
 export const FAILING = 'pi'
 export const ERROR_LINES = ['error: infinite recursion encountered', '       at hosts/pi/default.nix:12:3:', '           12|   imports = [ ./default.nix ];', '              |   ^']
 export const FIX_LINES = ['- imports = [ ./default.nix ];', '+ imports = [ ../../modules/common.nix ];']
-export const STAMPS = ['nix flake check · passed', 'dry-build · 3 machines']
+export const STAMPS = ['nix flake check · passed', 'built · 3 machines']
 
 /** The acts of the timeline, in order, as windows of t. */
 export const STEPS = [
