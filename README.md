@@ -51,21 +51,21 @@ An MCP server gives automation the same features.
   machine whose system does not evaluate, a failed assertion for instance,
   shows its error.
 - **Checks**: on exactly the staged changes, with live output, `nix flake check`
-  and then a real build of every machine whose system they change compared
-  with what is pushed (by system derivation, as Changes compares), so a
-  package or system that evaluates but does not build fails the check. With
-  nothing pushed yet, every machine is built. The result says which machines
-  were built, which failed, which need a reboot, and what Nix built and
-  downloaded (from a dry run first). Configurations you tick are dry-built on top, which only
-  evaluates them. A commit needs a passing check of the staged changes, and a
-  push needs a passing check of the commit being pushed that compared it with
-  what the push lands on now. In the web UI you can override both explicitly;
-  MCP clients cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so
-  a restart does not ask for them again; checks passed before checks built the
-  machines only evaluated, and must run again. Checks run one at a time in
-  their own queue, so a long check never holds up the fleet views, search,
-  Lock or Update. The systems they build can be served to the machines as a
-  [binary cache](#binary-cache).
+  and then a real build of every machine whose system they change compared with
+  what is pushed (by system derivation, as Changes compares), so a package or
+  system that evaluates but does not build fails the check. With nothing pushed
+  yet, every machine is built. The result says which machines were built, which
+  failed, which need a reboot, and what Nix built and downloaded (from a dry run
+  first). Configurations you tick are dry-built on top, which only evaluates
+  them. A commit needs a passing check of the staged changes, and a push needs a
+  passing check of the commit being pushed that compared it with what the push
+  lands on now. In the web UI you can override both explicitly; MCP clients
+  cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so a restart
+  does not ask for them again; checks passed before checks built the machines
+  only evaluated, and must run again. Checks run one at a time in their own
+  queue, so a long check never holds up the fleet views, search, Lock or Update.
+  The systems they build can be served to the machines as a [binary
+  cache](#binary-cache).
 - **Git**: stage, commit, branches, push and pull, revert a commit, merge a
   `testing-<host>` branch, repository and per-file history with diffs and
   restore. Every commit uses the configured person's name and email.
