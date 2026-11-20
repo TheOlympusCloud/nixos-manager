@@ -170,7 +170,9 @@ func (r *Repo) notMerged(ctx context.Context, ref, headTree string) string {
 // EndTrial sends a machine back to its main branch: its testing branch on the
 // remote is set to the main branch's last commit, which comin then deploys
 // there. Deleting the branch would not do: comin's clone keeps the branches it
-// fetched. The working copy's branches are left alone.
+// fetched. A working copy on the testing branch goes back to the main one, as
+// a push from there would put the trial back; the trial's commits stay on the
+// local testing branch.
 func (s *Service) EndTrial(ctx context.Context, host string) (string, error) {
 	b, err := s.trialBranches(ctx, host)
 	if err != nil {
@@ -200,5 +202,12 @@ func (s *Service) EndTrial(ctx context.Context, host string) (string, error) {
 		}
 		return "", err
 	}
-	return fmt.Sprintf("%s goes back to %s: %s now points at its last commit, %.7s, so comin switches %s to it.", host, b.Main, b.Testing, main, host), nil
+	msg := fmt.Sprintf("%s goes back to %s: %s now points at its last commit, %.7s, so comin switches %s to it.", host, b.Main, b.Testing, main, host)
+	if cur, _ := r.currentBranch(ctx); cur == b.Testing {
+		if _, err := r.git(context.WithoutCancel(ctx), "switch", "-q", "--no-guess", b.Main); err != nil {
+			return msg + fmt.Sprintf(" This console stays on %s, as its changes there conflict with %s: commit or discard them and switch to %s, or a push from %s sends the trial back to %s.", b.Testing, b.Main, b.Main, b.Testing, host), nil
+		}
+		msg += fmt.Sprintf(" This console is back on %s; the trial's commits stay on its %s branch.", b.Main, b.Testing)
+	}
+	return msg, nil
 }

@@ -266,19 +266,45 @@ func TestEndTrial(t *testing.T) {
 	stageChecked(t, s, "hosts/web", "web kernel=2\n")
 	must[Trial](t)(s.TryOn(ctx, "web", "try", false))
 
+	trial := gitOut(t, s.Repo.Dir, "rev-parse", "testing-web")
 	msg, err := s.EndTrial(ctx, "web")
 	ok(t, err)
-	if main := remoteRef(t, s, "main"); remoteRef(t, s, "testing-web") != main || !strings.Contains(msg, "main") {
+	main := remoteRef(t, s, "main")
+	if remoteRef(t, s, "testing-web") != main || !strings.Contains(msg, "back on main") {
 		t.Fatalf("%q: testing-web %s, main %s", msg, remoteRef(t, s, "testing-web"), main)
 	}
-	if branchOf(t, s) != "testing-web" {
-		t.Fatal("ending a trial does not move the working copy")
+	// Back on main, so a later push cannot send the trial back; its commit stays on testing-web.
+	if branchOf(t, s) != "main" || gitOut(t, s.Repo.Dir, "rev-parse", "testing-web") != trial {
+		t.Fatalf("on %s, testing-web at %s", branchOf(t, s), gitOut(t, s.Repo.Dir, "rev-parse", "testing-web"))
+	}
+	must[string](t)(s.Push(ctx, false))
+	if remoteRef(t, s, "testing-web") != main {
+		t.Fatal("a push after the trial ended sent it back to web")
 	}
 	if msg, err := s.EndTrial(ctx, "web"); err != nil || !strings.Contains(msg, "follows main") {
 		t.Fatalf("second end: %q, %v", msg, err)
 	}
 	_, err = s.EndTrial(ctx, "nope")
 	isErr(t, err, ErrNotFound)
+}
+
+// Uncommitted changes that conflict with main keep the console on the testing
+// branch, and the reply says what a push from there would do.
+func TestEndTrialWithConflictingChanges(t *testing.T) {
+	ctx := context.Background()
+	s := trialService(t)
+	stageChecked(t, s, "hosts/web", "web kernel=2\n")
+	must[Trial](t)(s.TryOn(ctx, "web", "try", false))
+	write(t, s.Repo, "hosts/web", "web kernel=3\n")
+	readyModel(t, s, "working")
+	msg, err := s.EndTrial(ctx, "web")
+	ok(t, err)
+	if remoteRef(t, s, "testing-web") != remoteRef(t, s, "main") || branchOf(t, s) != "testing-web" || !strings.Contains(msg, "sends the trial back") {
+		t.Fatalf("%q, on %s", msg, branchOf(t, s))
+	}
+	if got := fileText(t, s.Repo, "hosts/web"); got != "web kernel=3\n" {
+		t.Fatalf("the change was lost: %q", got)
+	}
 }
 
 // A request cancelled during the push (a closed tab, a cancelled MCP call)

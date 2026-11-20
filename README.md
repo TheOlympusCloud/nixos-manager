@@ -558,7 +558,9 @@ risky change on a remote machine.
    branch on the remote back at `main`'s last commit, so comin switches the
    machine back to `main` (deleting the branch would not do: comin keeps the
    branches it fetched); a console on the testing branch goes back to `main`,
-   and the trial's commits stay on its local testing branch.
+   and the trial's commits stay on its local testing branch (with uncommitted
+   changes that conflict with `main`, it stays and says so: switch before you
+   push, or the push sends the trial back).
 
 When `main` moves on without the trial, comin leaves it and deploys `main`;
 Changes says so. MCP has the same: `try_on_machine` and `end_trial`.
