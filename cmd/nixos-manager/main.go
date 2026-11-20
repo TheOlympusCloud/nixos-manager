@@ -44,6 +44,8 @@ Environment:
   NIXMGR_LISTEN    address to listen on (default 127.0.0.1:8080)
   NIXMGR_NIX, NIXMGR_NIXFMT, NIXMGR_NIXD   tool commands (default nix, nixfmt, nixd)
   NIXMGR_EVAL_JOBS machines evaluated at once (default 2, or 1 on a single CPU; about 1 GB each)
+  NIXMGR_TRUSTED_PROXIES   reverse proxies besides loopback (addresses or CIDR ranges) whose
+                   X-Forwarded-For names the client for the login limits
   TZ               time zone of the update schedule (default the system's, else UTC)
 `
 

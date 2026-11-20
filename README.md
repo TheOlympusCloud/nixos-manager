@@ -277,7 +277,9 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
 
 The service runs as the `nixos-manager` user, with its working copy, deploy
 key, tokens and Nix caches in `/var/lib/nixos-manager`; `journalctl -u
-nixos-manager` has its log. Other options: `listen` (default `0.0.0.0:8080`),
+nixos-manager` has its log. Other options: `dataDir` (that folder, default
+`/var/lib/nixos-manager`; it must be under `/var/lib`, as it is the service's
+state directory), `listen` (default `0.0.0.0:8080`),
 `remote` (sets `NIXMGR_REMOTE`; leave it out to connect Forgejo in Settings),
 `environmentFile` (extra secrets as `KEY=value`), `extraEnvironment`, and
 `binaryCache` (see [Binary cache](#binary-cache)).
@@ -1105,7 +1107,8 @@ tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
 `list_branches`, `create_branch`, `switch_branch`, `revert_commit`,
 `merge_branch`, `push`, `pull`,
-`list_targets`, `run_check`, `flake_lock`, `flake_update`. Secrets:
+`list_targets`, `run_check`, `flake_lock`, `flake_update`. Deployments:
+`deployments`, `try_on_machine`, `end_trial`. Secrets:
 `list_secrets` (names and keys), `set_secret`, `delete_secret`; no tool reads a
 value back. They call the same
 code as the web UI, including the check rules for commit and push, which MCP
@@ -1184,19 +1187,6 @@ this release:
 Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
 a keyed hash of each one, never the session itself. Changing the password ends
 every session.
-
-Logins are limited before the password is checked: 10 attempts per 10
-minutes from one address, and 50 per 10 minutes from all addresses together.
-More get `429 Too Many Requests` with `Retry-After`; successful logins do not
-count. A browser that has logged in before keeps a cookie that gives it its own
-limit of 10, outside the shared one, so someone guessing from elsewhere cannot
-lock you out of a browser you already use. Behind a proxy on the same machine
-(`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
-to `X-Forwarded-For`. With Docker, a proxy on the host reaches the container
-from the Docker gateway rather than loopback: set `NIXMGR_TRUSTED_PROXIES` to
-that address (the `remote=` of the `login` lines in the log), or every proxied
-login shares one address's limit. List only proxies there, since anything in
-that list can claim any client address. The counts are kept in memory.
 
 Logins are limited before the password is checked: 10 attempts per 10
 minutes from one address, and 50 per 10 minutes from all addresses together.
