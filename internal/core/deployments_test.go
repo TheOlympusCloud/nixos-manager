@@ -550,3 +550,96 @@ func TestSilentMachines(t *testing.T) {
 		}
 	}
 }
+
+// fakeSystems answers what each machine builds at a commit, and records what was asked.
+type fakeSystems struct {
+	paths map[string]string // commit/host -> path; absent: not evaluated yet
+	asked map[string][]string
+}
+
+func (f *fakeSystems) ExpectedSystems(commit string, hosts []string) map[string]SystemEval {
+	f.asked[commit] = append(f.asked[commit], hosts...)
+	out := map[string]SystemEval{}
+	for _, h := range hosts {
+		if p, ok := f.paths[systemKey(commit, h)]; ok {
+			out[h] = SystemEval{Path: p}
+		}
+	}
+	return out
+}
+
+// What a machine says it runs is compared with what its deployed commit
+// builds: the same, a system no deployment made (manual), or a deployment
+// that did not finish switching (unfinished). No verdict while comin
+// switches, before the deployed commit is evaluated, or from a snapshot
+// older than the deployment.
+func TestDrift(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	write(t, r, "flake.nix", "2\n")
+	c2 := commitAll(t, r, "second")
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	src := &fakeSystems{paths: map[string]string{}, asked: map[string][]string{}}
+	d.Systems = src
+	hosts := []string{"same", "manual", "boot", "partway", "switching", "stale", "pending", "elsewhere", "old"}
+	e := func(c, h string) string { return storePath(map[bool]byte{true: '1', false: '2'}[c == c1], h) } // what h builds at c
+	for _, h := range hosts {
+		for _, c := range []string{c1, c2} {
+			if h != "pending" {
+				src.paths[systemKey(c, h)] = e(c, h)
+			}
+		}
+	}
+	other := storePath('x', "by-hand")
+	now := time.Now()
+	rec := func(ago time.Duration, in ReportIn) {
+		t.Helper()
+		ok(t, d.Record(in, now.Add(-ago)))
+	}
+	deploy := func(h, c, current, profile string) ReportIn {
+		return ReportIn{Host: h, Commit: c, Status: "done", Current: current, Profile: profile}
+	}
+	rec(time.Hour, deploy("same", c2, e(c2, "same"), e(c2, "same")))
+	rec(time.Minute, ReportIn{Host: "same", Phase: "heartbeat", Current: e(c2, "same"), Reboot: true})
+	rec(time.Hour, deploy("manual", c2, e(c2, "manual"), e(c2, "manual")))
+	rec(time.Minute, ReportIn{Host: "manual", Phase: "heartbeat", Current: other, Profile: other}) // nixos-rebuild switch by hand
+	rec(time.Hour, deploy("boot", c2, e(c1, "boot"), e(c2, "boot")))                               // installed, not running
+	rec(2*time.Hour, deploy("partway", c1, e(c1, "partway"), e(c1, "partway")))
+	rec(time.Hour, ReportIn{Host: "partway", Commit: c2, Status: "failed", Error: "unit failed", Current: e(c2, "partway"), Profile: e(c2, "partway")})
+	rec(2*time.Hour, deploy("switching", c1, e(c1, "switching"), e(c1, "switching")))
+	rec(10*time.Minute, ReportIn{Host: "switching", Commit: c2, Phase: "build", Status: "built"})
+	rec(5*time.Minute, ReportIn{Host: "switching", Phase: "heartbeat", Current: e(c2, "switching")}) // switched, not reported yet
+	rec(2*time.Hour, ReportIn{Host: "stale", Phase: "heartbeat", Current: other})
+	rec(time.Hour, ReportIn{Host: "stale", Commit: c2, Status: "done"}) // an older script: no system with the deployment
+	rec(time.Hour, deploy("pending", c2, other, other))
+	rec(time.Hour, deploy("elsewhere", sha('e'), other, other)) // a commit this working copy does not have
+	rec(time.Hour, ReportIn{Host: "old", Commit: c2, Status: "done"})
+
+	ov := must[DeployOverview](t)(d.Overview(ctx, nil, now))
+	got := map[string]MachineDeployment{}
+	for _, m := range ov.Machines {
+		got[m.Host] = m
+	}
+	for h, want := range map[string][2]string{
+		"same": {"", e(c2, "same")}, "manual": {"manual", e(c2, "manual")}, "boot": {"unfinished", e(c2, "boot")},
+		"partway": {"unfinished", e(c1, "partway")}, "switching": {"", ""}, "stale": {"", ""}, "pending": {"", ""},
+		"elsewhere": {"", ""}, "old": {"", ""},
+	} {
+		if m := got[h]; m.Drift != want[0] || m.Expected != want[1] {
+			t.Errorf("%s: drift %q expected %q, want %v", h, m.Drift, m.Expected, want)
+		}
+	}
+	if s := got["same"].System; s == nil || !s.Reboot {
+		t.Errorf("same: a pending reboot is not passed on: %+v", s)
+	}
+	slices.Sort(src.asked[c1])
+	slices.Sort(src.asked[c2])
+	if !slices.Equal(src.asked[c1], []string{"partway"}) || !slices.Equal(src.asked[c2], []string{"boot", "manual", "partway", "pending", "same"}) {
+		t.Errorf("asked for %v", src.asked)
+	}
+	if _, ok := src.asked[sha('e')]; ok {
+		t.Error("asked to evaluate a commit the working copy does not have")
+	}
+}

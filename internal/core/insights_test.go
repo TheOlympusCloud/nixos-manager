@@ -160,11 +160,14 @@ func TestDeployInsights(t *testing.T) {
 		{Host: "new", State: "never", Reports: []DeployReport{}},
 		// Behind because it is off: silent says it, behind would only repeat it.
 		{Host: "off", State: "behind", Behind: 3, BehindSince: now.Add(-9 * time.Hour), Silent: true, Reports: rep, Heartbeats: true},
-		{Host: "quiet", State: "current", Silent: true, Reports: rep, Heartbeats: true},           // up to date, but gone quiet
-		{Host: "old", State: "current", Reports: rep, SharedToken: true},                          // an older report module: no heartbeats, the shared token
-		{Host: "box", State: "never", Reports: []DeployReport{}, LastSeen: now, Heartbeats: true}, // set up, nothing deployed since
-		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep},   // not in the fleet
+		{Host: "quiet", State: "current", Silent: true, Reports: rep, Heartbeats: true},                          // up to date, but gone quiet
+		{Host: "old", State: "current", Reports: rep, SharedToken: true},                                         // an older report module: no heartbeats, the shared token
+		{Host: "box", State: "never", Reports: []DeployReport{}, LastSeen: now, Heartbeats: true},                // set up, nothing deployed since
+		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep, Drift: "manual"}, // not in the fleet
+		{Host: "hand", State: "current", Reports: rep, Heartbeats: true, Commit: strings.Repeat("c", 40), Drift: "manual", System: &SystemState{Reboot: true}},
+		{Host: "half", State: "current", Reports: rep, Heartbeats: true, Commit: strings.Repeat("c", 40), Drift: "unfinished"},
 	}
+	m.Hosts = append(m.Hosts, Host{Name: "hand"}, Host{Name: "half"})
 	got := Insights(m, deploys, "", now)
 	f := insightByID(got, "deploy-failed:pi")
 	if f.Severity != "error" || f.Link != "#/deployments" || f.Title != "pi failed to build bbbbbbb" ||
@@ -176,6 +179,15 @@ func TestDeployInsights(t *testing.T) {
 	}
 	if s := insightByID(got, "deploy-silent"); s.Severity != "warning" || strings.Join(s.Hosts, ",") != "off,quiet" || s.Title != "off and quiet have stopped reporting" {
 		t.Errorf("deploy-silent: %+v", s)
+	}
+	if h := insightByID(got, "drift-manual"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "hand" || h.Title != "hand runs a system no deployment made" {
+		t.Errorf("drift-manual: %+v", h)
+	}
+	if h := insightByID(got, "drift-unfinished"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "half" || h.Title != "half did not finish switching" {
+		t.Errorf("drift-unfinished: %+v", h)
+	}
+	if h := insightByID(got, "reboot-pending"); h.Severity != "info" || strings.Join(h.Hosts, ",") != "hand" || h.Title != "hand needs a reboot" {
+		t.Errorf("reboot-pending: %+v", h)
 	}
 	if h := insightByID(got, "deploy-shared-token"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "old" || h.Title != "old reports with the shared token" {
 		t.Errorf("deploy-shared-token: %+v", h)

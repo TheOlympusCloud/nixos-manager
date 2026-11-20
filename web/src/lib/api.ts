@@ -320,6 +320,10 @@ export type MachineDeployment = {
   /** Its last report used the shared fleet token, not its own. */
   sharedToken?: boolean
   system?: SystemState
+  /** The system its commit builds, as comin evaluates it, once the console evaluated it. */
+  expected?: string
+  /** manual: it runs a system no deployment made; unfinished: a switch stopped or failed partway. */
+  drift?: 'manual' | 'unfinished'
   /** The main branch its comin follows, or its testing branch when that is on top of it. */
   branch: string
   target?: string

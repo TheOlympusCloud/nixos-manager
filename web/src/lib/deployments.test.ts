@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Commit, DeployOverview, MachineDeployment } from './api'
-import { excerpt, forgetQuestion, installCommand, onSharedToken, localOnly, pollInterval, progress, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, urlLine } from './deployments'
+import { driftDetail, excerpt, forgetQuestion, installCommand, onSharedToken, localOnly, pollInterval, progress, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, urlLine } from './deployments'
 
 const commit = (sha: string, subject = sha): Commit => ({ sha, short: sha.slice(0, 7), author: 'Pablo', email: 'p@x', date: '2026-11-19T10:00:00Z', subject })
 const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', behind: 0, reports: [], silent: false, silentAfter: 2, heartbeats: true, ...extra })
@@ -85,6 +85,14 @@ describe('deployments', () => {
     expect(excerpt('a\nb\nc\nd\ne')).toBe('a\nb\nc\nd')
     expect(excerpt('x'.repeat(500))).toHaveLength(361)
     expect(excerpt(undefined)).toBe('')
+  })
+
+  it('says how what a machine runs differs from its commit', () => {
+    expect(driftDetail(m('pi', { drift: 'manual', commit: 'c3abcdef' }))).toBe(
+      'Runs a system that no deployment made: not what c3abcde builds, and not what it boots into from comin. Someone ran nixos-rebuild there, or rolled back; the next commit that changes it replaces it.',
+    )
+    expect(driftDetail(m('pi', { drift: 'unfinished', commit: 'c3abcdef' }))).toMatch(/^Did not finish switching/)
+    expect(driftDetail(m('pi'))).toBe('')
   })
 
   it('lists the machines still on the shared token', () => {

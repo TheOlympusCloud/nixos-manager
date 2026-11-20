@@ -128,7 +128,8 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
      4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
      holds a few nixpkgs revisions and the machines' systems the checks build.
      More cores make checks faster. The fleet views evaluate two machines at once (about 1 GB
-     each), and a check can run next to them. On a tight container set
+     each), and a check can run next to them, as can one evaluation of what a
+     newly deployed machine should run (Deployments). On a tight container set
      `services.nixos-manager.extraEnvironment.NIXMGR_EVAL_JOBS = "1";`, or
      raise it when memory is to spare.
 
@@ -444,6 +445,24 @@ whatever its deployment state: an up-to-date machine that dies no longer stays
 green. Set `silentAfter = null;` on a machine that is often off, such as a
 laptop, so it is never flagged. No machine is called silent in the first 20
 minutes after nixos-manager starts, while the machines report in again.
+
+nixos-manager also evaluates what each machine's deployed commit builds,
+the way comin does (the commit itself, `git+file://…?rev=…`, so a
+configuration that records `self.rev` matches), one machine at a time in its
+own job lane, and compares it with what the machine says it runs:
+
+- **Changed by hand**: it runs a system that neither its commit builds nor it
+  boots into from comin, after a `nixos-rebuild` on the machine or a rollback.
+  comin replaces it with the next commit that changes the machine.
+- **Switch unfinished**: comin installed the commit's system as the boot
+  default but it does not run, or a switch failed partway and left the failed
+  commit's system running.
+- **Reboot pending**: the running kernel, its modules or the initrd are not the
+  booted ones.
+
+There is no verdict while comin switches to a new build, or before the commit
+is evaluated; the result of each commit is kept until nixos-manager restarts,
+and a failed evaluation is tried again after an hour.
 
 To turn it on (the **Deployments** view walks you through it):
 

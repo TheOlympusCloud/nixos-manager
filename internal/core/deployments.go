@@ -114,6 +114,10 @@ func (r DeployReport) failed() bool { return r.Status == "failed" }
 // what its latest report of any kind (heartbeats too) said in heartbeats.json,
 // and the key each machine's report token is derived from.
 type Deployments struct {
+	// Systems evaluates what each machine builds at the commit it deployed, to
+	// compare with what it runs; nil compares nothing.
+	Systems SystemSource
+
 	repo      *Repo
 	path      string
 	livePath  string
@@ -379,6 +383,11 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// SystemSource says what machines build at a commit (Jobs evaluates it).
+type SystemSource interface {
+	ExpectedSystems(commit string, hosts []string) map[string]SystemEval
+}
+
 // MachineDeployment is what one machine reported and what that means against
 // the branch comin follows for it.
 type MachineDeployment struct {
@@ -397,6 +406,15 @@ type MachineDeployment struct {
 	SharedToken bool `json:"sharedToken,omitempty"`
 	// System is what it last said it runs, boots and boots next.
 	System *SystemState `json:"system,omitempty"`
+	// Expected is the system Commit builds, as comin evaluates it; "" while
+	// that is not known.
+	Expected string `json:"expected,omitempty"`
+	// Drift compares System with Expected: "" (the same, or no verdict yet),
+	// manual (it runs a system no deployment made: nixos-rebuild by hand, or a
+	// rollback) or unfinished (the deployed system is installed but does not
+	// run: a switch that stopped or failed partway).
+	Drift  string `json:"drift,omitempty"`
+	inRepo bool   // Commit is in this working copy
 	// Branch is the main branch its comin follows (services.comin.remotes), or
 	// its testing branch when that is on top of the main one.
 	Branch string `json:"branch"`
@@ -530,6 +548,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 				}
 			}
 			m.Subject, known = s, ok
+			m.inRepo = ok
 		}
 		if known && m.Target != "" && m.Commit != m.Target {
 			k := [2]string{m.Commit, m.Target}
@@ -561,7 +580,65 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 			now.Sub(m.LastSeen) > time.Duration(m.SilentAfter)*time.Hour && now.Sub(d.started) > silenceWarmup
 		ov.Machines = append(ov.Machines, m)
 	}
+	d.drift(ctx, ov.Machines)
 	return ov, nil
+}
+
+// drift compares what each machine last said it runs with what the commit it
+// deployed builds, asking Systems for the systems it needs (those not known
+// yet are evaluated in the background, and judged at a later call).
+func (d *Deployments) drift(ctx context.Context, ms []MachineDeployment) {
+	if d.Systems == nil {
+		return
+	}
+	want := map[string][]string{} // commit -> machines
+	var judge []*MachineDeployment
+	for i := range ms {
+		m := &ms[i]
+		// No verdict from a snapshot older than the deployment, or while comin
+		// switches to a build ("built" is followed by the deployment's report).
+		if m.System == nil || !m.inRepo || m.System.At.Before(m.DeployedAt) || m.Reports[0].Status == "built" {
+			continue
+		}
+		judge = append(judge, m)
+		want[m.Commit] = append(want[m.Commit], m.Host)
+		if f := m.Reports[0]; f.Phase == "deploy" && f.failed() && f.Commit != m.Commit {
+			if _, err := d.repo.git(ctx, "cat-file", "-e", "--end-of-options", f.Commit+"^{commit}"); err == nil {
+				want[f.Commit] = append(want[f.Commit], m.Host)
+			}
+		}
+	}
+	got := map[string]map[string]SystemEval{}
+	for c, hosts := range want {
+		got[c] = d.Systems.ExpectedSystems(c, hosts)
+	}
+	for _, m := range judge {
+		e, ok := got[m.Commit][m.Host]
+		if !ok || e.Error != "" {
+			continue
+		}
+		m.Expected = e.Path
+		run := m.System.Current
+		if run == e.Path {
+			continue
+		}
+		// A switch that failed partway leaves the failed commit's system running.
+		if f := m.Reports[0]; f.Phase == "deploy" && f.failed() && f.Commit != m.Commit {
+			fe, ok := got[f.Commit][m.Host]
+			if !ok && slices.Contains(want[f.Commit], m.Host) {
+				continue // not evaluated yet: no verdict
+			}
+			if ok && fe.Error == "" && run == fe.Path {
+				m.Drift = "unfinished"
+				continue
+			}
+		}
+		if m.System.Profile == e.Path {
+			m.Drift = "unfinished" // installed as the boot default, not switched to
+		} else {
+			m.Drift = "manual"
+		}
+	}
 }
 
 // removed lists the machines that reported but are no longer in the flake,

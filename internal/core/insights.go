@@ -294,7 +294,7 @@ func list(xs []string) string {
 // heartbeats.
 func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	var out []Insight
-	var behind, silent, never, legacy, shared []string
+	var behind, silent, never, legacy, shared, manual, unfinished, reboot []string
 	reporting := false
 	for _, d := range deploys {
 		reporting = reporting || len(d.Reports) > 0
@@ -309,6 +309,15 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 		}
 		if d.SharedToken {
 			shared = append(shared, d.Host)
+		}
+		switch d.Drift {
+		case "manual":
+			manual = append(manual, d.Host)
+		case "unfinished":
+			unfinished = append(unfinished, d.Host)
+		}
+		if d.System != nil && d.System.Reboot {
+			reboot = append(reboot, d.Host)
 		}
 		switch {
 		case d.State == "failed" && d.Failure != nil:
@@ -354,6 +363,22 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 		out = append(out, Insight{ID: "deploy-silent", Severity: "warning", Hosts: silent, Link: "#/deployments",
 			Title:  fmt.Sprintf("%s %s stopped reporting", list(silent), are(silent)),
 			Detail: "No report or heartbeat for longer than fleet.deployReport.silentAfter allows (7 days and a commit behind for a machine without heartbeats). Check that it is on, that comin and its report timer run, and that it still reaches this console. A machine that is often off can set silentAfter = null."})
+	}
+	runs := func(hs []string) string { return map[bool]string{true: "runs", false: "run"}[len(hs) == 1] }
+	if len(manual) > 0 {
+		out = append(out, Insight{ID: "drift-manual", Severity: "warning", Hosts: manual, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s a system no deployment made", list(manual), runs(manual)),
+			Detail: "What runs is neither what its deployed commit builds nor what it boots into from comin: someone ran nixos-rebuild there, or rolled back. comin replaces it with the next commit that changes the machine; to keep the change, make it in the repository."})
+	}
+	if len(unfinished) > 0 {
+		out = append(out, Insight{ID: "drift-unfinished", Severity: "warning", Hosts: unfinished, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s did not finish switching", list(unfinished)),
+			Detail: "What runs is not what its deployed commit builds, but comin got it there: a switch stopped or failed partway (a service that did not start, say), or the new system is installed and waits for a reboot. journalctl -u comin on the machine says why."})
+	}
+	if len(reboot) > 0 {
+		out = append(out, Insight{ID: "reboot-pending", Severity: "info", Hosts: reboot, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s a reboot", list(reboot), map[bool]string{true: "needs", false: "need"}[len(reboot) == 1]),
+			Detail: "A deployment changed the kernel, its modules or the initrd, which only a reboot loads: until then the machine runs the old kernel."})
 	}
 	if len(shared) > 0 {
 		out = append(out, Insight{ID: "deploy-shared-token", Severity: "warning", Hosts: shared, Link: "#/deployments",

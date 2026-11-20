@@ -119,6 +119,18 @@ export function excerpt(error: string | undefined, lines = 4, chars = 360): stri
   return text.length > chars ? text.slice(0, chars).trimEnd() + '…' : text
 }
 
+/** How what a machine runs differs from what its deployed commit builds, or "". */
+export function driftDetail(m: MachineDeployment): string {
+  switch (m.drift) {
+    case 'manual':
+      return `Runs a system that no deployment made: not what ${short(m.commit)} builds, and not what it boots into from comin. Someone ran nixos-rebuild there, or rolled back; the next commit that changes it replaces it.`
+    case 'unfinished':
+      return `Did not finish switching: what runs is not what ${short(m.commit)} builds, but comin got it there. A switch stopped or failed partway, or the new system waits for a reboot: journalctl -u comin says why.`
+    default:
+      return ''
+  }
+}
+
 /** The machines whose last report used the shared fleet token, while it is accepted. */
 export const onSharedToken = (ov: DeployOverview | null): string[] =>
   ov?.sharedToken ? ov.machines.filter((m) => m.sharedToken).map((m) => m.host).sort() : []

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { excerpt, short, silenceDetail, stateDetail } from '../../lib/deployments'
+  import { driftDetail, excerpt, short, silenceDetail, stateDetail } from '../../lib/deployments'
   import { deployOf, deploys, watchDeployments } from '../../lib/deployments.svelte'
   import { link } from '../../lib/router.svelte'
   import { ago } from '../../lib/util'
@@ -39,6 +39,8 @@
     </dl>
     {#if !m.failure}<p class="muted small state">{stateDetail(m)}</p>{/if}
     {#if m.silent}<p class="small state warn-line" role="status">{silenceDetail(m)}</p>{/if}
+    {#if m.drift}<p class="small state warn-line" role="status">{driftDetail(m)}</p>{/if}
+    {#if m.system?.reboot}<p class="muted small state">A reboot is pending: a deployment changed the kernel, its modules or the initrd, which only a reboot loads.</p>{/if}
     {#if m.failure}
       <div class="fail" role="alert">
         <div class="fail-head">
