@@ -179,17 +179,20 @@ func TestReportDeploymentScript(t *testing.T) {
 	}
 }
 
-// A comin report that cannot be delivered waits for the next heartbeat, which
-// sends it first; a newer report that gets through replaces it, and one the
+// Reports that cannot be delivered wait, in order, and every later run sends
+// them first: the next heartbeat, or the next comin report. A heartbeat sent
+// while one still waits says nothing about the system, and a report the
 // manager refuses is dropped.
-func TestUndeliveredReportsWaitForTheHeartbeat(t *testing.T) {
+func TestUndeliveredReportsWaitInOrder(t *testing.T) {
 	srv, got, code := fakeManager(t)
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "token")
 	os.WriteFile(tokenFile, []byte("nxh_secret"), 0o600)
-	state := filepath.Join(dir, "state")
-	script := reporter(t, srv.URL, tokenFile, state, filepath.Join(dir, "root"))
-	pending := filepath.Join(state, "pending.json")
+	state, root := filepath.Join(dir, "state"), filepath.Join(dir, "root")
+	sys := strings.Repeat("a", 32) + "-nixos-system-pi-26.05"
+	fakeSystem(t, root, sys, sys)
+	script := reporter(t, srv.URL, tokenFile, state, root)
+	pending := filepath.Join(state, "pending.jsonl")
 	run := func(env ...string) string {
 		t.Helper()
 		cmd := exec.Command(script)
@@ -203,53 +206,106 @@ func TestUndeliveredReportsWaitForTheHeartbeat(t *testing.T) {
 		}
 		return string(out)
 	}
-	deploy := func(c byte) string {
-		return run("COMIN_STATUS=done", "COMIN_GIT_SHA="+strings.Repeat(string(c), 40))
+	report := func(c byte, phase, status string) string {
+		return run("COMIN_PHASE="+phase, "COMIN_STATUS="+status, "COMIN_GIT_SHA="+strings.Repeat(string(c), 40))
+	}
+	// received says what the manager got, in order: a commit's first letter, or "beat"
+	// for a heartbeat, "beat-" for one without a system.
+	received := func(n int) string {
+		t.Helper()
+		var out []string
+		for range n {
+			s := <-got
+			switch c, _ := s.body["commit"].(string); {
+			case s.body["phase"] == "heartbeat" && s.body["current"] == "":
+				out = append(out, "beat-")
+			case s.body["phase"] == "heartbeat":
+				out = append(out, "beat")
+			default:
+				out = append(out, c[:1])
+			}
+		}
+		select {
+		case s := <-got:
+			t.Fatalf("one more report: %+v", s.body)
+		default:
+		}
+		return strings.Join(out, " ")
+	}
+	waiting := func() string {
+		b, err := os.ReadFile(pending)
+		if os.IsNotExist(err) {
+			return ""
+		}
+		var out []string
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var r map[string]any
+			if err := json.Unmarshal([]byte(l), &r); err != nil {
+				t.Fatalf("pending line %q: %v", l, err)
+			}
+			out = append(out, r["commit"].(string)[:1])
+		}
+		return strings.Join(out, " ")
 	}
 
 	// Not delivered, and not a status curl retries by itself (5xx would be sent twice).
 	code.Store(http.StatusNotFound)
-	if out := deploy('a'); !strings.Contains(out, "the next heartbeat sends it") {
+	if out := report('a', "deploy", "done"); !strings.Contains(out, "the next heartbeat sends it") {
 		t.Errorf("output: %q", out)
 	}
-	<-got
-	if fi, err := os.Stat(pending); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("pending report: %v %v", fi, err)
+	if fi, err := os.Stat(pending); err != nil || fi.Mode().Perm() != 0o600 || received(1) != "a" || waiting() != "a" {
+		t.Fatalf("pending report: %v %v %q", fi, err, waiting())
 	}
 	if fi, err := os.Stat(state); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("state folder: %v %v", fi, err)
 	}
+	// The manager is still down when comin's next build fails: both wait, in order.
+	report('b', "build", "failed")
+	if r, w := received(1), waiting(); r != "a" || w != "a b" {
+		t.Fatalf("after the failed build: received %q, waiting %q", r, w)
+	}
+	// While reports wait, a heartbeat tells that the machine is up, not what it runs.
+	run("heartbeat")
+	if r, w := received(2), waiting(); r != "a beat-" || w != "a b" {
+		t.Fatalf("heartbeat while waiting: received %q, waiting %q", r, w)
+	}
 	code.Store(http.StatusNoContent)
 	run("heartbeat")
-	if s := <-got; s.body["commit"] != strings.Repeat("a", 40) || s.body["phase"] != "deploy" {
-		t.Fatalf("the waiting report did not go first: %+v", s.body)
-	}
-	if s := <-got; s.body["phase"] != "heartbeat" {
-		t.Fatalf("then the heartbeat: %+v", s.body)
-	}
-	if _, err := os.Stat(pending); !os.IsNotExist(err) {
-		t.Fatalf("the delivered report still waits: %v", err)
+	if r, w := received(3), waiting(); r != "a b beat" || w != "" {
+		t.Fatalf("heartbeat once the manager is back: received %q, waiting %q", r, w)
 	}
 
+	// A comin report sends the waiting ones first, so a build report never
+	// overtakes the deployment that tells what runs.
 	code.Store(http.StatusUnauthorized)
-	deploy('b')
-	<-got
+	report('c', "deploy", "done")
+	received(1)
 	code.Store(http.StatusNoContent)
-	deploy('c')
-	<-got
-	if _, err := os.Stat(pending); !os.IsNotExist(err) {
-		t.Fatalf("an older report waits after a newer one got through: %v", err)
+	report('d', "build", "failed")
+	if r, w := received(2), waiting(); r != "c d" || w != "" {
+		t.Fatalf("a later report: received %q, waiting %q", r, w)
 	}
 
+	// Refused: sending it again cannot help, so it is dropped.
 	code.Store(http.StatusNotFound)
-	deploy('d')
-	<-got
-	code.Store(http.StatusBadRequest) // refused: sending it again cannot help
+	report('e', "deploy", "done")
+	received(1)
+	code.Store(http.StatusBadRequest)
 	run("heartbeat")
-	<-got
-	<-got
-	if _, err := os.Stat(pending); !os.IsNotExist(err) {
-		t.Fatalf("a refused report still waits: %v", err)
+	if r, w := received(2), waiting(); r != "e beat" || w != "" {
+		t.Fatalf("a refused report: received %q, waiting %q", r, w)
+	}
+
+	// At most the newest 20 wait.
+	code.Store(http.StatusNotFound)
+	for i := range 25 {
+		run("COMIN_STATUS=done", fmt.Sprintf("COMIN_GIT_SHA=%040x", i))
+		received(1)
+	}
+	b, _ := os.ReadFile(pending)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 20 || !strings.Contains(lines[0], fmt.Sprintf("%040x", 5)) || !strings.Contains(lines[19], fmt.Sprintf("%040x", 24)) {
+		t.Fatalf("%d waiting, first %.80s", len(lines), lines[0])
 	}
 }
 
