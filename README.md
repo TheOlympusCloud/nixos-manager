@@ -526,11 +526,19 @@ ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
 `flake.lock` is saved while they run, they write nothing: run them again.
 
 The machine views, settings and option search evaluate the flake in pure mode,
-like `nix build` and comin: fleet code cannot read the server's files or
-environment (`builtins.readFile "/var/lib/nixos-manager/sops-age-key"` fails
-with "forbidden in pure evaluation mode"), and only the inputs `flake.lock`
-pins are fetched. After adding an input to `flake.nix`, run **Lock**; until
-then the machines show "flake.lock does not pin every input".
+like `nix build` and comin: a plain read or import of a server path fails
+(`builtins.readFile "/var/lib/nixos-manager/sops-age-key"` gives "forbidden in
+pure evaluation mode"), fleet code sees no environment, and only the inputs
+`flake.lock` pins are fetched. After adding an input to `flake.nix`, run
+**Lock**; until then the machines show "flake.lock does not pin every input".
+
+**This does not keep the server's data from fleet code.** Nix still fetches a
+local folder pinned by its hash (`builtins.fetchTree { type = "path"; … }` or a
+`path:` input), and a wrong hash makes it print the right one. Checks also run
+`nix build` and `nix flake check` as the server's user. So anyone who can push
+to the fleet repository or holds an edit token can copy the data folder, age
+key included, into the Nix store in two tries. Give push access and edit tokens
+only to people who may see the secrets, as in Docker.
 
 ### Try a change on one machine first
 
