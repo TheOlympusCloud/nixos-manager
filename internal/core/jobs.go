@@ -79,7 +79,8 @@ func newJobs(repo *Repo) *Jobs {
 
 // JobRequest asks for one of:
 //   - "check": nix flake check on the staged changes, a build of every machine whose
-//     system they change compared with what is pushed, then a dry build of each target attribute;
+//     system they change compared with what is pushed, then a dry build of each target
+//     attribute; or, with Commit, the same for a commit (see CheckCommit);
 //   - "lock": nix flake lock of the working copy;
 //   - "update": nix flake update of Inputs (all when empty) of the working copy.
 type JobRequest struct {
@@ -89,8 +90,13 @@ type JobRequest struct {
 	Host    string   `json:"host,omitempty"`  // options index jobs
 	Names   []string `json:"names,omitempty"` // option value jobs
 	Hosts   []string `json:"hosts,omitempty"`
-	// Base is the tree a push lands on, recorded by Submit for a check: the
-	// machines are compared with it. Never from a client.
+	// Commit is a commit to check instead of the staged changes: a full SHA.
+	Commit string `json:"commit,omitempty"`
+	// Branch is the branch a webhook saw Commit pushed to. Never from a client.
+	Branch string `json:"-"`
+	// Base is the tree the machines are compared with, recorded when a check is
+	// queued: the one a push lands on, or for a commit, the newest checked tree
+	// before it. Never from a client.
 	Base string `json:"-"`
 }
 
@@ -119,6 +125,8 @@ type JobInfo struct {
 	Targets  []string      `json:"targets"`
 	Inputs   []string      `json:"inputs,omitempty"`
 	Tree     string        `json:"tree,omitempty"`
+	Commit   string        `json:"commit,omitempty"` // a check of a commit, not of the staged changes
+	Branch   string        `json:"branch,omitempty"` // the branch a webhook saw Commit pushed to
 	Started  time.Time     `json:"started,omitzero"`
 	Finished time.Time     `json:"finished,omitzero"`
 	Summary  *CheckSummary `json:"summary,omitempty"`
@@ -163,7 +171,8 @@ func (j *Job) Done() <-chan struct{} { return j.done }
 func (j *Job) Info(withOutput bool) JobInfo {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	info := JobInfo{ID: j.ID, Kind: j.Req.Kind, State: j.state, Targets: j.Req.Targets, Inputs: j.Req.Inputs, Tree: j.tree, Started: j.started, Finished: j.finished, Summary: j.summary}
+	info := JobInfo{ID: j.ID, Kind: j.Req.Kind, State: j.state, Targets: j.Req.Targets, Inputs: j.Req.Inputs, Tree: j.tree, Commit: j.Req.Commit, Branch: j.Req.Branch,
+		Started: j.started, Finished: j.finished, Summary: j.summary}
 	if info.Targets == nil {
 		info.Targets = []string{}
 	}
@@ -193,9 +202,22 @@ var inputName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_'-]*$`)
 // it validates.
 func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 	var tree string
-	req.Base = ""
+	req.Base, req.Branch = "", ""
+	if req.Commit != "" && req.Kind != "check" {
+		return nil, errorf(ErrInvalid, "only a check takes a commit")
+	}
 	switch req.Kind {
 	case "check":
+		if req.Commit != "" {
+			if len(req.Targets) > 0 {
+				return nil, errorf(ErrInvalid, "a check of a commit builds the machines it changes; it takes no extra targets")
+			}
+			job, pass, err := js.CheckCommit(ctx, req.Commit, "")
+			if pass != nil {
+				return nil, errorf(ErrConflict, "commit %.7s already passed a check", req.Commit)
+			}
+			return job, err
+		}
 		for _, t := range req.Targets {
 			if t == "" || strings.ContainsAny(t, "\x00\r\n") {
 				return nil, errorf(ErrInvalid, "invalid target %q", t)
