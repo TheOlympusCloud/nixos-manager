@@ -1,5 +1,5 @@
 // The model comparison (working copy, one commit or what a push changes), waiting while either side evaluates.
-import { api, type ModelDiffReply } from './api'
+import { api, ApiError, type ModelDiffReply } from './api'
 import { waitJob } from './fleet.svelte'
 import { settingChanges, type SettingChange } from './impact'
 
@@ -23,7 +23,8 @@ export const managedFiles = (paths: string[]) => paths.filter((p) => MANAGED.tes
 
 /**
  * What each changed managed.json sets differently, per machine: `before` is a revision,
- * `after` a revision or null for the working copy. A missing or unreadable file counts as empty.
+ * `after` a revision or null for the working copy. A missing file counts as empty; one that
+ * cannot be read or parsed leaves its machine out, rather than every setting shown as changed.
  */
 export async function managedSettings(
   paths: string[],
@@ -32,19 +33,23 @@ export async function managedSettings(
   /** Files known to be absent on one side (new or deleted), so they are not asked for. */
   absent: { before?: string[]; after?: string[] } = {},
 ): Promise<Record<string, SettingChange[]>> {
-  const settingsOf = (text: string) => {
+  // null: unknown (unreadable or not JSON).
+  const settingsOf = (text: string | null) => {
     try {
-      return (JSON.parse(text) as { settings?: unknown }).settings ?? {}
+      return text === null ? null : ((JSON.parse(text) as { settings?: unknown }).settings ?? {})
     } catch {
-      return {}
+      return null
     }
   }
-  const read = (rev: string | null, path: string) => (rev ? api.fileAt(rev, path) : api.file(path).then((f) => f.content)).catch(() => '{}')
+  const read = (rev: string | null, path: string) =>
+    (rev ? api.fileAt(rev, path) : api.file(path).then((f) => f.content)).catch((e) => (e instanceof ApiError && e.status === 404 ? '{}' : null))
   const out: Record<string, SettingChange[]> = {}
   await Promise.all(
     managedFiles(paths).map(async (path) => {
       const [a, b] = await Promise.all([absent.before?.includes(path) ? '{}' : read(before, path), absent.after?.includes(path) ? '{}' : read(after, path)])
-      const changes = settingChanges(settingsOf(a), settingsOf(b))
+      const [sa, sb] = [settingsOf(a), settingsOf(b)]
+      if (sa === null || sb === null) return
+      const changes = settingChanges(sa, sb)
       if (changes.length) out[MANAGED.exec(path)![1]] = changes
     }),
   )
