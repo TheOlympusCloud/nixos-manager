@@ -544,6 +544,19 @@ that address (the `remote=` of the `login` lines in the log), or every proxied
 login shares one address's limit. List only proxies there, since anything in
 that list can claim any client address. The counts are kept in memory.
 
+Logins are limited before the password is checked: 10 attempts per 10
+minutes from one address, and 50 per 10 minutes from all addresses together.
+More get `429 Too Many Requests` with `Retry-After`; successful logins do not
+count. A browser that has logged in before keeps a cookie that gives it its own
+limit of 10, outside the shared one, so someone guessing from elsewhere cannot
+lock you out of a browser you already use. Behind a proxy on the same machine
+(`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
+to `X-Forwarded-For`. With Docker, a proxy on the host reaches the container
+from the Docker gateway rather than loopback: set `NIXMGR_TRUSTED_PROXIES` to
+that address (the `remote=` of the `login` lines in the log), or every proxied
+login shares one address's limit. List only proxies there, since anything in
+that list can claim any client address. The counts are kept in memory.
+
 ## Visual editing on an existing repository
 
 The starter flake loads each machine's `managed.json`. In a repository you
