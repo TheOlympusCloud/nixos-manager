@@ -9,11 +9,14 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/TheOlympusCloud/nixos-manager/internal/fakesops"
 )
 
 const testName, testEmail = "Test User", "test@example.invalid"
 
 func TestMain(m *testing.M) {
+	fakesops.Main() // when a test runs this binary as sops, age-keygen or ssh-to-age
 	// Keep the developer's own git config and hooks out of the test repos.
 	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")

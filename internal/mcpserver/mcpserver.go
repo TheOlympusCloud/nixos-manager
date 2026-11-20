@@ -17,7 +17,7 @@ const outputTail = 20000
 
 const instructions = `This server edits a git-backed Nix flake repository (NixOS, home-manager and other flake outputs).
 Typical flow: list_files / read_file, write_file with the base_hash from read_file, stage, run_check, commit, push.
-Commits and pushes are only accepted after run_check passed for exactly that content; it builds every machine the change touches. Never store secrets in the repository.`
+Commits and pushes are only accepted after run_check passed for exactly that content; it builds every machine the change touches. Never write a secret in a file: set_secret stores it encrypted for the machines (sops-nix).`
 
 type done struct {
 	Done bool `json:"done"`
@@ -45,7 +45,7 @@ var toolScope = map[string]auth.Scope{
 	"list_branches": auth.ScopeRead, "fleet_overview": auth.ScopeRead, "fleet_insights": auth.ScopeRead,
 	"deployments": auth.ScopeRead, "compare_option": auth.ScopeRead, "host_details": auth.ScopeRead,
 	"model_diff": auth.ScopeRead, "search_packages": auth.ScopeRead, "search_options": auth.ScopeRead,
-	"list_targets": auth.ScopeRead,
+	"list_targets": auth.ScopeRead, "list_secrets": auth.ScopeRead,
 
 	"write_file": auth.ScopeEdit, "create_folder": auth.ScopeEdit, "move_path": auth.ScopeEdit, "delete_path": auth.ScopeEdit,
 	"stage": auth.ScopeEdit, "unstage": auth.ScopeEdit, "discard": auth.ScopeEdit, "commit": auth.ScopeEdit,
@@ -53,7 +53,7 @@ var toolScope = map[string]auth.Scope{
 	"revert_commit": auth.ScopeEdit, "merge_branch": auth.ScopeEdit, "pull": auth.ScopeEdit,
 	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
-	"flake_lock": auth.ScopeEdit, "flake_update": auth.ScopeEdit,
+	"flake_lock": auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
 
 	"push": auth.ScopeFull, "try_on_machine": auth.ScopeFull, "end_trial": auth.ScopeFull,
 }
@@ -388,6 +388,25 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	tool(s, "unset_option", "Remove an option setting from a machine's managed.json.", func(ctx context.Context, in hostPath) (core.ManagedView, error) {
 		return svc.UnsetOption(in.Host, in.Path, nil)
 	})
+
+	if svc.Secrets != nil {
+		type secretIn struct {
+			Host string `json:"host,omitempty" jsonschema:"the machine that alone gets it; empty for every machine with a key"`
+			Name string `json:"name" jsonschema:"its name: the file /run/secrets/<name> on the machine"`
+		}
+		tool(s, "list_secrets", "The fleet's secrets, kept with sops-nix: this server's age key, each machine's approved key (from its SSH host key; a machine without one gets no secrets; a person approves keys in Settings → Secrets, and proposed lists keys in secrets/hosts/ waiting for that), and the names in secrets/common.json (every machine with a key) and secrets/hosts/<machine>.json, never a value. stale: re-encrypting is needed (Settings → Secrets).", func(ctx context.Context, _ struct{}) (core.SecretsStatus, error) {
+			return svc.Secrets.Status(ctx)
+		})
+		tool(s, "set_secret", "Add or replace a secret, encrypted before it is written: for every machine with a key (no host) or one machine. It is a change in the working copy, like any other: run_check, commit and push deploy it. Values are never shown back over MCP.", func(ctx context.Context, in struct {
+			secretIn
+			Value string `json:"value" jsonschema:"the value, text up to 64 KiB"`
+		}) (done, error) {
+			return done{true}, svc.Secrets.Set(ctx, in.Host, in.Name, in.Value)
+		})
+		tool(s, "delete_secret", "Remove a secret (for every machine with no host, or from one machine's file).", func(ctx context.Context, in secretIn) (done, error) {
+			return done{true}, svc.Secrets.Delete(ctx, in.Host, in.Name)
+		})
+	}
 
 	tool(s, "list_targets", "List the NixOS, home-manager and nix-darwin configurations in the staged flake, with the attribute to pass to run_check for an extra dry build.", func(ctx context.Context, _ struct{}) (map[string][]core.Target, error) {
 		t, err := svc.Jobs.Targets(ctx)

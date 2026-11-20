@@ -135,7 +135,8 @@ func run() error {
 	if svc.Deploys, err = core.OpenDeployments(data, repo); err != nil {
 		return err
 	}
-	svc.Deploys.Systems = svc.Jobs // what each machine should run, to compare with what it says it runs
+	svc.Deploys.Systems = svc.Jobs             // what each machine should run, to compare with what it says it runs
+	svc.Secrets = core.OpenSecrets(data, repo) // sops, age-keygen and ssh-to-age from PATH
 	notifier, err := core.OpenNotifier(data, svc)
 	if err != nil {
 		return err

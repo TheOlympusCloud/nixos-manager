@@ -26,6 +26,13 @@ An MCP server gives automation the same features.
 - **Try on one machine**: from Changes, push a checked change to one machine's
   `testing-<host>` branch, which its comin deploys there alone (a reboot undoes
   it), watch it there, then promote it to `main` or end the trial.
+- **Secrets** with sops-nix: Wi-Fi passwords, API keys, password hashes,
+  comin's pull token for a private repository and each machine's report token,
+  encrypted in the repository for this server and the machines that get them,
+  each machine decrypting its own with its SSH host key. Settings → Secrets
+  keeps the machines' keys and `.sops.yaml`, writes values encrypted, and shows
+  one only when asked; machine pages list what each machine gets, and option
+  forms offer a secret where a file path goes.
 - **Machine pages**: packages (with the file that adds each one), services and
   programs, users and SSH keys, ports and file systems, and **Essentials**:
   time zone, locale, keyboard, garbage collection, store optimisation, zram,
@@ -481,8 +488,9 @@ When **Pull** rebases your local commits onto new remote commits, the result
 was never checked as a whole, so **Push** refuses it: run the checks again with
 nothing staged or changed, then push.
 
-Never store secrets in the repository; use sops-nix or agenix. Nix copies
-what it evaluates into the store, which every user of the server can read.
+Never store a secret in the repository in plain text: keep it in
+[Secrets](#secrets), encrypted. Nix copies what it evaluates into the store,
+which every user of the server can read.
 **Lock** and **Update** give it only the tracked files (as they are in the
 working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
 ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
@@ -670,6 +678,118 @@ risky changes (network, firewall, VPN, SSH) are best tried first.
   the previous generation in the boot menu, or run `nixos-rebuild switch
   --rollback`. Once it is online, comin pulls the fix and deploys it.
 
+## Secrets
+
+Passwords, tokens and keys the machines need live in the repository,
+encrypted with [sops](https://github.com/getsops/sops) for this server and the
+machines that get them, and [sops-nix](https://github.com/Mic92/sops-nix) puts
+each one on its machine as a file, `/run/secrets/<name>`, decrypted there with
+the machine's SSH host key. **Settings → Secrets** keeps them:
+
+```
+.sops.yaml                 who can open each file below, written by the console
+secrets/common.json        what every machine with a key gets
+secrets/hosts/<name>.pub   a machine's SSH host key (public): its age key comes from it
+secrets/hosts/<name>.json  what that machine alone gets
+```
+
+- **This server's key.** The first time Settings needs it, the server makes an
+  age key in `$NIXMGR_DATA/sops-age-key` (mode 0600). It is never in the
+  repository, never logged and never sent to the browser. **Back it up**:
+  without it nobody can change the secrets (the machines keep decrypting
+  theirs), and a server set up again from scratch makes a new one that opens
+  nothing. To move the console, copy it and `sops-machines.json` (the approved
+  machine keys) to the new server; without the latter, approve each machine's
+  key again under Keys waiting for approval.
+- **Machine keys.** A machine gets secrets once its SSH host key is approved:
+  paste `/etc/ssh/ssh_host_ed25519_key.pub` from the machine (or an
+  `ssh-keyscan -t ed25519 <machine>` line, after comparing its fingerprint with
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine: whoever
+  holds that key gets the secrets). The console turns it into an age key with
+  `ssh-to-age`, writes `secrets/hosts/<name>.pub` and `.sops.yaml`, and
+  encrypts the files again for the new set of keys. Approving, changing and
+  removing keys needs the web login or a full token. The approved keys are kept
+  on the server, in `$NIXMGR_DATA/sops-machines.json`, never taken from the
+  repository: a key that arrives in `secrets/hosts/` another way (a pull, an
+  edit in Code, a token that can only edit) is listed under **Keys waiting for
+  approval**, and nothing is encrypted for it until a person approves it there.
+  Re-encrypt writes back the approved key of a machine whose `.pub` was changed. A machine without a key gets no secrets at all, so adding a
+  secret for every machine never fails a deployment on one that cannot
+  decrypt it. The starter fleet makes an SSH host key on every machine, even
+  without an SSH server (`services.openssh.generateHostKeys`). **Remove**
+  deletes the machine's own secrets and encrypts the others again without it,
+  with a new data key, so it cannot open what is added later; change the values
+  it knew if it is not to be trusted. A machine that left the flake is marked
+  "not in the flake" until its key is removed.
+- **Values.** A value goes to sops on a pipe and only its encrypted form is
+  written (the console checks that every value came back encrypted). Names are
+  letters, digits, `.`, `_` and `-` (not ending in `_unencrypted`, which sops
+  would leave readable). **Show** decrypts one value for the person who asked,
+  and nothing keeps it. Over the API that needs a token with full access; no
+  MCP tool reads a value. Listing the names needs read access, writing a value
+  needs edit access.
+- **Re-encrypt** appears when a file, `.sops.yaml` or a `.pub` does not match
+  the approved keys, after it changed outside this page (a pull, an edit in
+  Code). A file this server's key cannot open is never overwritten.
+- **Removing a key** makes the machine's settings that use a secret (an option
+  set to its path, `neededForUsers`) fail its check: remove them too.
+
+Every change here is a change of the working copy: stage it in **Changes**, run
+the check (it builds the machines whose secrets changed, and sops-nix checks the
+files as part of the build), commit and push. On the machines,
+`modules/secrets.nix` declares every value of `secrets/common.json` and of the
+machine's own file (its own wins) as `sops.secrets.<name>`. Owner, mode or
+`neededForUsers` go next to it in Nix as usual:
+
+```nix
+sops.secrets.wifi.owner = "wpa_supplicant";
+networking.wireless.secretsFile = config.sops.secrets.wifi.path;
+```
+
+The machine page lists the secrets the machine decrypts and where. An option
+that takes a file path (a password, token or environment file) offers the
+machine's secrets in its form; for a user's `hashedPasswordFile` it also sets
+`neededForUsers`, as the hash must be there before users are made.
+
+### Private repository and report tokens
+
+Two setup steps under **Settings → Secrets**:
+
+- **Private repository.** comin on each machine pulls with a read-only Forgejo
+  token: in Forgejo, **Settings → Applications → Generate new token**, as a user
+  who can read the repository, with the **repository** permission **Read**.
+  Saved as the secret `comin-token` for every machine with a key, which the
+  starter fleet's `modules/common.nix` gives comin
+  (`auth.access_token_path`). A machine pulls the repository before it
+  decrypts anything, so it needs the token before the repository turns
+  private: push the secrets while it is still readable, or switch a new
+  machine once by hand from a checkout (`nixos-rebuild switch --flake
+  .#<name>`) with its key already added.
+- **Report tokens.** **Store every machine's token** saves each machine's own
+  [report token](#deployments) as its secret `nixos-manager-report`, which
+  `modules/secrets.nix` points the report hook at, instead of copying it over
+  SSH. Store them again after **New tokens for every machine**.
+
+**A fleet made before secrets** has neither `modules/secrets.nix` nor the
+sops-nix input. Add the input to `flake.nix` and run **Lock**:
+
+```nix
+sops-nix = {
+  url = "github:Mic92/sops-nix";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+then copy `modules/secrets.nix` from `templates/fleet/modules/` here, import it
+from `modules/common.nix` next to `report-deployments.nix` (it sets that
+module's token file), and add the `auth.access_token_path` line of the
+starter's `common.nix` to the comin remote. A fleet that already uses sops-nix
+with its own layout keeps it: the console only touches `.sops.yaml` and
+`secrets/` as above, and lists the machines' secrets either way.
+
+The server runs `sops`, `age-keygen` and `ssh-to-age`: the Nix package and the
+Docker image bring them; Settings says which one is missing otherwise.
+
 ## Notifications
 
 **Settings → Notifications** sends a message when:
@@ -815,7 +935,9 @@ tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
 `list_branches`, `create_branch`, `switch_branch`, `revert_commit`,
 `merge_branch`, `push`, `pull`,
-`list_targets`, `run_check`, `flake_lock`, `flake_update`. They call the same
+`list_targets`, `run_check`, `flake_lock`, `flake_update`. Secrets:
+`list_secrets` (names and keys), `set_secret`, `delete_secret`; no tool reads a
+value back. They call the same
 code as the web UI, including the check rules for commit and push, which MCP
 clients cannot override. Writes and restores need the `base_hash` from
 `read_file`, so a client never overwrites an edit it has not seen.
@@ -826,9 +948,9 @@ Each token gets a scope when it is created, and optionally an expiry date:
 
 | Scope | What it can do |
 |---|---|
-| Read only | Read files, history, the fleet model, checks, jobs and deployments; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
-| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, and lock or update inputs |
-| Full | Also push, which deploys |
+| Read only | Read files, history, the fleet model, checks, jobs, deployments and the secrets' names; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
+| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, and write secrets |
+| Full | Also push, which deploys, read a secret's value (`POST /api/secrets/reveal`), and approve or remove machine keys, which decide who can decrypt |
 
 The MCP endpoint offers only the tools of the token's scope. The same token
 works on the HTTP API, on the routes its scope covers:
@@ -837,8 +959,8 @@ works on the HTTP API, on the routes its scope covers:
 curl -H "Authorization: Bearer <token>" http://<server>:8080/api/deployments
 ```
 
-Managing tokens, Settings, the deployment report token and the editor's
-language server need the web login. Only the person logged in to the web UI
+Managing tokens, Settings, the deployment report token (and storing the report
+tokens as secrets) and the editor's language server need the web login. Only the person logged in to the web UI
 can commit or push without a passing check. Tokens created before scopes
 existed are full tokens, as before; an expired token stays listed, refused,
 until you revoke it.
@@ -854,7 +976,7 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, and deployment reports (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, deployment reports, the age key of the secrets (`sops-age-key`: back it up) and the approved machine keys (`sops-machines.json`) (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |

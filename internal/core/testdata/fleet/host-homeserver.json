@@ -32,6 +32,10 @@
   "hosts": "1b7f",
   "ssh/sshd_config": "41aa"
  },
+ "secrets": [
+  { "name": "pablo-password", "path": "/run/secrets-for-users/pablo-password", "file": "secrets/hosts/homeserver.json", "owner": "", "group": "", "mode": "0400" },
+  { "name": "wifi", "path": "/run/secrets/wifi", "file": "secrets/common.json", "owner": "root", "group": "root", "mode": "0400" }
+ ],
  "managedFile": "hosts/homeserver/managed.json",
  "packages": [
   {

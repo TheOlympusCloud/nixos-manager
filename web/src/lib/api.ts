@@ -82,8 +82,12 @@ export type Host = {
   files: string[]
   /** Security and maintenance facts the fleet insights look at. */
   checks?: Checks
+  /** The sops-nix secrets it decrypts, never their values; null (or absent) without sops-nix. */
+  secrets?: HostSecret[] | null
   error?: string | null
 }
+/** One of sops.secrets: where the machine finds it and the sops file it comes from ("nixos" outside the flake). */
+export type HostSecret = { name: string; path: string; file: string; owner: string; group: string; mode: string }
 export type Checks = {
   ssh: boolean
   /** null: the NixOS default, which allows passwords. */
@@ -323,6 +327,40 @@ export const api = {
   testNotifications: () => post<{ status: ChannelStatus[] }>('/api/notifications/test').then((r) => r.status),
   /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
   forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
+
+  secrets: () => get<SecretsStatus>('/api/secrets'),
+  /** Approves a machine's SSH host key, new or replacing its last one (the .pub file, or an ssh-keyscan line); needs full access. */
+  setMachineKey: (host: string, key: string) => request<SecretMachine>('PUT', `/api/secrets/machines/${encodeURIComponent(host)}`, { key }),
+  /** Removes a machine's key and its own secrets; the shared ones are encrypted again without it. */
+  removeMachineKey: (host: string) => request<void>('DELETE', `/api/secrets/machines/${encodeURIComponent(host)}`, {}),
+  /** host "": for every machine with a key. */
+  setSecret: (host: string, name: string, value: string) => request<void>('PUT', '/api/secrets', { host, name, value }),
+  deleteSecret: (host: string, name: string) => post<void>('/api/secrets/delete', { host, name }),
+  /** The value in plain text: only with full access, when the person asks. */
+  revealSecret: (host: string, name: string) => post<{ value: string }>('/api/secrets/reveal', { host, name }).then((r) => r.value),
+  reencryptSecrets: () => post<void>('/api/secrets/reencrypt'),
+  /** Stores every machine's own report token as its secret; returns the machines. */
+  storeReportTokens: () => post<{ hosts: string[] }>('/api/secrets/report-tokens').then((r) => r.hosts),
+}
+
+// ---- secrets (Settings) ----
+
+export type SecretMachine = { name: string; key: string; fingerprint: string; recipient: string; error?: string }
+export type SecretFile = { path: string; host: string; names: string[]; stale: boolean; locked: boolean; error?: string }
+export type SecretsStatus = {
+  /** Tools not found on the server. */
+  missing: string[]
+  /** This server's age key (public half), and where its private half is. */
+  recipient: string
+  keyFile: string
+  /** Machines with an approved key: only these can decrypt. */
+  machines: SecretMachine[]
+  /** Keys in secrets/hosts/*.pub not approved here (a pull, an edit): nothing is encrypted for them. */
+  proposed: SecretMachine[]
+  /** secrets/common.json first, then each machine's file. */
+  files: SecretFile[]
+  /** A file or .sops.yaml is not encrypted for exactly the machines' keys: re-encrypt. */
+  stale: boolean
 }
 
 // ---- notifications (Settings) ----

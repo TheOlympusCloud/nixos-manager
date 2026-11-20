@@ -74,8 +74,8 @@ func (s *Server) Handler() http.Handler {
 }
 
 // tokenRoutes are the API routes an API token may call, with the scope each
-// needs. Every other route (tokens, Settings, the report token, the editor's
-// language server) needs the web UI login.
+// needs. Every other route (tokens, Settings, the report token and storing the
+// report tokens as secrets, the editor's language server) needs the web UI login.
 var tokenRoutes = map[string]auth.Scope{
 	"/api/": auth.ScopeRead, // no such route: 404
 
@@ -88,6 +88,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"GET /api/fleet/values": auth.ScopeRead, "GET /api/model": auth.ScopeRead, "POST /api/model/refresh": auth.ScopeRead,
 	"GET /api/model/diff": auth.ScopeRead, "GET /api/targets": auth.ScopeRead, "GET /api/jobs": auth.ScopeRead,
 	"GET /api/jobs/{id}": auth.ScopeRead, "GET /api/jobs/{id}/events": auth.ScopeRead, "GET /api/deployments": auth.ScopeRead,
+	"GET /api/secrets": auth.ScopeRead, // names and keys, never a value
 
 	"PUT /api/file": auth.ScopeEdit, "POST /api/mkdir": auth.ScopeEdit, "POST /api/move": auth.ScopeEdit,
 	"POST /api/delete": auth.ScopeEdit, "POST /api/stage": auth.ScopeEdit, "POST /api/unstage": auth.ScopeEdit,
@@ -95,9 +96,13 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/branches": auth.ScopeEdit, "POST /api/switch": auth.ScopeEdit, "POST /api/revert": auth.ScopeEdit,
 	"POST /api/merge": auth.ScopeEdit, "POST /api/pull": auth.ScopeEdit, "POST /api/hosts/{host}/packages": auth.ScopeEdit,
 	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
+	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
 
 	"POST /api/push": auth.ScopeFull, // a push is a deploy
 	"POST /api/try":  auth.ScopeFull, "POST /api/try/end": auth.ScopeFull,
+	"POST /api/secrets/reveal": auth.ScopeFull, // a value, in plain text
+	// A machine key decides who can decrypt every secret.
+	"PUT /api/secrets/machines/{host}": auth.ScopeFull, "DELETE /api/secrets/machines/{host}": auth.ScopeFull,
 }
 
 func (s *Server) apiMux() *http.ServeMux {
@@ -351,6 +356,7 @@ func (s *Server) apiMux() *http.ServeMux {
 	s.forgejoRoutes(api)
 	s.deploymentRoutes(api)
 	s.notifyRoutes(api)
+	s.secretRoutes(api)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API route")
 	})
