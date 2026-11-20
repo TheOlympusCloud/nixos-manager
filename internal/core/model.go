@@ -27,7 +27,13 @@ type Host struct {
 	StateVersion string  `json:"stateVersion"`
 	TimeZone     *string `json:"timeZone"`
 	Kernel       *string `json:"kernel"`
-	ManagedFile  *string `json:"managedFile"`
+	// Toplevel is the derivation of the whole system (system.build.toplevel.drvPath):
+	// when it differs, something on the machine changes.
+	Toplevel string `json:"toplevel"`
+	// Boot is the kernel, initrd and kernel parameters, which take effect only
+	// after a reboot; "" when the machine boots no kernel of its own (a container).
+	Boot        string  `json:"boot"`
+	ManagedFile *string `json:"managedFile"`
 	// ManagedPackages maps each attribute in managed.json to its package name
 	// (nodejs_22 -> nodejs), so a package seen in the model can be removed by attribute.
 	ManagedPackages map[string]string `json:"managedPackages"`
@@ -195,6 +201,9 @@ type HostDiff struct {
 	PortsRemoved    []string `json:"portsRemoved,omitempty"`
 	// Packages present before and after with a different version (e.g. after a nixpkgs update).
 	VersionsChanged []VersionChange `json:"versionsChanged,omitempty"`
+	Kernel          *VersionChange  `json:"kernel,omitempty"`
+	// Reboot: the kernel, initrd or kernel parameters change, which only a reboot applies.
+	Reboot bool `json:"reboot,omitempty"`
 }
 
 type VersionChange struct {
@@ -275,13 +284,20 @@ func DiffModels(head, working *Model) []HostDiff {
 		d.UsersAdded, d.UsersRemoved = setDiff(names(b.Users, user), names(a.Users, user))
 		d.PortsAdded, d.PortsRemoved = setDiff(portNames(b.Ports), portNames(a.Ports))
 		d.VersionsChanged = versionChanges(b.Packages, a.Packages)
+		if inBefore && b.Error == "" && a.Boot != "" { // a machine that boots its own kernel, known before and after
+			d.Reboot = a.Boot != b.Boot
+			if b.Kernel != nil && a.Kernel != nil && *b.Kernel != *a.Kernel {
+				d.Kernel = &VersionChange{Name: "kernel", From: *b.Kernel, To: *a.Kernel}
+			}
+		}
 		switch {
 		case !inBefore:
 			d.Status = "added"
 		case !inAfter:
 			d.Status = "removed"
 		case d.PackagesAdded != nil || d.PackagesRemoved != nil || d.FeaturesAdded != nil || d.FeaturesRemoved != nil ||
-			d.UsersAdded != nil || d.UsersRemoved != nil || d.PortsAdded != nil || d.PortsRemoved != nil || d.VersionsChanged != nil:
+			d.UsersAdded != nil || d.UsersRemoved != nil || d.PortsAdded != nil || d.PortsRemoved != nil || d.VersionsChanged != nil ||
+			a.Toplevel != b.Toplevel:
 			d.Status = "changed"
 		default:
 			d.Status = "unchanged"

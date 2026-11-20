@@ -6,6 +6,8 @@
  "stateVersion": "26.05",
  "timeZone": "Europe/Madrid",
  "kernel": "6.12.58",
+ "toplevel": "/nix/store/1xk3q6-nixos-system-homeserver-26.05.drv",
+ "boot": "",
  "managedFile": "hosts/homeserver/managed.json",
  "packages": [
   {

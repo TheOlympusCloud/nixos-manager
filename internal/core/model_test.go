@@ -132,3 +132,46 @@ func TestVersionChangesWithSeveralVersionsOfAName(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+// The lists show what is easy to name; the system derivation shows that anything
+// changed at all: a unit, an /etc file, a sysctl. The kernel, initrd and kernel
+// parameters take effect only after a reboot.
+func TestDiffModelsSeesEveryChangeOfTheSystem(t *testing.T) {
+	sys := func(name, toplevel, boot, kernel string) Host {
+		h := Host{Name: name, Toplevel: "/nix/store/" + toplevel + "-nixos-system-" + name + ".drv", Boot: boot}
+		if kernel != "" {
+			h.Kernel = &kernel
+		}
+		return h
+	}
+	head := &Model{Hosts: []Host{
+		sys("web", "a1", "k1 i1", "6.12.1"),
+		sys("kern", "a2", "k1 i1", "6.12.1"),
+		sys("initrd", "a3", "k1 i1", "6.12.1"),
+		sys("ct", "a4", "", "6.12.1"),
+		sys("same", "a5", "k1 i1", "6.12.1"),
+		{Name: "broken", Error: "infinite recursion"},
+	}}
+	work := &Model{Hosts: []Host{
+		sys("web", "b1", "k1 i1", "6.12.1"),
+		sys("kern", "b2", "k2 i2", "6.12.2"),
+		sys("initrd", "b3", "k1 i2", "6.12.1"),
+		sys("ct", "b4", "", "6.12.2"), // a container runs its host's kernel
+		sys("same", "a5", "k1 i1", "6.12.1"),
+		sys("broken", "b6", "k1 i1", "6.12.1"),
+		sys("new", "b7", "k1 i1", "6.12.1"),
+	}}
+	got := DiffModels(head, work)
+	want := []HostDiff{
+		{Host: "broken", Status: "changed"}, // its last commit did not evaluate: nothing to say about a reboot
+		{Host: "ct", Status: "changed"},
+		{Host: "initrd", Status: "changed", Reboot: true},
+		{Host: "kern", Status: "changed", Reboot: true, Kernel: &VersionChange{Name: "kernel", From: "6.12.1", To: "6.12.2"}},
+		{Host: "new", Status: "added"},
+		{Host: "same", Status: "unchanged"},
+		{Host: "web", Status: "changed"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("diff\n got %+v\nwant %+v", got, want)
+	}
+}

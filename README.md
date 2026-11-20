@@ -44,12 +44,19 @@ An MCP server gives automation the same features.
 - **Changes in NixOS terms**: before committing, see per machine which
   packages, versions, services, users, ports and settings the working copy
   changes, and which inputs moved. History shows the same for every commit.
+  A machine counts as changed whenever its system derivation
+  (`system.build.toplevel`) does, so an edit outside those lists (a systemd
+  unit, an `/etc` file, a sysctl) shows as "Other configuration", and a new
+  kernel, kernel module, initrd or kernel parameter as "Reboot needed". A
+  machine whose system does not evaluate, a failed assertion for instance,
+  shows its error.
 - **Checks**: `nix flake check` plus a dry build of the chosen configurations,
   run on exactly the staged changes, with live output. A commit needs a passing
   check of the staged changes, and a push needs a passing check of the commit
   being pushed. In the web UI you can override both explicitly; MCP clients
   cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so a restart
-  does not ask for them again.
+  does not ask for them again. Checks run one at a time in their own queue, so
+  a long check never holds up the fleet views, search, Lock or Update.
 - **Git**: stage, commit, branches, push and pull, revert a commit, merge a
   `testing-<host>` branch, repository and per-file history with diffs and
   restore. Every commit uses the configured person's name and email.
@@ -111,7 +118,10 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
    - Size: every machine is a full NixOS evaluation, so memory goes first.
      4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
      holds a few nixpkgs revisions and their builds. More cores make checks
-     faster.
+     faster. The fleet views evaluate two machines at once (about 1 GB
+     each), and a check can run next to them. On a tight container set
+     `services.nixos-manager.extraEnvironment.NIXMGR_EVAL_JOBS = "1";`, or
+     raise it when memory is to spare.
 
 3. **Configure it.** `ssh root@<address>`, then write `/etc/nixos/flake.nix`:
 
@@ -526,6 +536,7 @@ commit message may not bring its own `Via` trailer.
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
 | `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
+| `NIXMGR_EVAL_JOBS` | Machines evaluated at once for the fleet views (default 2, or 1 on a single CPU). Each is a whole NixOS evaluation, about 1 GB of memory, and a check can run at the same time. **Evaluate again** after a failure re-evaluates only the machines that failed |
 
 Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
 a keyed hash of each one, never the session itself. Changing the password ends
@@ -592,8 +603,9 @@ restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 runs the checks that need real Nix (network needed): values set by clicking
 win without dropping the hand-written users and SSH settings around them, the
 deployment reporter wires into comin, new LXC and VM machines evaluate, a
-standalone home-manager configuration shows its packages and programs, and
-the flake builds the package and passes `nix flake check`.
+sysctl shows as a change and kernel parameters as a reboot while a container
+never needs one, a standalone home-manager configuration shows its packages
+and programs, and the flake builds the package and passes `nix flake check`.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines

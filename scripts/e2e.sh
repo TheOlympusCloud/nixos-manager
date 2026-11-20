@@ -38,7 +38,7 @@ case "$*" in
   *) echo "nix $*" ;;
 esac
 case "$*" in
-  *"nixmgr:host"*) echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
+  *"nixmgr:host"*) echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/0000-nixos-system-example-26.05.drv","boot":"","managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
 esac
@@ -56,6 +56,13 @@ export NIXMGR_DATA=$work/data NIXMGR_LISTEN=127.0.0.1:$port NIXMGR_REMOTE=$work/
   NIXMGR_NIX=$nix_bin NIXMGR_NIXFMT=$nixfmt_bin
 NIXMGR_PASSWORD_HASH=$(printf 'pw\n' | "$work/nixos-manager" hash-password)
 export NIXMGR_PASSWORD_HASH
+if timeout 10 env NIXMGR_EVAL_JOBS=0 "$work/nixos-manager" > "$work/server.log" 2>&1 ||
+  ! grep -q NIXMGR_EVAL_JOBS "$work/server.log"; then
+  fail "NIXMGR_EVAL_JOBS=0 was accepted"
+fi
+: > "$work/server.log"
+echo "ok   a bad NIXMGR_EVAL_JOBS stops the start"
+export NIXMGR_EVAL_JOBS=2 # machines evaluated at once
 start() {
   "$work/nixos-manager" >> "$work/server.log" 2>&1 &
   pid=$!

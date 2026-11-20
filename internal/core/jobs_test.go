@@ -182,17 +182,43 @@ func TestFailingCheckDoesNotPass(t *testing.T) {
 	}
 }
 
-func TestJobsRunOneAtATimeInOrder(t *testing.T) {
-	ctx := context.Background()
+// gateNix holds every nix flake check until the file $RELEASE exists, and
+// writes a flake.lock for nix flake lock, so a test can keep a check running.
+const gateNix = `#!/bin/sh
+echo "nix $*"
+case "$*" in
+  *"flake check"*) while [ ! -f "$RELEASE" ]; do sleep 0.02; done ;;
+  *"flake lock"*) for a in "$@"; do case "$a" in path:*) d="${a#path:}" ;; esac; done; echo '{}' > "$d/flake.lock" ;;
+esac
+`
+
+// gatedService runs checks that wait for release().
+func gatedService(t *testing.T) (*Service, func()) {
+	t.Helper()
 	s := newService(t)
-	a := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check", Targets: []string{"slow"}}))
-	b := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
-	if b.Info(false).State != "queued" {
-		t.Fatalf("second job state %s, want queued", b.Info(false).State)
+	s.Jobs.Nix = script(t, "nix", gateNix)
+	release := filepath.Join(t.TempDir(), "release")
+	t.Setenv("RELEASE", release)
+	t.Cleanup(func() { os.WriteFile(release, nil, 0o644) }) // never leave a worker waiting
+	return s, func() { ok(t, os.WriteFile(release, nil, 0o644)) }
+}
+
+func TestChecksRunOneAtATimeInOrder(t *testing.T) {
+	ctx := context.Background()
+	s, release := gatedService(t)
+	a := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"}))
+	b := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"}))
+	for a.Info(false).State != "running" {
+		time.Sleep(5 * time.Millisecond)
 	}
+	time.Sleep(50 * time.Millisecond)
+	if st := b.Info(false).State; st != "queued" {
+		t.Fatalf("second check %s while the first runs, want queued", st)
+	}
+	release()
 	ai, bi := wait(t, a), wait(t, b)
 	if bi.Started.Before(ai.Finished) {
-		t.Fatalf("jobs overlapped: a finished %s, b started %s", ai.Finished, bi.Started)
+		t.Fatalf("checks overlapped: a finished %s, b started %s", ai.Finished, bi.Started)
 	}
 	list := s.Jobs.List()
 	if len(list) != 2 || list[0].ID != b.ID || list[0].Output != "" {
@@ -200,6 +226,49 @@ func TestJobsRunOneAtATimeInOrder(t *testing.T) {
 	}
 	if got, ok := s.Jobs.Get(a.ID); !ok || got != a {
 		t.Fatal("Get did not find the job")
+	}
+}
+
+// A check can run for half an hour: lock, update, the fleet model and the
+// search indexes have their own lane and do not wait for it.
+func TestACheckDoesNotHoldUpTheOtherJobs(t *testing.T) {
+	ctx := context.Background()
+	s, release := gatedService(t)
+	check := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"}))
+	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+	if info := wait(t, lock); info.State != "passed" {
+		t.Fatalf("lock: %+v", info)
+	}
+	if st := check.Info(false).State; st != "running" {
+		t.Fatalf("check %s, want still running", st)
+	}
+	release()
+	if info := wait(t, check); info.State != "passed" {
+		t.Fatalf("check: %+v", info)
+	}
+}
+
+// Jobs keep finishing in one lane while the other runs a long job: the list
+// forgets the oldest finished ones, never the running one.
+func TestFinishedJobsAreForgottenBehindARunningOne(t *testing.T) {
+	ctx := context.Background()
+	s, release := gatedService(t)
+	defer release()
+	check := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"}))
+	var first *Job
+	for i := 0; i < keepJobs; i++ {
+		j := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+		if first == nil {
+			first = j
+		}
+		wait(t, j)
+	}
+	list := s.Jobs.List()
+	if len(list) != keepJobs || list[len(list)-1].ID != check.ID {
+		t.Fatalf("%d jobs listed, the oldest %s; want %d with the running check %s kept", len(list), list[len(list)-1].ID, keepJobs, check.ID)
+	}
+	if _, ok := s.Jobs.Get(first.ID); ok {
+		t.Fatal("the oldest finished job is still kept")
 	}
 }
 

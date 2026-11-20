@@ -2,12 +2,16 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/TheOlympusCloud/nixos-manager/templates"
 )
 
 // fleetService serves the fixture fleet through scripts/dev/fake-nix.
@@ -71,6 +75,9 @@ func TestModelOfAFleet(t *testing.T) {
 	}
 	if m.Hosts[2].ManagedFile != nil {
 		t.Fatal("pi does not load a managed file")
+	}
+	if !strings.HasSuffix(ws.Toplevel, "-nixos-system-workstation-26.05.drv") || ws.Boot == "" || m.Hosts[0].Boot != "" {
+		t.Fatalf("system derivation and boot: %q %q, homeserver (a container) %q", ws.Toplevel, ws.Boot, m.Hosts[0].Boot)
 	}
 	if ws.ManagedPackages["vscode"] != "vscode" || m.Hosts[2].ManagedPackages == nil {
 		t.Fatalf("managed package names %+v / %+v", ws.ManagedPackages, m.Hosts[2].ManagedPackages)
@@ -186,6 +193,93 @@ func TestEditsDoNotSkipAnEvaluationHistoryWaitsOn(t *testing.T) {
 	}
 }
 
+// countingNix wraps the fixture fake-nix: each machine evaluation lasts 0.4 s
+// and logs its name, and how many were running half way, to $COUNTS.
+func countingNix(t *testing.T, s *Service) (counts string) {
+	t.Helper()
+	dir := t.TempDir()
+	counts = filepath.Join(dir, "counts")
+	t.Setenv("COUNTS", counts)
+	s.Jobs.Nix = script(t, "nix", `#!/bin/sh
+case "$*" in *"nixmgr:host"*)
+  run="$COUNTS.run.$NIXMGR_HOST"
+  touch "$run"; sleep 0.2
+  echo "$NIXMGR_HOST $(ls "$COUNTS".run.* | wc -l)" >> "$COUNTS"
+  sleep 0.2; rm "$run" ;;
+esac
+exec `+s.Jobs.Nix+` "$@"
+`)
+	return counts
+}
+
+// evaluated reads countingNix's log: the machines evaluated, and the most at once.
+func evaluated(t *testing.T, counts string) (hosts []string, most int) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(fileOf(t, counts)), "\n") {
+		var h string
+		var n int
+		if _, err := fmt.Sscan(line, &h, &n); err != nil {
+			t.Fatalf("log line %q: %v", line, err)
+		}
+		hosts, most = append(hosts, h), max(most, n)
+	}
+	slices.Sort(hosts)
+	return hosts, most
+}
+
+func fileOf(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// Machines evaluate side by side, never more than EvalJobs at once, and the
+// model lists them in the same order whatever finished first.
+func TestMachinesEvaluateInParallelWithinTheLimit(t *testing.T) {
+	s := fleetService(t, "testdata/fleet")
+	counts := countingNix(t, s)
+	s.Jobs.EvalJobs = 2
+	m := readyModel(t, s, "working")
+	hosts, most := evaluated(t, counts)
+	if strings.Join(hosts, ",") != "homeserver,oldbox,pi,workstation" || most != 2 {
+		t.Fatalf("evaluated %v, at most %d at once; want all four, 2 at once", hosts, most)
+	}
+	if got := strings.Join(names(m.Hosts, func(h Host) string { return h.Name }), ","); got != "homeserver,oldbox,pi,workstation" {
+		t.Fatalf("model hosts %s", got)
+	}
+	if m.Hosts[1].Error == "" || m.Hosts[3].Error != "" || len(m.Homes) != 1 {
+		t.Fatalf("one broken machine must not hide the others: %+v", m)
+	}
+}
+
+// Evaluate again keeps the machines that evaluated: the files did not change,
+// so neither did they. It evaluates again only what failed.
+func TestEvaluateAgainOnlyRetriesWhatFailed(t *testing.T) {
+	fixtures := t.TempDir()
+	ok(t, os.CopyFS(fixtures, os.DirFS("testdata/fleet")))
+	s := fleetService(t, fixtures)
+	counts := countingNix(t, s)
+	before := readyModel(t, s, "working")
+	if before.Hosts[1].Name != "oldbox" || before.Hosts[1].Error == "" {
+		t.Fatalf("oldbox should fail first: %+v", before.Hosts[1])
+	}
+	// What was missing (the network, say) is back.
+	pi := strings.Replace(fileOf(t, filepath.Join(fixtures, "host-pi.json")), `"pi"`, `"oldbox"`, -1)
+	ok(t, os.WriteFile(filepath.Join(fixtures, "host-oldbox.json"), []byte(pi), 0o644))
+	ok(t, os.Remove(counts))
+	wait(t, must[*Job](t)(s.Jobs.RefreshModel(context.Background())))
+	after := readyModel(t, s, "working")
+	if hosts, _ := evaluated(t, counts); strings.Join(hosts, ",") != "oldbox" {
+		t.Fatalf("evaluated again %v, want only oldbox", hosts)
+	}
+	if after.Hosts[1].Error != "" || after.Hosts[1].Name != "oldbox" || !reflect.DeepEqual(after.Hosts[3], before.Hosts[3]) || len(after.Homes) != 1 {
+		t.Fatalf("model after evaluating again: %+v", after)
+	}
+}
+
 // History can show what one commit changed: the model at any revision.
 func TestModelAtRevision(t *testing.T) {
 	ctx := context.Background()
@@ -271,6 +365,90 @@ func TestHomeModelWithRealNix(t *testing.T) {
 	h := m.Homes[0]
 	if h.Error != "" || !slices.Contains(h.Packages, "hello") || !slices.Contains(h.Programs, "git") {
 		t.Fatalf("home: %+v", h)
+	}
+}
+
+// The model must tell any change of a machine's system, and which ones need a
+// reboot, from a real NixOS evaluation: a container has no kernel of its own,
+// a sysctl changes the system but not what it boots, kernel parameters do.
+func TestChangeDetectionWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	s := NewService(newRepo(t))
+	if _, err := s.Repo.Seed(templates.Fleet); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []MachineSpec{
+		{Name: "ct", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-lxc"},
+		{Name: "vm", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-vm"},
+	} {
+		must[MachineCreated](t)(s.CreateMachine(spec))
+	}
+	// Locked, so nixpkgs cannot move between the evaluations compared.
+	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+	select {
+	case <-lock.Done():
+	case <-time.After(10 * time.Minute):
+		t.Fatal("the lock did not finish")
+	}
+	if info := lock.Info(true); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "machines", true))
+	model := func(at string) *Model {
+		t.Helper()
+		_, j, err := s.Jobs.Model(ctx, at)
+		ok(t, err)
+		if j != nil {
+			select {
+			case <-j.Done():
+			case <-time.After(20 * time.Minute):
+				t.Fatal("the model did not finish")
+			}
+		}
+		m, _, err := s.Jobs.Model(ctx, at)
+		ok(t, err)
+		if m == nil || m.Error != "" || len(m.Hosts) != 3 {
+			t.Fatalf("model at %s: %+v", at, m)
+		}
+		for _, h := range m.Hosts {
+			if h.Error != "" || !strings.HasPrefix(h.Toplevel, "/nix/store/") || !strings.HasSuffix(h.Toplevel, ".drv") {
+				t.Fatalf("%s: toplevel %q, error %s", h.Name, h.Toplevel, h.Error)
+			}
+		}
+		return m
+	}
+	head := model("head")
+	for _, h := range head.Hosts {
+		if (h.Name == "ct") != (h.Boot == "") {
+			t.Fatalf("%s boots %q; only the container boots no kernel of its own", h.Name, h.Boot)
+		}
+	}
+	edit := func(line string) []HostDiff {
+		t.Helper()
+		def := fileText(t, s.Repo, "hosts/example/default.nix")
+		write(t, s.Repo, "hosts/example/default.nix", strings.Replace(def, "system.stateVersion", line+"\n  system.stateVersion", 1))
+		return DiffModels(head, model("working"))
+	}
+	byHost := func(ds []HostDiff) map[string]HostDiff {
+		out := map[string]HostDiff{}
+		for _, d := range ds {
+			out[d.Host] = d
+		}
+		return out
+	}
+	d := byHost(edit(`boot.kernel.sysctl."vm.swappiness" = 10;`))
+	if ex := d["example"]; ex.Status != "changed" || ex.Reboot || ex.PackagesAdded != nil || ex.FeaturesAdded != nil || ex.VersionsChanged != nil {
+		t.Fatalf("a sysctl must show as another change without a reboot: %+v", ex)
+	}
+	if d["ct"].Status != "unchanged" || d["vm"].Status != "unchanged" {
+		t.Fatalf("machines the edit does not touch: %+v %+v", d["ct"], d["vm"])
+	}
+	if ex := byHost(edit(`boot.kernelParams = [ "quiet" ];`))["example"]; ex.Status != "changed" || !ex.Reboot {
+		t.Fatalf("kernel parameters need a reboot: %+v", ex)
 	}
 }
 

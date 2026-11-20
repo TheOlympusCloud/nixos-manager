@@ -116,6 +116,7 @@ func (js *Jobs) runValues(ctx context.Context, job *Job) (err error) {
 		if err != nil {
 			js.mu.Lock()
 			js.indexErrs[job.key] = err
+			js.keepValues(job.key) // a failure nobody asks about again is forgotten too
 			js.mu.Unlock()
 		}
 	}()
@@ -158,11 +159,18 @@ func (js *Jobs) runValues(ctx context.Context, job *Job) (err error) {
 	}
 	js.mu.Lock()
 	js.indexes[job.key] = out
-	js.valuesOrder = append(js.valuesOrder, job.key)
-	for len(js.valuesOrder) > keepValues {
-		delete(js.indexes, js.valuesOrder[0])
-		js.valuesOrder = js.valuesOrder[1:]
-	}
+	js.keepValues(job.key)
 	js.mu.Unlock()
 	return nil
+}
+
+// keepValues records key as the newest option values result or failure, and
+// forgets the oldest beyond keepValues; js.mu must be held.
+func (js *Jobs) keepValues(key string) {
+	js.valuesOrder = append(slices.DeleteFunc(js.valuesOrder, func(k string) bool { return k == key }), key)
+	for len(js.valuesOrder) > keepValues {
+		delete(js.indexes, js.valuesOrder[0])
+		delete(js.indexErrs, js.valuesOrder[0])
+		js.valuesOrder = js.valuesOrder[1:]
+	}
 }
