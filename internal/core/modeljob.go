@@ -508,6 +508,25 @@ func (js *Jobs) lockedFlake(ctx context.Context, src string) (string, error) {
 	return "path:" + src + "?narHash=" + url.QueryEscape(hash), nil
 }
 
+// WorkingFlake exports the working copy and returns it as a flake reference
+// pure evaluation accepts, for the editor's language server. cleanup removes
+// the export.
+func (js *Jobs) WorkingFlake(ctx context.Context) (ref string, cleanup func(), err error) {
+	tree, err := js.Repo.WorkingTree(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	src, cleanup, err := js.snapshot(ctx, tree)
+	if err != nil {
+		return "", nil, err
+	}
+	if ref, err = js.lockedFlake(ctx, src); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return ref, cleanup, nil
+}
+
 // nixString quotes s as a Nix string: no escape sequence, no interpolation.
 func nixString(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`).Replace(s) + `"`

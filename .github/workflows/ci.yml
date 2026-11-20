@@ -90,6 +90,11 @@ jobs:
         run: |
           NIXMGR_NIX_TESTS=1 nix shell $tools --command go test -timeout 45m ./templates ./nix ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
             { scripts/ci-annotate.sh "Real Nix tests" "$RUNNER_TEMP/tests.log"; exit 1; }
+      - name: The editor's language server with real nixd
+        if: ${{ !cancelled() }}
+        run: |
+          NIXMGR_NIX_TESTS=1 nix shell $tools github:NixOS/nixpkgs/nixos-26.05#nixd --command go test -run 'WithRealNix$' ./internal/server 2>&1 | tee "$RUNNER_TEMP/nixd.log" ||
+            { scripts/ci-annotate.sh "Real nixd tests" "$RUNNER_TEMP/nixd.log"; exit 1; }
       - name: End-to-end with real Nix
         if: ${{ !cancelled() }}
         run: |

@@ -189,7 +189,7 @@ func (js *Jobs) buildSystems(ctx context.Context, job *Job, src string, build []
 			}
 			sum.Failed = append(sum.Failed, h.Name)
 			fmt.Fprintf(job, "%s does not build.\n", h.Name)
-			if local := localSystem(); h.System != "" && h.System != local {
+			if local := LocalSystem(); h.System != "" && h.System != local {
 				fmt.Fprintf(job, "%s is %s and this server %s: if the error says that system is not available, give the server emulation or a remote builder for it (README, \"Machines of another architecture\").\n", h.Name, h.System, local)
 			}
 			continue
@@ -266,8 +266,8 @@ func plural(n int, one, many string) string {
 	return strconv.Itoa(n) + " " + many
 }
 
-// localSystem is this server's Nix system, e.g. x86_64-linux.
-func localSystem() string {
+// LocalSystem is this server's Nix system, e.g. x86_64-linux.
+func LocalSystem() string {
 	arch := map[string]string{"amd64": "x86_64", "arm64": "aarch64", "386": "i686"}[runtime.GOARCH]
 	if arch == "" {
 		arch = runtime.GOARCH
