@@ -36,7 +36,8 @@ let
           };
           system.stateVersion = "26.05";
           networking.hostName = name;
-          fleet.deployReport.url = "http://manager.example.invalid:8080";
+          # common.nix leaves it null; the reporter must be on to see its token file.
+          fleet.deployReport.url = nixpkgs.lib.mkForce "http://manager.example.invalid:8080";
         }
       ];
     };
