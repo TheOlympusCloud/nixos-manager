@@ -104,7 +104,7 @@ func (s *Service) TryOn(ctx context.Context, host, message string, replace bool)
 	}
 	for _, ref := range []string{"refs/remotes/origin/" + b.Testing, "refs/heads/" + b.Testing} {
 		if c := r.notMerged(ctx, ref, headTree); c != "" && !replace {
-			return t, errorf(ErrConflict, "%s already holds a trial, %s, that %s does not have: replace it?", b.Testing, c, b.Main)
+			return t, errorf(ErrConflict, "the branch %s already holds a trial, %s, that %s does not have: replace it?", b.Testing, c, b.Main)
 		}
 	}
 

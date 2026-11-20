@@ -29,7 +29,8 @@
   const tryable = $derived(tryTargets(deploys.overview, app.status?.branch ?? '', app.status?.staged_check?.built ?? []))
   let tryHost = $state('')
   const tryOn = $derived(tryable.find((m) => m.host === tryHost) ?? tryable[0])
-  const canTry = $derived(checked && !committing && !repo.busy && (staged.length ? hasMessage : (app.status?.ahead ?? 0) > 0))
+  const somethingToTry = $derived(staged.length > 0 || (app.status?.ahead ?? 0) > 0)
+  const canTry = $derived(checked && somethingToTry && !committing && !repo.busy && (!staged.length || hasMessage))
   const targetsHint = $derived(
     `flake check and a build of every machine they change${app.selectedTargets.length ? `, plus ${app.selectedTargets.length} dry build${app.selectedTargets.length === 1 ? '' : 's'}` : ''}`,
   )
@@ -132,7 +133,7 @@
     {#if staged.length && hasMessage && !checked && !checking && !committing}
       <button class="link unchecked" onclick={() => commit(true)}>Commit without checks…</button>
     {/if}
-    {#if checked && tryOn}
+    {#if checked && somethingToTry && tryOn}
       <div class="try" role="group" aria-label="Try on one machine first">
         <span class="muted small">Or first</span>
         {#if tryable.length > 1}
