@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -136,6 +137,7 @@ func Insights(m *Model, deploys []MachineDeployment, origin string, now time.Tim
 		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
 	out = append(out, missingPackages(healthy)...)
 	out = append(out, releaseInsights(healthy, now)...)
+	out = append(out, inputEOL(m.Inputs, healthy, now)...)
 	out = append(out, deployInsights(m, deploys, now)...)
 	out = append(out, cominInsights(healthy, origin)...)
 	slices.SortStableFunc(out, func(a, b Insight) int {
@@ -237,6 +239,30 @@ func releaseInsights(healthy []Host, now time.Time) []Insight {
 		out = append(out, Insight{ID: "release-mixed", Severity: "info", Hosts: olds,
 			Title:  "Machines run different NixOS releases",
 			Detail: fmt.Sprintf("The newest is %s. Mixed releases mean different package versions and options across the fleet.", newest)})
+	}
+	return out
+}
+
+// releaseBranch finds a NixOS release in an input's branch: nixos-26.05,
+// nixos-26.05-small, nixpkgs-26.05-darwin, release-26.05.
+var releaseBranch = regexp.MustCompile(`(?:^|[/=])((?:nixos|nixpkgs|release)-(\d\d\.\d\d)(?:-[a-z]+)?)(?:$|[&#])`)
+
+// inputEOL flags inputs that follow a release branch whose support ended,
+// except a release the machines already run (release-eol says it for them).
+func inputEOL(inputs []Input, healthy []Host, now time.Time) []Insight {
+	var out []Insight
+	for _, in := range inputs {
+		m := releaseBranch.FindStringSubmatch(in.URL)
+		if m == nil {
+			continue
+		}
+		end, ok := releaseEnd(m[2])
+		if !ok || now.Before(end) || slices.ContainsFunc(healthy, func(h Host) bool { return strings.HasPrefix(h.Release, m[2]) }) {
+			continue
+		}
+		out = append(out, Insight{ID: "input-eol:" + in.Name, Severity: "warning", Hosts: []string{},
+			Title:  fmt.Sprintf("%s follows %s, which no longer gets updates", in.Name, m[1]),
+			Detail: fmt.Sprintf("NixOS %s reached its end of life on %s. Point the input in flake.nix at a supported release branch (the one nixpkgs follows), update it, then check the machines.", m[2], end.AddDate(0, 0, -1).Format("2 Jan 2006"))})
 	}
 	return out
 }

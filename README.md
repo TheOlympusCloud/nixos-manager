@@ -526,6 +526,41 @@ copy both `report-deployment*` files from `templates/fleet/modules/` into its
 a machine is only flagged as silent when it is behind and has not reported for
 7 days.
 
+## Notifications
+
+**Settings → Notifications** sends a message when:
+
+- a machine fails to build or deploy a commit (once per machine and commit);
+- a machine has been behind its branch for over an hour (and is not silent);
+- a machine stops reporting (see `silentAfter` above);
+- the commit the fleet's branch points at does not evaluate, as a whole or for
+  a machine, so comin cannot deploy it (told only after a second evaluation
+  fails too, so a network hiccup does not page you);
+- a NixOS release the machines run reaches, or is a month from, its end of
+  life, or a flake input follows a release branch whose support ended.
+
+Channels, any or all of them:
+
+- **ntfy**: the topic's address (`https://ntfy.sh/<topic>` or a server of your
+  own) and, for a protected topic, an access token. On ntfy.sh anyone who
+  knows the topic can read it, so pick a name nobody guesses.
+- **Webhook**: a JSON `POST` with `key`, `kind` (`deploy-failed`,
+  `deploy-stuck`, `host-silent`, `eval-failed`, `eol`, `test`), `severity`,
+  `title`, `message`, `hosts`, `url` (a link into the console) and `at`.
+- **Email** over SMTP, with STARTTLS (587), TLS (465) or, to a local relay
+  only, none. A password is only ever sent encrypted.
+
+Each event goes once to each channel while it lasts; when it ends it is
+forgotten, so it is sent again only if it comes back. A channel only gets
+events that start after it was set up or pointed somewhere new: what is
+already wrong is in **Health**. A failed send is tried again a minute later,
+then waiting twice as long each time, up to an hour; Settings shows how the
+last send to each channel went, and **Send a test message** checks a channel
+right away. Nothing is sent in the first 20 minutes after a start, while the
+machines report in. The channels are in `$NIXMGR_DATA/notify.json` (the
+token and password are never shown again once saved), and what was sent in
+`$NIXMGR_DATA/notify-state.json`, so a restart does not send it twice.
+
 ## Binary cache
 
 A check builds the systems of the machines a change touches. With the binary

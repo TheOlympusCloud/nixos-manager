@@ -297,9 +297,26 @@ export const api = {
   regenerateDeployTokens: () => post<void>('/api/deployments/token'),
   /** Stops accepting the shared fleet token of an install from before machine tokens. */
   dropSharedDeployToken: () => request<void>('DELETE', '/api/deployments/shared-token', {}),
+  notifications: () => get<{ settings: NotifySettings; status: ChannelStatus[] }>('/api/notifications'),
+  saveNotifications: (settings: NotifySettings) => post<{ settings: NotifySettings }>('/api/notifications', settings).then((r) => r.settings),
+  /** Sends a test message to every saved channel. */
+  testNotifications: () => post<{ status: ChannelStatus[] }>('/api/notifications/test').then((r) => r.status),
   /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
   forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
 }
+
+// ---- notifications (Settings) ----
+
+export type EmailSecurity = 'starttls' | 'tls' | 'none'
+/** Channels as saved. Secrets are write-only: read back empty with has* set; sent back empty with has* set, the saved one stays. */
+export type NotifySettings = {
+  consoleUrl?: string
+  ntfy?: { url: string; token?: string; hasToken?: boolean }
+  webhook?: { url: string }
+  email?: { host: string; port: number; security: EmailSecurity; username?: string; password?: string; hasPassword?: boolean; from: string; to: string[] }
+}
+/** How the last send to a channel went. */
+export type ChannelStatus = { channel: 'ntfy' | 'webhook' | 'email'; ok: boolean; error?: string; at: string }
 
 // ---- deployments (what comin reports from each machine) ----
 

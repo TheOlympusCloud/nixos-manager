@@ -145,6 +145,30 @@ func TestReleaseInsights(t *testing.T) {
 	if got := byID(fleet("26.05", "26.05", ""), now); len(got) != 0 {
 		t.Errorf("one supported release (and an unknown one) is healthy: %v", got)
 	}
+
+	// Inputs that follow a release branch whose support ended, unless the
+	// machines' own release already says it.
+	m := fleet("26.05", "25.05")
+	m.Inputs = []Input{
+		{Name: "nixpkgs", URL: "github:NixOS/nixpkgs/nixos-25.05", LastModified: now.Unix()},
+		{Name: "home-manager", URL: "github:nix-community/home-manager/release-24.11", LastModified: now.Unix()},
+		{Name: "stable", URL: "git+https://git.example/nixpkgs?ref=nixos-26.05-small", LastModified: now.Unix()}, // supported
+		{Name: "darwin", URL: "github:NixOS/nixpkgs/nixpkgs-24.05-darwin", LastModified: now.Unix()},
+		{Name: "unstable", URL: "github:NixOS/nixpkgs/nixos-unstable", LastModified: now.Unix()},
+		{Name: "pinned", URL: "github:owner/repo/release-29.05", LastModified: now.Unix()},
+	}
+	got = byID(m, now)
+	if in := got["input-eol:home-manager"]; in.Severity != "warning" || in.Title != "home-manager follows release-24.11, which no longer gets updates" || len(in.Hosts) != 0 {
+		t.Errorf("home-manager: %+v", in)
+	}
+	if in := got["input-eol:darwin"]; in.Title != "darwin follows nixpkgs-24.05-darwin, which no longer gets updates" {
+		t.Errorf("darwin: %+v", in)
+	}
+	for _, id := range []string{"input-eol:nixpkgs", "input-eol:stable", "input-eol:unstable", "input-eol:pinned"} {
+		if in, ok := got[id]; ok {
+			t.Errorf("%s: %+v", id, in)
+		}
+	}
 }
 
 func TestDeployInsights(t *testing.T) {

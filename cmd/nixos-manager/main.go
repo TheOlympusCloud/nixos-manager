@@ -136,6 +136,10 @@ func run() error {
 		return err
 	}
 	svc.Deploys.Systems = svc.Jobs // what each machine should run, to compare with what it says it runs
+	notifier, err := core.OpenNotifier(data, svc)
+	if err != nil {
+		return err
+	}
 
 	s := &server.Server{
 		Svc: svc, Auth: a, UI: web.UI,
@@ -143,6 +147,7 @@ func run() error {
 		Nixd: strings.Fields(env("NIXMGR_NIXD", "nixd")),
 
 		Forgejo:        &core.Forgejo{Repo: repo, DataDir: data, EnvRemote: os.Getenv("NIXMGR_REMOTE")},
+		Notify:         notifier,
 		TrustedProxies: proxies,
 	}
 	// No write timeout: job streams, the editor socket and MCP calls are long-lived.
@@ -150,6 +155,7 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go notifier.Run(ctx)
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
