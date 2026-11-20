@@ -108,6 +108,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/secrets/reveal": auth.ScopeFull, // a value, in plain text
 	// A machine key decides who can decrypt every secret.
 	"PUT /api/secrets/machines/{host}": auth.ScopeFull, "DELETE /api/secrets/machines/{host}": auth.ScopeFull,
+	"POST /api/hostkey": auth.ScopeFull, // connects from the server to any address
 }
 
 func (s *Server) apiMux() *http.ServeMux {
@@ -300,6 +301,10 @@ func (s *Server) apiMux() *http.ServeMux {
 	})
 	api.HandleFunc("POST /api/machines", post(func(r *http.Request, in core.MachineSpec) (any, error) {
 		return s.Svc.CreateMachine(in)
+	}))
+	// A new machine's SSH host key, for its secrets: the handshake only, never a login.
+	api.HandleFunc("POST /api/hostkey", post(func(r *http.Request, in struct{ Address string }) (any, error) {
+		return core.FetchHostKey(r.Context(), in.Address)
 	}))
 	api.HandleFunc("GET /api/model", s.model)
 	api.HandleFunc("POST /api/model/refresh", post(func(r *http.Request, _ struct{}) (any, error) {

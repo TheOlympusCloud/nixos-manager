@@ -29,9 +29,10 @@ type fakeForgejo struct {
 	*httptest.Server
 	mu       sync.Mutex
 	posts    []statusPost
-	calls    int // status posts received
-	fail     int // answer 500 to this many status posts first
-	repoCode int // the answer to GET of the repository; 0 is 200
+	calls    int      // status posts received
+	fail     int      // answer 500 to this many status posts first
+	repoCode int      // the answer to GET of the repository; 0 is 200
+	console  *Forgejo // set by forgejoFleet: final also waits for it to finish with the commit
 }
 
 func newFakeForgejo(t *testing.T) *fakeForgejo {
@@ -120,9 +121,22 @@ func (f *fakeForgejo) final(t *testing.T, sha string) []string {
 	t.Helper()
 	waitFor(t, "the result of "+sha[:7], func() bool {
 		s := f.states(sha)
-		return len(s) > 0 && s[len(s)-1] != "pending"
+		return len(s) > 0 && s[len(s)-1] != "pending" && !f.reporting(sha)
 	})
 	return f.states(sha)
+}
+
+// reporting: the console has not yet dropped the commit and saved that
+// (report does both under its lock after the last status), so a test that
+// ended now would race that save with the removal of its data folder.
+func (f *fakeForgejo) reporting(sha string) bool {
+	if f.console == nil {
+		return false
+	}
+	f.console.mu.Lock()
+	defer f.console.mu.Unlock()
+	_, ok := f.console.pushed[sha]
+	return ok
 }
 
 // forgejoFleet is buildService on a remote that looks like Forgejo's
@@ -148,6 +162,7 @@ func forgejoFleet(t *testing.T) (*Service, *Forgejo, *fakeForgejo) {
 	f := &Forgejo{Repo: s.Repo, DataDir: t.TempDir(), Jobs: s.Jobs}
 	ok(t, f.Resume())
 	ok(t, f.SetStatusToken(ctx, "good-token", "http://console.lan:8080/"))
+	fake.console = f
 	return s, f, fake
 }
 
@@ -317,6 +332,7 @@ func TestPushedCommitsSurviveARestart(t *testing.T) {
 	}
 
 	again := &Forgejo{Repo: s.Repo, DataDir: f.DataDir, Jobs: s.Jobs}
+	fake.console = again // f stopped; again reports
 	ok(t, again.Resume())
 	if got := fake.final(t, sha); got[len(got)-1] != "success" {
 		t.Fatalf("statuses %v", got)

@@ -7,6 +7,8 @@
   import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
   import DeploymentCard from '../deployments/DeploymentCard.svelte'
+  import { app } from '../../lib/state.svelte'
+  import InstallCard from './InstallCard.svelte'
 
   let { host }: { host: Host } = $props()
 
@@ -18,6 +20,8 @@
     { label: 'Open ports', value: host.ports.tcp.length + host.ports.udp.length, note: host.ports.firewall ? 'firewall on' : 'firewall off', tab: 'network' },
     { label: 'File systems', value: host.fileSystems.length, note: host.fileSystems.map((f) => f.fsType).filter((v, i, a) => a.indexOf(v) === i).join(', '), tab: 'network' },
   ])
+  // A machine the wizard gave a disk layout: nixos-anywhere installs it.
+  const disko = $derived(app.entries.some((e) => e.path === `hosts/${host.name}/disk-config.nix`))
 </script>
 
 <div class="tiles stagger">
@@ -46,6 +50,7 @@
   </section>
 
   <div>
+    {#if disko}<InstallCard host={host.name} />{/if}
     <DeploymentCard host={host.name} />
 
     <section class="section">

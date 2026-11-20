@@ -707,6 +707,14 @@ func TestCreateMachineOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/machines", map[string]any{"name": "nas", "system": "x86_64-linux", "role": "server"}, nil); code != 409 {
 		t.Fatalf("duplicate: %d", code)
 	}
+	spec := map[string]any{"name": "pc", "system": "x86_64-linux", "role": "minimal", "disk": "btrfs", "device": "/dev/nvme0n1"}
+	if code := e.do(t, "POST", "/api/machines", spec, &res); code != 200 || len(res.Files) != 4 || res.Files[2] != "hosts/pc/disk-config.nix" {
+		t.Fatalf("create with a disk layout: %d %+v", code, res)
+	}
+	var er struct{ Error string }
+	if code := e.do(t, "POST", "/api/hostkey", map[string]string{"address": "pc; reboot"}, &er); code != 400 || !strings.Contains(er.Error, "address") {
+		t.Fatalf("host key of a bad address: %d %q", code, er.Error)
+	}
 }
 
 // A working copy that does not evaluate cannot be compared: no "removed" machines.
