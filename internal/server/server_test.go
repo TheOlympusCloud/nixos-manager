@@ -83,7 +83,8 @@ func newEnv(t *testing.T) *env {
 	}
 	svc := core.NewService(repo)
 	nix := filepath.Join(t.TempDir(), "nix")
-	os.WriteFile(nix, []byte("#!/bin/sh\necho \"nix $*\"\n"), 0o755)
+	// Evaluations answer a flake without machines, so a check builds nothing; the rest echoes.
+	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\necho \"nix $*\"\n"), 0o755)
 	svc.Jobs.Nix = nix
 	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost) // tests log in often; -race slows bcrypt a lot
 	a, err := auth.New(string(hash), filepath.Join(t.TempDir(), "tokens.json"))

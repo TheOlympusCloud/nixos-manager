@@ -177,16 +177,25 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 		return nil, nil, err
 	}
 	if tree == "" {
-		return &Model{Hosts: []Host{}, Homes: []Home{}, Inputs: []Input{}}, nil, nil
-	}
-	js.mu.Lock()
-	defer js.mu.Unlock()
-	if m := js.models[tree]; m != nil {
-		return m, nil, nil
+		return emptyModel(), nil, nil
 	}
 	key := "model:" + at
 	if key == "model:" {
 		key = "model:working"
+	}
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	return js.modelFor(tree, key)
+}
+
+func emptyModel() *Model { return &Model{Hosts: []Host{}, Homes: []Home{}, Inputs: []Input{}} }
+
+// modelFor returns the model of tree, or the job computing it, which it queues
+// if there is none. Only the working copy's requests may be skipped by newer
+// ones. js.mu must be held.
+func (js *Jobs) modelFor(tree, key string) (*Model, *Job, error) {
+	if m := js.models[tree]; m != nil {
+		return m, nil, nil
 	}
 	for _, j := range js.jobs {
 		if j.Req.Kind == "model" && j.tree == tree && !j.finishedState() {
@@ -224,6 +233,49 @@ func (js *Jobs) RefreshModel(ctx context.Context) (*Job, error) {
 		err = errorf(ErrConflict, "the model is already being refreshed")
 	}
 	return j, err
+}
+
+// prepareModel queues the evaluation of tree for a check, which never trusts a
+// cached failure (no network, say): that model is evaluated again, keeping the
+// machines that evaluated. Tree "" is a fleet with no machines.
+func (js *Jobs) prepareModel(tree string) error {
+	if tree == "" {
+		return nil
+	}
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	if m := js.models[tree]; m != nil && modelFailed(m) {
+		js.retry = m
+		delete(js.models, tree)
+	}
+	_, _, err := js.modelFor(tree, "model:check")
+	return err
+}
+
+// waitModel waits for the model of tree, after prepareModel.
+func (js *Jobs) waitModel(ctx context.Context, tree string) (*Model, error) {
+	if tree == "" {
+		return emptyModel(), nil
+	}
+	for range 3 { // the model can be dropped from the cache between the job's end and this read
+		js.mu.Lock()
+		m, j, err := js.modelFor(tree, "model:check")
+		js.mu.Unlock()
+		if m != nil || err != nil {
+			return m, err
+		}
+		select {
+		case <-j.Done():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, errors.New("the fleet evaluation kept being dropped before the check could read it; run the check again")
+}
+
+func modelFailed(m *Model) bool {
+	return m.Error != "" || slices.ContainsFunc(m.Hosts, func(h Host) bool { return h.Error != "" }) ||
+		slices.ContainsFunc(m.Homes, func(h Home) bool { return h.Error != "" })
 }
 
 func (j *Job) finishedState() bool {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -154,11 +155,12 @@ func TestPassedCheckThatCannotBeSaved(t *testing.T) {
 func TestPassedChecksKeepTheNewest(t *testing.T) {
 	s := newService(t)
 	js := s.Jobs
+	pass := func(i int) { js.pass(CheckPass{Tree: fmt.Sprintf("%040x", i)}) }
 	for i := range keepChecks + 1 {
-		js.pass(fmt.Sprintf("%040x", i))
+		pass(i)
 	}
-	js.pass(fmt.Sprintf("%040x", 1))
-	js.pass(fmt.Sprintf("%040x", keepChecks+1))
+	pass(1)
+	pass(keepChecks + 1)
 	if js.Passed(fmt.Sprintf("%040x", 0)) || js.Passed(fmt.Sprintf("%040x", 2)) {
 		t.Fatal("the oldest passed trees were kept past the cap")
 	}
@@ -184,7 +186,9 @@ func TestFailingCheckDoesNotPass(t *testing.T) {
 
 // gateNix holds every nix flake check until the file $RELEASE exists, and
 // writes a flake.lock for nix flake lock, so a test can keep a check running.
+// Its flake has no machines.
 const gateNix = `#!/bin/sh
+case "$*" in *"eval --json"*) echo '{"nixos":[],"home":[],"darwin":[]}'; exit 0 ;; esac
 echo "nix $*"
 case "$*" in
   *"flake check"*) while [ ! -f "$RELEASE" ]; do sleep 0.02; done ;;
@@ -220,7 +224,7 @@ func TestChecksRunOneAtATimeInOrder(t *testing.T) {
 	if bi.Started.Before(ai.Finished) {
 		t.Fatalf("checks overlapped: a finished %s, b started %s", ai.Finished, bi.Started)
 	}
-	list := s.Jobs.List()
+	list := slices.DeleteFunc(s.Jobs.List(), func(j JobInfo) bool { return j.Kind == "model" }) // the fleet the checks compare
 	if len(list) != 2 || list[0].ID != b.ID || list[0].Output != "" {
 		t.Fatalf("list %+v", list)
 	}

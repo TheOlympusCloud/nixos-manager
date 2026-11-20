@@ -412,6 +412,7 @@ type Status struct {
 	Files         []FileStatus `json:"files"`
 	StagedTree    string       `json:"staged_tree"`
 	StagedChecked bool         `json:"staged_checked"`
+	StagedCheck   *CheckPass   `json:"staged_check,omitempty"` // the passed check, with the machines it built
 }
 
 func (r *Repo) Status(ctx context.Context) (Status, error) {
@@ -977,6 +978,23 @@ func (r *Repo) currentBranch(ctx context.Context) (string, error) {
 		return "", errorf(ErrInvalid, "no remote is configured")
 	}
 	return strings.TrimSpace(cur), nil
+}
+
+// pushBase is the tree a push of the current branch lands on: origin's copy of
+// the branch, else origin's default branch (a new testing-<host> branch is
+// deployed on top of it), else "" when the remote has neither, as last
+// fetched. Needs r.mu.
+func (r *Repo) pushBase(ctx context.Context) (string, error) {
+	refs := []string{"refs/remotes/origin/HEAD"}
+	if cur, err := r.git(ctx, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
+		refs = append([]string{"refs/remotes/origin/" + strings.TrimSpace(cur)}, refs...)
+	}
+	for _, ref := range refs {
+		if out, err := r.git(ctx, "rev-parse", "--verify", "-q", ref+"^{tree}"); err == nil {
+			return strings.TrimSpace(out), nil
+		}
+	}
+	return "", nil
 }
 
 // Push sends the current branch to origin and sets it as upstream.

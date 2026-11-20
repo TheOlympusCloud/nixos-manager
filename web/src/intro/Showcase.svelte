@@ -11,7 +11,7 @@
   const FEATURES: [string, string][] = [
     ['Fleet graph', 'Machines, services, shared modules, packages, users and flake inputs: one map you can read.'],
     ['Edit by clicking', 'Add a package or set an option; it lands in that machine’s managed.json. Hand-written Nix is never rewritten.'],
-    ['Checked before commit', 'nix flake check and a dry build run on exactly what is staged. Nothing commits, nothing pushes, until they pass.'],
+    ['Checked before commit', 'nix flake check runs on exactly what is staged, and every machine it changes is built. Nothing commits, nothing pushes, until they pass.'],
     ['Changes in NixOS terms', '“homeserver: +jellyfin, port tcp/8096”, not a diff you have to decode.'],
     ['History and restore', 'Every version of every file, one click from the working copy.'],
     ['Agents via MCP', 'Automation uses the same actions as you, and cannot skip the checks.'],

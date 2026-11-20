@@ -5,7 +5,7 @@
 
   const STEPS = [
     ['Edit', 'homeserver: +jellyfin · port tcp/8096'],
-    ['Check', 'nix flake check · dry-build 3/3 · passed'],
+    ['Check', 'nix flake check · built 3/3 · passed'],
     ['Commit', '4e1f9a2 · homeserver: enable jellyfin'],
     ['Push', 'main → forgejo · fleet/nixos'],
     ['Pull', 'comin · fetched 4e1f9a2 on 3 machines'],

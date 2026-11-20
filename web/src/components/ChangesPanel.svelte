@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ApiError, api, type StatusFile } from '../lib/api'
+  import { builtText } from '../lib/checks'
   import { draft } from '../lib/repo.svelte'
   import { go, link } from '../lib/router.svelte'
   import { act, app, checkStaged, refreshStatus } from '../lib/state.svelte'
@@ -21,7 +22,9 @@
   const commitHint = $derived(
     !staged.length ? 'Tick the files to commit.' : !checked ? 'The staged files need a passing check.' : !hasMessage ? 'Write a commit message.' : '',
   )
-  const targetsHint = $derived(app.selectedTargets.length ? `flake check and ${app.selectedTargets.length} dry build${app.selectedTargets.length === 1 ? '' : 's'}` : 'flake check')
+  const targetsHint = $derived(
+    `flake check and a build of every machine they change${app.selectedTargets.length ? `, plus ${app.selectedTargets.length} dry build${app.selectedTargets.length === 1 ? '' : 's'}` : ''}`,
+  )
 
   /** Plain words for git's status letters. */
   const words: Record<string, string> = { '?': 'New', A: 'New', M: 'Edited', D: 'Deleted', R: 'Renamed' }
@@ -92,7 +95,7 @@
       {#if !staged.length}
         <span class="muted">Nothing staged yet.</span>
       {:else if checked}
-        <span class="ok"><Icon name="tick" size={13} />The staged files passed the checks.</span>
+        <span class="ok"><Icon name="tick" size={13} />Checks passed{app.status?.staged_check ? `: ${builtText(app.status.staged_check)}` : ''}.</span>
       {:else if checking}
         <span class="busy"><span class="spinner" aria-hidden="true"></span>Checking the staged files…</span>
         <button class="link" onclick={() => stagedJob && (app.inspect = { kind: 'job', id: stagedJob.id })}>Log</button>
