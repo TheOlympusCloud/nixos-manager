@@ -95,6 +95,7 @@ func TestTokenScopesOverHTTP(t *testing.T) {
 		{read, "GET", "/api/tree", nil, 200},
 		{read, "GET", "/api/status", nil, 200},
 		{read, "GET", "/api/nope", nil, 404},
+		{read, "DELETE", "/api/file", map[string]any{}, 404}, // a known path with another method: as for the web UI
 		{read, "PUT", "/api/file", map[string]string{"path": "r.nix", "content": "1"}, 403},
 		{read, "POST", "/api/stage", map[string]any{}, 403},
 		{edit, "POST", "/api/push", map[string]any{}, 403},
@@ -244,5 +245,42 @@ func TestMCPToolsFollowTheTokenScope(t *testing.T) {
 	}
 	if _, _, err := e.svc.Read("a.nix"); err == nil {
 		t.Fatal("the file exists")
+	}
+}
+
+// The SDK binds an MCP session to the token that opened it; another token
+// cannot continue it, whatever its scope.
+func TestMCPSessionStaysWithItsToken(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	a := e.createToken(t, "a", "read", nil)
+	b := e.createToken(t, "b", "full", nil)
+	post := func(secret, session, body string) *http.Response {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Authorization", "Bearer "+secret)
+		if session != "" {
+			req.Header.Set("Mcp-Session-Id", session)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp
+	}
+	init := post(a.Token, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
+	session := init.Header.Get("Mcp-Session-Id")
+	if init.StatusCode != 200 || session == "" {
+		t.Fatalf("initialize: %d, session %q", init.StatusCode, session)
+	}
+	list := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	if code := post(b.Token, session, list).StatusCode; code != 403 {
+		t.Fatalf("another token continued the session: %d", code)
+	}
+	if code := post(a.Token, session, list).StatusCode; code == 403 || code == 401 {
+		t.Fatalf("the session's own token was refused: %d", code)
 	}
 }

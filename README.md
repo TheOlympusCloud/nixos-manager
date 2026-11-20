@@ -352,7 +352,9 @@ Tailscale encrypts the traffic, and `tailscale serve` adds HTTPS on the tailnet:
   `services.tailscale.enable = true;` to its configuration and switch, then
   run `tailscale up` once and `tailscale serve --bg 8080`. It is reachable at
   `https://nixos-manager.<tailnet>.ts.net`.
-- **Docker.** Run `tailscale serve --bg 8080` on the host.
+- **Docker.** Run `tailscale serve --bg 8080` on the host, and set
+  `NIXMGR_TRUSTED_PROXIES` in `compose.yaml` (see the login limits under
+  Configuration).
 
 If the LAN is not trusted, listen on loopback only and use it through
 Tailscale: `listen = "127.0.0.1:8080";` without `openFirewall` in the
@@ -456,7 +458,7 @@ Each token gets a scope when it is created, and optionally an expiry date:
 
 | Scope | What it can do |
 |---|---|
-| Read only | Read files, history, the fleet model, checks, jobs and deployments |
+| Read only | Read files, history, the fleet model, checks, jobs and deployments; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
 | Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, and lock or update inputs |
 | Full | Also push, which deploys |
 
@@ -488,6 +490,7 @@ commit message may not bring its own `Via` trailer.
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
+| `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
 
 Sessions last 7 days and are kept in memory, so a restart logs you out.
@@ -499,7 +502,11 @@ count. A browser that has logged in before keeps a cookie that gives it its own
 limit of 10, outside the shared one, so someone guessing from elsewhere cannot
 lock you out of a browser you already use. Behind a proxy on the same machine
 (`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
-to `X-Forwarded-For`. The counts are kept in memory.
+to `X-Forwarded-For`. With Docker, a proxy on the host reaches the container
+from the Docker gateway rather than loopback: set `NIXMGR_TRUSTED_PROXIES` to
+that address (the `remote=` of the `login` lines in the log), or every proxied
+login shares one address's limit. List only proxies there, since anything in
+that list can claim any client address. The counts are kept in memory.
 
 ## Visual editing on an existing repository
 

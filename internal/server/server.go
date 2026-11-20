@@ -16,10 +16,12 @@ import (
 	"net/http"
 	"net/netip"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -42,6 +44,10 @@ type Server struct {
 	Nixd []string     // language server command
 
 	Forgejo *core.Forgejo // Settings → Forgejo and the push webhook; nil turns them off
+
+	// TrustedProxies are reverse proxies, besides loopback, whose X-Forwarded-For
+	// names the client for the login limits (e.g. the Docker gateway).
+	TrustedProxies []netip.Prefix
 
 	lspSlots chan struct{}
 	gz       sync.Map // static path -> gzipped bytes
@@ -417,7 +423,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	source, known := "ip "+clientIP(r), false
+	source, known := "ip "+s.clientIP(r), false
 	if c, err := r.Cookie(browserCookie); err == nil {
 		if id, ok := s.Auth.CheckKnownBrowser(c.Value); ok {
 			source, known = "browser "+id, true
@@ -444,15 +450,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 // clientIP is the address the login limits count by: the peer, or behind a
-// proxy on this machine (tailscale serve, Caddy, nginx) the address the proxy
-// appended to X-Forwarded-For. IPv6 counts by /64, which one host can fill.
-func clientIP(r *http.Request) string {
+// proxy on this machine (tailscale serve, Caddy, nginx) or a trusted one, the
+// address the proxy appended to X-Forwarded-For. IPv6 counts by /64, which one
+// host can fill.
+func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	ip, perr := netip.ParseAddr(host)
 	if err != nil || perr != nil {
 		return r.RemoteAddr
 	}
-	if xff := r.Header.Values("X-Forwarded-For"); ip.IsLoopback() && len(xff) > 0 {
+	proxy := ip.IsLoopback() || slices.ContainsFunc(s.TrustedProxies, func(p netip.Prefix) bool { return p.Contains(ip.Unmap()) })
+	if xff := r.Header.Values("X-Forwarded-For"); proxy && len(xff) > 0 {
 		last := xff[len(xff)-1]
 		if fwd, err := netip.ParseAddr(strings.TrimSpace(last[strings.LastIndex(last, ",")+1:])); err == nil {
 			ip = fwd
@@ -463,6 +471,29 @@ func clientIP(r *http.Request) string {
 		return p.String()
 	}
 	return ip.String()
+}
+
+// ParseTrustedProxies reads NIXMGR_TRUSTED_PROXIES: addresses or CIDR ranges,
+// separated by commas or spaces.
+func ParseTrustedProxies(list string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.FieldsFunc(list, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		p, err := netip.ParsePrefix(f)
+		if !strings.Contains(f, "/") {
+			var a netip.Addr
+			if a, err = netip.ParseAddr(f); err == nil {
+				p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%q is not an address or CIDR range", f)
+		}
+		if p != p.Masked() {
+			return nil, fmt.Errorf("%q has host bits set; did you mean %s?", f, p.Masked())
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

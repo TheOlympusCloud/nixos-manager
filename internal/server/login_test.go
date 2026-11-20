@@ -95,7 +95,7 @@ func TestClientIP(t *testing.T) {
 		if c.xff != "" {
 			r.Header.Set("X-Forwarded-For", c.xff)
 		}
-		if got := clientIP(r); got != c.want {
+		if got := (&Server{}).clientIP(r); got != c.want {
 			t.Errorf("%s with X-Forwarded-For %q: %q, want %q", c.remote, c.xff, got, c.want)
 		}
 	}
@@ -103,7 +103,52 @@ func TestClientIP(t *testing.T) {
 	r.RemoteAddr = "127.0.0.1:1"
 	r.Header.Add("X-Forwarded-For", "203.0.113.1")
 	r.Header.Add("X-Forwarded-For", "203.0.113.2")
-	if got := clientIP(r); got != "203.0.113.2" {
+	if got := (&Server{}).clientIP(r); got != "203.0.113.2" {
 		t.Errorf("two X-Forwarded-For headers: %q", got)
+	}
+}
+
+// With Docker, a proxy on the host reaches the container from the bridge
+// gateway: naming it as a trusted proxy makes its X-Forwarded-For count.
+func TestClientIPBehindTrustedProxy(t *testing.T) {
+	trusted, err := ParseTrustedProxies("172.18.0.1, fd00::/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{TrustedProxies: trusted}
+	for _, c := range []struct{ remote, xff, want string }{
+		{"172.18.0.1:5000", "100.64.0.5", "100.64.0.5"},
+		{"172.18.0.1:5000", "", "172.18.0.1"},
+		{"172.18.0.2:5000", "100.64.0.5", "172.18.0.2"}, // not the proxy: the header is the client's own
+		{"[fd00::1]:5000", "100.64.0.5", "100.64.0.5"},
+		{"127.0.0.1:5000", "100.64.0.5", "100.64.0.5"}, // loopback stays trusted
+		{"192.0.2.1:5000", "100.64.0.5", "192.0.2.1"},
+	} {
+		r, _ := http.NewRequest("POST", "/api/login", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		if got := s.clientIP(r); got != c.want {
+			t.Errorf("%s with X-Forwarded-For %q: %q, want %q", c.remote, c.xff, got, c.want)
+		}
+	}
+	if got := (&Server{}).clientIP(&http.Request{RemoteAddr: "172.18.0.1:5000", Header: http.Header{"X-Forwarded-For": {"100.64.0.5"}}}); got != "172.18.0.1" {
+		t.Errorf("without the setting the gateway is the client: %q", got)
+	}
+}
+
+func TestParseTrustedProxies(t *testing.T) {
+	got, err := ParseTrustedProxies(" 172.18.0.1,10.0.0.0/8  fd00::/8 ")
+	if err != nil || len(got) != 3 || got[0].String() != "172.18.0.1/32" || got[1].String() != "10.0.0.0/8" || got[2].String() != "fd00::/8" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got, err := ParseTrustedProxies(""); err != nil || got != nil {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+	for _, bad := range []string{"proxy.lan", "10.0.0.0/33", "10.0.0.1/8"} {
+		if _, err := ParseTrustedProxies(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }
