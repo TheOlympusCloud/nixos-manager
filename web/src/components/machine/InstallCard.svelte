@@ -9,7 +9,7 @@
   import { untrack } from 'svelte'
   import { api, type HostKey, type SecretsStatus } from '../../lib/api'
   import { deployOf } from '../../lib/deployments.svelte'
-  import { addressProblem, diskOf, installCommand, isPlaceholder } from '../../lib/install'
+  import { addressProblem, installCommand, installReads } from '../../lib/install'
   import { codeLink, go } from '../../lib/router.svelte'
   import { refresh } from '../../lib/state.svelte'
   import { confirmBox, toast } from '../../lib/ui.svelte'
@@ -24,8 +24,9 @@
 
   const dir = $derived(`hosts/${host}`)
   let disk = $state('')
-  let generate = $state(true) // hardware-configuration.nix is still the placeholder
+  let generate = $state<boolean | null>(true) // hardware-configuration.nix is still the placeholder; null: unknown
   let secrets = $state<SecretsStatus | null>(null)
+  let loadErrors = $state<string[]>([])
   let address = $state('')
   let key = $state<HostKey | null>(null)
   let busy = $state('')
@@ -36,7 +37,8 @@
   const installed = $derived(!!m && (m.state !== 'never' || !!m.lastSeen))
   const problem = $derived(addressProblem(address.trim()))
   const ready = $derived(!!address.trim() && !problem)
-  const command = $derived(installCommand(host, address.trim(), generate))
+  const command = $derived(installCommand(host, address.trim(), !!generate))
+  const canCopy = $derived(ready && generate !== null)
   const secretsOn = $derived(!!secrets && !secrets.missing.length)
   const approved = $derived(secrets?.machines.find((s) => s.name === host) ?? null)
   const show = (e: unknown) => (error = e instanceof Error ? e.message : String(e))
@@ -50,9 +52,7 @@
     })
     Promise.allSettled([api.file(`hosts/${h}/disk-config.nix`), api.file(`hosts/${h}/hardware-configuration.nix`), api.secrets()]).then(([d, hw, st]) => {
       if (h !== host) return
-      disk = d.status === 'fulfilled' ? diskOf(d.value.content) : ''
-      generate = hw.status !== 'fulfilled' || isPlaceholder(hw.value.content)
-      secrets = st.status === 'fulfilled' ? st.value : null // no secrets on this server
+      ;({ disk, generate, secrets, errors: loadErrors } = installReads(d, hw, st))
     })
   })
 
@@ -112,6 +112,7 @@
       {#if disk}<span class="mono">{disk}</span>{:else}the disk it names{/if}, partitions it and installs {host} on it. This console never starts an install: you
       run it.
     </p>
+    {#each loadErrors as e (e)}<p class="error-text" role="alert">{e}</p>{/each}
     <ol class="steps">
       <li>Commit and push <span class="mono">{dir}/</span> in <a href="#/changes">Changes</a>: nixos-anywhere installs what the repository has.</li>
       <li>
@@ -147,12 +148,19 @@
         <div class="cmd">
           <!-- Wrap between arguments only. -->
           <code>{#each command.split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
-          <button type="button" class="small" onclick={copy} disabled={!ready} title={ready ? undefined : 'Enter its address first'}
+          <button
+            type="button"
+            class="small"
+            onclick={copy}
+            disabled={!canCopy}
+            title={!ready ? 'Enter its address first' : generate === null ? 'hardware-configuration.nix could not be read' : undefined}
             ><Icon name={copied ? 'tick' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button
           >
         </div>
         <span class="muted small">
-          {#if generate}
+          {#if generate === null}
+            Until hardware-configuration.nix can be read, this command is not known.
+          {:else if generate}
             It erases the disk, installs {host} and reboots it, then commits and pushes the hardware configuration nixos-anywhere wrote, so that comin deploys the same
             system.
           {:else}
