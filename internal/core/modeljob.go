@@ -3,10 +3,12 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,11 +31,75 @@ func nixExpr(name string) string {
 const keepModels = 16
 
 // WorkingTree is the tree object of everything in the working copy, untracked
-// files included, built in a private index so the real one is untouched.
+// files included, built in a private index so the real one is untouched. Every
+// UI poll asks for it, so it is kept until a file changes, and served without
+// the repository lock until then.
 func (r *Repo) WorkingTree(ctx context.Context) (string, error) {
+	sum, cacheable := r.fingerprint()
+	if cacheable {
+		r.wt.mu.Lock()
+		tree, same := r.wt.tree, r.wt.sum == sum
+		r.wt.mu.Unlock()
+		if same && tree != "" {
+			return tree, nil
+		}
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.indexTree(ctx, []string{"-A", "--", "."})
+	tree, err := r.indexTree(ctx, []string{"-A", "--", "."})
+	r.mu.Unlock()
+	if err == nil && cacheable { // the fingerprint was taken first: a change since then is a miss next time
+		r.wt.mu.Lock()
+		r.wt.sum, r.wt.tree = sum, tree
+		r.wt.mu.Unlock()
+	}
+	return tree, err
+}
+
+// racyWindow is how old every timestamp must be before a fingerprint is
+// trusted: a file changed within the same clock tick as the walk could change
+// again without moving its times. Linux file times advance in jiffies, a few
+// milliseconds; this leaves room for coarser file systems.
+var racyWindow = 2 * time.Second
+
+// fingerprint hashes what git add -A reads: the path, type, mode, size, times
+// and inode of everything in the working copy, and of the index and
+// info/exclude. cacheable is false when a timestamp is too recent to prove
+// that a later change would move it, or the walk failed.
+// shortcut: the global excludes file (core.excludesFile) is not watched; a change there shows once a repository file changes.
+func (r *Repo) fingerprint() (sum [32]byte, cacheable bool) {
+	start := time.Now()
+	h := sha256.New()
+	cacheable = true
+	add := func(name string, fi fs.FileInfo) {
+		ctime, ino, ok := fileID(fi)
+		if !ok || start.Sub(ctime) < racyWindow || start.Sub(fi.ModTime()) < racyWindow {
+			cacheable = false
+		}
+		fmt.Fprintf(h, "%q %v %d %d %d %d\x00", name, fi.Mode(), fi.Size(), fi.ModTime().UnixNano(), ctime.UnixNano(), ino)
+	}
+	err := filepath.WalkDir(r.Dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" && filepath.Dir(p) == r.Dir {
+			return fs.SkipDir
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		add(p, fi)
+		return nil
+	})
+	for _, p := range r.gitFiles {
+		if fi, err := os.Lstat(p); err == nil {
+			add(p, fi)
+		} else {
+			fmt.Fprintf(h, "%q absent\x00", p)
+		}
+	}
+	h.Sum(sum[:0])
+	return sum, cacheable && err == nil
 }
 
 // indexTree runs each git add in a private copy of the index, so the real one

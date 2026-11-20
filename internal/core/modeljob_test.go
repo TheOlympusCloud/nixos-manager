@@ -273,3 +273,104 @@ func TestHomeModelWithRealNix(t *testing.T) {
 		t.Fatalf("home: %+v", h)
 	}
 }
+
+// settle waits until the files are older than the racy window, so the next
+// WorkingTree can be cached.
+func settle(t *testing.T) {
+	t.Helper()
+	old := racyWindow
+	racyWindow = 30 * time.Millisecond
+	t.Cleanup(func() { racyWindow = old })
+	time.Sleep(2 * racyWindow)
+}
+
+// cachedTree is WorkingTree while the repository lock is held by someone else:
+// only a cached answer can come back.
+func cachedTree(t *testing.T, r *Repo) (string, bool) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	got := make(chan string, 1)
+	go func() {
+		tree, _ := r.WorkingTree(context.Background())
+		got <- tree
+	}()
+	select {
+	case tree := <-got:
+		return tree, true
+	case <-time.After(500 * time.Millisecond):
+		r.mu.Unlock()
+		<-got // let it finish with the lock
+		r.mu.Lock()
+		return "", false
+	}
+}
+
+// freshTree is the working tree computed without the cache.
+func freshTree(t *testing.T, r *Repo) string {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return must[string](t)(r.indexTree(context.Background(), []string{"-A", "--", "."}))
+}
+
+// Polls reuse the working tree without the repository lock while no file
+// changed, and see every change: content of the same size with the
+// modification time put back, renames, new and deleted files, the executable
+// bit, ignore rules and the index.
+func TestWorkingTreeIsCachedUntilAnythingChanges(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "a.nix", "aaaa\n")
+	write(t, r, "ignored.nix", "tracked though ignored\n")
+	gitOut(t, r.Dir, "add", "-A")
+	write(t, r, ".gitignore", "ignored.nix\n")
+	commitAll(t, r, "init")
+	abs := func(p string) string { return filepath.Join(r.Dir, p) }
+
+	for _, c := range []struct {
+		name   string
+		change func()
+	}{
+		{"same size, same mtime", func() {
+			fi, _ := os.Stat(abs("a.nix"))
+			ok(t, os.WriteFile(abs("a.nix"), []byte("bbbb\n"), 0o644))
+			ok(t, os.Chtimes(abs("a.nix"), fi.ModTime(), fi.ModTime()))
+		}},
+		{"rename", func() { ok(t, os.Rename(abs("a.nix"), abs("b.nix"))) }},
+		{"new file", func() { ok(t, os.WriteFile(abs("c.nix"), []byte("c\n"), 0o644)) }},
+		{"executable", func() { ok(t, os.Chmod(abs("c.nix"), 0o755)) }},
+		{"delete", func() { ok(t, os.Remove(abs("c.nix"))) }},
+		{"info/exclude", func() { ok(t, os.WriteFile(abs(".git/info/exclude"), []byte("b.nix\n"), 0o644)) }},
+		{"index", func() { gitOut(t, r.Dir, "rm", "-q", "--cached", "ignored.nix") }},
+	} {
+		settle(t)
+		before := must[string](t)(r.WorkingTree(ctx))
+		if tree, hit := cachedTree(t, r); !hit || tree != before {
+			t.Fatalf("%s: an unchanged working copy was not served from the cache (%v)", c.name, hit)
+		}
+		c.change()
+		settle(t) // past the racy window, only the fingerprint can tell
+		want := freshTree(t, r)
+		if want == before {
+			t.Fatalf("%s: the change does not change the tree; the test is wrong", c.name)
+		}
+		if got := must[string](t)(r.WorkingTree(ctx)); got != want {
+			t.Fatalf("%s: stale working tree %s, want %s", c.name, got, want)
+		}
+	}
+}
+
+// A file changed moments ago may change again within the same timestamp, so
+// the tree is not cached until it is older than the racy window.
+func TestRecentChangesAreNotCached(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	settle(t)
+	racyWindow = time.Hour
+	write(t, r, "a.nix", "a\n")
+	must[string](t)(r.WorkingTree(ctx))
+	if _, hit := cachedTree(t, r); hit {
+		t.Fatal("a tree with a file changed just now was cached")
+	}
+}

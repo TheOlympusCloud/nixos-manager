@@ -57,8 +57,14 @@ type Repo struct {
 	AuthorEmail string
 	SSHDir      string // the app's deploy key and known_hosts (forgejo.go); "" uses ssh's defaults
 
-	mu   sync.Mutex
-	root *os.Root
+	mu       sync.Mutex
+	root     *os.Root
+	gitFiles []string // the index and info/exclude: git add -A reads them too
+	wt       struct {
+		mu   sync.Mutex
+		sum  [32]byte
+		tree string // "" while nothing is cached
+	}
 }
 
 // OpenRepo opens the working copy in dir. A missing or empty dir is cloned from
@@ -118,6 +124,16 @@ func OpenRepoSSH(dir, remote, name, email, sshDir string) (*Repo, error) {
 	}
 	if r.root, err = os.OpenRoot(dir); err != nil {
 		return nil, err
+	}
+	out, err := r.git(ctx, "rev-parse", "--git-path", "index", "--git-path", "info/exclude")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range strings.Fields(out) {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		r.gitFiles = append(r.gitFiles, p)
 	}
 	return r, nil
 }
