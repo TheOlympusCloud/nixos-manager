@@ -1179,23 +1179,41 @@ func (r *Repo) Seed(fsys fs.FS) (bool, error) {
 }
 
 // CommitsBetween counts the commits that to has and from lacks (from..to) and
-// says when the oldest of them was committed. from and to are SHAs or full refs
-// chosen by the caller, never user input.
-func (r *Repo) CommitsBetween(ctx context.Context, from, to string) (int, time.Time, error) {
-	out, err := r.git(ctx, "log", "--format=%ct", "--end-of-options", to, "^"+from, "--")
+// says since when ref, whose tip is to, has held one of them. Its reflog has
+// when each tip arrived (a fetch, a push, a commit here), so a commit made
+// hours before it was pushed or merged counts from then; without a reflog,
+// from when the oldest of them was committed. from, to and ref are SHAs or full
+// refs chosen by the caller, never user input.
+func (r *Repo) CommitsBetween(ctx context.Context, from, to, ref string) (int, time.Time, error) {
+	out, err := r.git(ctx, "log", "--format=%H %ct", "--end-of-options", to, "^"+from, "--")
 	if err != nil {
 		return 0, time.Time{}, err
 	}
-	lines := strings.Fields(out)
-	var oldest int64
-	for _, l := range lines {
+	missing := map[string]bool{}
+	var since int64
+	for _, l := range strings.Split(out, "\n") {
+		var sha string
 		var sec int64
-		if _, err := fmt.Sscan(l, &sec); err == nil && (oldest == 0 || sec < oldest) {
-			oldest = sec
+		if _, err := fmt.Sscan(l, &sha, &sec); err == nil {
+			missing[sha] = true
+			if since == 0 || sec < since {
+				since = sec
+			}
 		}
 	}
-	if len(lines) == 0 {
+	if len(missing) == 0 {
 		return 0, time.Time{}, nil
 	}
-	return len(lines), time.Unix(oldest, 0).UTC(), nil
+	// Newest first, back to the last tip that held nothing from lacks.
+	out, _ = r.git(ctx, "log", "-g", "--date=unix", "--format=%H %gd", "--end-of-options", ref, "--")
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		sha, sel, _ := strings.Cut(l, " ")
+		_, at, _ := strings.Cut(sel, "@{") // <ref>@{<unix time>}
+		var sec int64
+		if _, err := fmt.Sscanf(at, "%d}", &sec); err != nil || !missing[sha] {
+			break
+		}
+		since = sec
+	}
+	return len(missing), time.Unix(since, 0).UTC(), nil
 }

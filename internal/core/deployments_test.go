@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -410,15 +411,61 @@ func TestCommitsBetween(t *testing.T) {
 	commitAll(t, r, "two")
 	write(t, r, "a", "3\n")
 	c3 := commitAll(t, r, "three")
-	n, since, err := r.CommitsBetween(ctx, c1, c3)
+	n, since, err := r.CommitsBetween(ctx, c1, c3, "refs/heads/main")
 	if err != nil || n != 2 || since.IsZero() {
 		t.Fatalf("c1..c3: %d %v %v", n, since, err)
 	}
-	if n, _, err := r.CommitsBetween(ctx, c3, c1); err != nil || n != 0 {
+	if n, _, err := r.CommitsBetween(ctx, c3, c1, "refs/heads/main"); err != nil || n != 0 {
 		t.Fatalf("c3..c1: %d %v", n, err)
 	}
-	if _, _, err := r.CommitsBetween(ctx, sha('e'), c3); err == nil {
+	if _, _, err := r.CommitsBetween(ctx, sha('e'), c3, "refs/heads/main"); err == nil {
 		t.Fatal("an unknown commit was counted")
+	}
+	// Without a reflog: from when the oldest was committed.
+	if n, since, err := r.CommitsBetween(ctx, c1, c3, "refs/heads/nope"); err != nil || n != 2 || since.IsZero() {
+		t.Fatalf("no reflog: %d %v %v", n, since, err)
+	}
+}
+
+// lateCommit makes a commit on top of parent as if made at, without moving any
+// branch, as on a laptop that pushes it hours later.
+func lateCommit(t *testing.T, r *Repo, parent string, at time.Time) string {
+	t.Helper()
+	cmd := exec.Command("git", "commit-tree", "-p", parent, "-m", "made early", parent+"^{tree}")
+	cmd.Dir = r.Dir
+	date := fmt.Sprintf("@%d +0000", at.Unix())
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=x", "GIT_AUTHOR_EMAIL=x@example.invalid", "GIT_AUTHOR_DATE="+date,
+		"GIT_COMMITTER_NAME=x", "GIT_COMMITTER_EMAIL=x@example.invalid", "GIT_COMMITTER_DATE="+date)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// A commit made five hours ago that only now reached main (pushed late, merged
+// from a trial, a scheduled update merged in the morning) makes a machine
+// behind from now: no "has not caught up for over an hour" yet.
+func TestBehindSinceTheBranchGotIt(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	now := time.Now()
+	late := lateCommit(t, r, c1, now.Add(-5*time.Hour))
+	gitOut(t, r.Dir, "-c", "user.name=x", "-c", "user.email=x@example.invalid", "update-ref", "refs/heads/main", late)
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	d.started = time.Time{}
+	ok(t, d.Record(ReportIn{Host: "pc", Commit: c1, Status: "done"}, now.Add(-6*time.Hour)))
+	ov := must[DeployOverview](t)(d.Overview(ctx, fleet("pc"), now))
+	m := ov.Machines[0]
+	if m.State != "behind" || m.Behind != 1 || now.Sub(m.BehindSince) > time.Minute {
+		t.Fatalf("pc: %+v", m)
+	}
+	for _, e := range deployEvents(fleet("pc"), ov, now) {
+		if e.Kind == "deploy-stuck" {
+			t.Fatalf("a commit that just arrived made %s", e.Title)
+		}
 	}
 }
 
