@@ -145,3 +145,39 @@ export const installCommand = (token: string, host: string) => `echo '${token}' 
 
 /** Addresses only this computer can reach: the machines need the manager's LAN or Tailscale address. */
 export const localOnly = (hostname: string) => ['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)
+
+/** The machine a branch tries changes on: the one whose testing branch it is. */
+export function trialOf(ov: DeployOverview | null, branch: string): MachineDeployment | undefined {
+  return branch ? ov?.machines.find((m) => m.testing === branch) : undefined
+}
+
+/** The machines a change checked on branch can be tried on: those the check built whose comin follows branch, with a testing branch. */
+export function tryTargets(ov: DeployOverview | null, branch: string, built: string[]): MachineDeployment[] {
+  return (ov?.machines ?? []).filter((m) => built.includes(m.host) && m.main === branch && !!m.testing)
+}
+
+export type Rollback = { label: string; question: string; list: string; message: string; rev: string; since: string }
+
+/** Rolling a failed machine back: reverting the commits since the one it runs (one change), with the words for it. */
+export function rollbackOf(m: MachineDeployment): Rollback | null {
+  const cs = m.culprits ?? []
+  if (!cs.length || !m.commit || !m.failure) return null
+  const [newest] = cs
+  const did = m.failure.phase === 'build' ? 'build' : 'switch to'
+  const base = { rev: newest.sha, since: m.commit }
+  if (cs.length === 1)
+    return {
+      ...base,
+      label: `Revert the commit that broke ${m.host}`,
+      question: `${m.host} failed to ${did} ${short(newest.sha)} “${newest.subject}”, the only commit since ${short(m.commit)}, which it runs. This stages the opposite of that commit, runs the checks, and then you commit and push it: every machine it changed gets the revert.`,
+      list: '',
+      message: `Revert "${newest.subject}"\n\nThis reverts commit ${newest.sha}.`,
+    }
+  return {
+    ...base,
+    label: `Revert the ${cs.length} commits since ${m.host} last deployed`,
+    question: `${m.host} failed to ${did} ${short(newest.sha)} after ${cs.length} commits since ${short(m.commit)}, which it runs. Any of them may have broken it, so this stages the opposite of all ${cs.length} as one change, runs the checks, and then you commit and push it. To keep some, revert only the one at fault from History instead.`,
+    list: cs.map((c) => `${short(c.sha)} ${c.subject}`).join('\n'),
+    message: `Revert the ${cs.length} commits that broke ${m.host}\n\nThis reverts commits ${cs.map((c) => c.sha).join(', ')}.`,
+  }
+}

@@ -99,6 +99,8 @@ func TestTokenScopesOverHTTP(t *testing.T) {
 		{read, "PUT", "/api/file", map[string]string{"path": "r.nix", "content": "1"}, 403},
 		{read, "POST", "/api/stage", map[string]any{}, 403},
 		{edit, "POST", "/api/push", map[string]any{}, 403},
+		{edit, "POST", "/api/try", map[string]string{"host": "pi"}, 403}, // a trial pushes
+		{edit, "POST", "/api/try/end", map[string]string{"host": "pi"}, 403},
 		{full, "POST", "/api/push", map[string]any{}, 400}, // allowed; there is no remote
 		// Only the web UI login reaches these, whatever the token's scope.
 		{full, "GET", "/api/tokens", nil, 403},

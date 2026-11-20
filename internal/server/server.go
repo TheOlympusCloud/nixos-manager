@@ -97,6 +97,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
 
 	"POST /api/push": auth.ScopeFull, // a push is a deploy
+	"POST /api/try":  auth.ScopeFull, "POST /api/try/end": auth.ScopeFull,
 }
 
 func (s *Server) apiMux() *http.ServeMux {
@@ -182,11 +183,21 @@ func (s *Server) apiMux() *http.ServeMux {
 	api.HandleFunc("POST /api/switch", post(func(r *http.Request, in struct{ Name string }) (any, error) {
 		return nil, s.Svc.Switch(r.Context(), in.Name)
 	}))
-	api.HandleFunc("POST /api/revert", post(func(r *http.Request, in struct{ Rev string }) (any, error) {
-		return nil, s.Svc.Revert(r.Context(), in.Rev)
+	api.HandleFunc("POST /api/revert", post(func(r *http.Request, in struct{ Rev, Since string }) (any, error) {
+		return nil, s.Svc.Revert(r.Context(), in.Rev, in.Since)
 	}))
 	api.HandleFunc("POST /api/merge", post(func(r *http.Request, in struct{ Branch string }) (any, error) {
 		msg, err := s.Svc.Merge(r.Context(), in.Branch)
+		return map[string]string{"message": msg}, err
+	}))
+	api.HandleFunc("POST /api/try", post(func(r *http.Request, in struct {
+		Host, Message string
+		Replace       bool
+	}) (any, error) {
+		return s.Svc.TryOn(r.Context(), in.Host, in.Message, in.Replace)
+	}))
+	api.HandleFunc("POST /api/try/end", post(func(r *http.Request, in struct{ Host string }) (any, error) {
+		msg, err := s.Svc.EndTrial(r.Context(), in.Host)
 		return map[string]string{"message": msg}, err
 	}))
 	api.HandleFunc("POST /api/push", post(func(r *http.Request, in struct{ Force bool }) (any, error) {

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { ApiError, api, type StatusFile } from '../lib/api'
   import { builtText } from '../lib/checks'
-  import { draft } from '../lib/repo.svelte'
+  import { tryTargets } from '../lib/deployments'
+  import { deploys, watchDeployments } from '../lib/deployments.svelte'
+  import { draft, pullOrPush, repo, tryOnMachine } from '../lib/repo.svelte'
   import { go, link } from '../lib/router.svelte'
   import { act, app, checkStaged, refreshStatus } from '../lib/state.svelte'
   import { confirmBox, report, toast } from '../lib/ui.svelte'
@@ -22,6 +24,13 @@
   const commitHint = $derived(
     !staged.length ? 'Tick the files to commit.' : !checked ? 'The staged files need a passing check.' : !hasMessage ? 'Write a commit message.' : '',
   )
+  // Try on one machine: those the check built, from the branch their comin follows.
+  $effect(() => watchDeployments())
+  const tryable = $derived(tryTargets(deploys.overview, app.status?.branch ?? '', app.status?.staged_check?.built ?? []))
+  let tryHost = $state('')
+  const tryOn = $derived(tryable.find((m) => m.host === tryHost) ?? tryable[0])
+  const somethingToTry = $derived(staged.length > 0 || (app.status?.ahead ?? 0) > 0)
+  const canTry = $derived(checked && somethingToTry && !committing && !repo.busy && (!staged.length || hasMessage))
   const targetsHint = $derived(
     `flake check and a build of every machine they change${app.selectedTargets.length ? `, plus ${app.selectedTargets.length} dry build${app.selectedTargets.length === 1 ? '' : 's'}` : ''}`,
   )
@@ -63,11 +72,16 @@
     committing = true
     commitError = ''
     const msg = draft.message.trim()
+    // A rollback, committed as it was staged, goes on to the push dialog.
+    const rollback = !!draft.pushTree && draft.pushTree === app.status?.staged_tree
+    let pushNext = false
     try {
       const { sha } = await api.commit(msg, force)
       draft.message = ''
+      draft.pushTree = ''
       toast(`${sha.slice(0, 7)} · ${msg.split('\n')[0]}`, 'ok', 'Committed', { label: 'View in History', run: () => go(link('history', [], { rev: sha })) })
       app.logVersion++
+      pushNext = rollback
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return
       commitError = e instanceof Error ? e.message : String(e)
@@ -76,6 +90,7 @@
       committing = false
       await refreshStatus()
     }
+    if (pushNext) await pullOrPush('push')
   }
 </script>
 
@@ -117,6 +132,27 @@
     {#if commitError}<p class="error small" role="alert">{commitError}</p>{/if}
     {#if staged.length && hasMessage && !checked && !checking && !committing}
       <button class="link unchecked" onclick={() => commit(true)}>Commit without checks…</button>
+    {/if}
+    {#if checked && somethingToTry && tryOn}
+      <div class="try" role="group" aria-label="Try on one machine first">
+        <span class="muted small">Or first</span>
+        {#if tryable.length > 1}
+          <select aria-label="Machine to try on" value={tryOn.host} onchange={(e) => (tryHost = e.currentTarget.value)}>
+            {#each tryable as m (m.host)}<option value={m.host}>{m.host}</option>{/each}
+          </select>
+        {/if}
+        <button
+          class="small"
+          disabled={!canTry}
+          onclick={() => tryOn && tryOnMachine(tryOn)}
+          title={canTry
+            ? `Push ${staged.length ? 'this, as a commit,' : 'the commits not pushed yet'} to ${tryOn.testing}: comin deploys it on ${tryOn.host} only, until you promote it or end the trial`
+            : staged.length
+              ? 'Write a commit message first.'
+              : ''}>
+          <Icon name="deploy" size={13} />{repo.busy === 'try' ? 'Pushing…' : tryable.length > 1 ? 'Try on it' : `Try on ${tryOn.host}`}
+        </button>
+      </div>
     {/if}
   </div>
 
@@ -212,6 +248,16 @@
   .error {
     color: var(--red);
     white-space: pre-wrap;
+  }
+  .try {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .try select {
+    width: auto;
+    max-width: 50%;
   }
   .unchecked {
     align-self: flex-start;

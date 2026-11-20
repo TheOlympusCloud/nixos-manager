@@ -53,7 +53,7 @@
           <p class="muted small">These come from the server’s environment variables (shown on the right) and change when it restarts with new values.</p>
           {#if remote && upstream}
             <p class="info">
-              <Icon name="info" size={14} /><span>Machines running comin deploy what is pushed to <span class="mono">main</span>; a <span class="mono">testing-&lt;machine&gt;</span> branch deploys to that machine only, for a trial.</span>
+              <Icon name="info" size={14} /><span>Machines running comin deploy what is pushed to <span class="mono">main</span>; a <span class="mono">testing-&lt;machine&gt;</span> branch deploys to that machine only, for a trial: Changes → Try on pushes one.</span>
             </p>
           {/if}
         </section>

@@ -805,6 +805,22 @@ func TestRevertAndMergeOverHTTP(t *testing.T) {
 	}
 }
 
+// Trials answer over HTTP with the service's errors: here the flake has no
+// such machine.
+func TestTrialsOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	var m any
+	e.ready(t, "/api/model?at=working", &m)
+	var er struct{ Error string }
+	if code := e.do(t, "POST", "/api/try", map[string]any{"host": "pi", "message": "try", "replace": true}, &er); code != 404 || !strings.Contains(er.Error, "pi") {
+		t.Fatalf("try: %d %q", code, er.Error)
+	}
+	if code := e.do(t, "POST", "/api/try/end", map[string]string{"host": "pi"}, &er); code != 404 {
+		t.Fatalf("end: %d %q", code, er.Error)
+	}
+}
+
 func cookieHeader(cs []*http.Cookie) string {
 	parts := make([]string, len(cs))
 	for i, c := range cs {

@@ -2,6 +2,7 @@
   import Icon from '../components/Icon.svelte'
   import DeployBadge from '../components/deployments/DeployBadge.svelte'
   import DeploySetup from '../components/deployments/DeploySetup.svelte'
+  import FailureActions from '../components/deployments/FailureActions.svelte'
   import Rollout from '../components/deployments/Rollout.svelte'
   import { api, type MachineDeployment } from '../lib/api'
   import { excerpt, forgetQuestion, rollingOut, short, sortRank, tileOf } from '../lib/deployments'
@@ -124,6 +125,7 @@
                       <div class="err-box">
                         <span class="err-title">{m.failure.phase === 'build' ? 'Build' : 'Switch'} of <span class="mono">{short(m.failure.commit)}</span> failed {ago(m.failure.at)}</span>
                         <pre>{excerpt(m.failure.error) || 'comin gave no error message'}</pre>
+                        <FailureActions {m} />
                       </div>
                     </td>
                   </tr>

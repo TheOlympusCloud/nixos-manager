@@ -289,8 +289,12 @@ export const api = {
   optionValues: (names: string[], hosts: string[] = []) =>
     get<ValuesReply>('/api/fleet/values', { name: names, host: hosts }),
   createMachine: (spec: MachineSpec) => post<MachineCreated>('/api/machines', spec),
-  /** Stages the inverse of a commit (nothing is committed). 409: local changes or a conflict. */
-  revert: (rev: string) => post('/api/revert', { rev }),
+  /** Stages the inverse of a commit, or with since of every commit after since up to rev (nothing is committed). 409: local changes, not on this branch, or a conflict. */
+  revert: (rev: string, since = '') => post('/api/revert', { rev, since }),
+  /** Commits the staged changes (or takes the unpushed commits) on the machine's testing branch and pushes it; the working copy moves there. */
+  tryOn: (host: string, message: string, replace = false) => post<Trial>('/api/try', { host, message, replace }),
+  /** Points the machine's testing branch back at its main branch's last commit. */
+  endTrial: (host: string) => post<{ message: string }>('/api/try/end', { host }).then((r) => r.message),
   /** Stages a branch squashed into the current one; returns a suggested commit message. 409 on conflict. */
   merge: (branch: string) => post<{ message: string }>('/api/merge', { branch }).then((r) => r.message),
   refreshModel: () => post<{ job: string }>('/api/model/refresh').then((r) => r.job),
@@ -359,6 +363,11 @@ export type MachineDeployment = {
   drift?: 'manual' | 'unfinished'
   /** The main branch its comin follows, or its testing branch when that is on top of it. */
   branch: string
+  /** The two branches its comin follows; testing is absent when its settings name none (or are unknown). */
+  main: string
+  testing?: string
+  /** After a failure on its main branch: the commits since the one it runs, newest first, to revert. */
+  culprits?: Commit[]
   target?: string
   /** The last commit it deployed (or built and found unchanged). */
   commit?: string
@@ -372,4 +381,6 @@ export type MachineDeployment = {
   reports: DeployReport[]
 }
 /** sharedToken: the shared fleet token of an install from before machine tokens is still accepted. */
+/** A change tried on one machine: the commit pushed to its testing branch. */
+export type Trial = { host: string; branch: string; main: string; commit: string }
 export type DeployOverview = { reporting: boolean; sharedToken: boolean; branch: string; commits: Commit[]; machines: MachineDeployment[] }

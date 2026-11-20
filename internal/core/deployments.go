@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"os"
@@ -418,7 +419,16 @@ type MachineDeployment struct {
 	// Branch is the main branch its comin follows (services.comin.remotes), or
 	// its testing branch when that is on top of the main one.
 	Branch string `json:"branch"`
-	Target string `json:"target,omitempty"` // the branch's last commit
+	// Main and Testing are those two branches; Testing is "" when its comin
+	// settings are unknown or name none. A trial is a commit pushed to Testing.
+	Main    string `json:"main"`
+	Testing string `json:"testing,omitempty"`
+	// Culprits, when its last deployment failed on its main branch, are the
+	// commits after the last one it deployed up to the failed one, newest
+	// first: reverting them brings it back to what it runs. Empty when that is
+	// not known, or they include a merge, or are more than maxCulprits.
+	Culprits []Commit `json:"culprits,omitempty"`
+	Target   string   `json:"target,omitempty"` // the branch's last commit
 	// Commit is the last commit it deployed, or built and found unchanged.
 	Commit      string         `json:"commit,omitempty"`
 	Subject     string         `json:"subject,omitempty"`
@@ -458,7 +468,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	if d == nil {
 		return ov, nil
 	}
-	follows := d.follows(ctx, model)
+	follows := cominFollows(ctx, d.repo, model)
 	ov.Branch = fleetBranch(follows)
 	ov.SharedToken = d.SharedToken()
 	d.mu.Lock()
@@ -514,12 +524,13 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	gaps := map[[2]string]gap{}
 	for _, h := range hosts {
 		b := follows[h]
+		m := MachineDeployment{Host: h, Testing: b.Testing, Reports: reports[h]}
 		b.Main, b.Testing = cmp.Or(b.Main, ov.Branch), cmp.Or(b.Testing, "testing-"+h)
-		m := MachineDeployment{Host: h, Branch: b.Main, Target: tips[b.Main], Reports: reports[h]}
+		m.Branch, m.Main, m.Target = b.Main, b.Main, tips[b.Main]
 		if m.Reports == nil {
 			m.Reports = []DeployReport{}
 		}
-		if t := tips[b.Testing]; t != "" && m.Target != "" && t != m.Target && d.isAncestor(ctx, m.Target, t) {
+		if t := tips[b.Testing]; t != "" && m.Target != "" && t != m.Target && d.repo.isAncestor(ctx, m.Target, t) {
 			m.Branch, m.Target = b.Testing, t // comin deploys a testing branch that is on top of the main one
 		}
 		if len(m.Reports) > 0 {
@@ -572,6 +583,9 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 		default:
 			m.State = "behind"
 		}
+		if m.Failure != nil && m.Commit != "" {
+			m.Culprits = d.culprits(ctx, m.Commit, m.Failure.Commit, tips[b.Main])
+		}
 		m.SilentAfter = legacySilence
 		if m.Heartbeats {
 			m.SilentAfter = l.SilentAfter
@@ -582,6 +596,28 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	}
 	d.drift(ctx, ov.Machines)
 	return ov, nil
+}
+
+// maxCulprits is how many commits a failed deployment names at most.
+// shortcut: a failure after more commits than this gets no revert to offer;
+// revert the commits from History, or raise it if fleets push that much at once.
+const maxCulprits = 10
+
+// culprits are the commits after good up to failed, newest first, when failed
+// is on the branch whose last commit is tip and comes after good, with no merge
+// between them; nil otherwise.
+func (d *Deployments) culprits(ctx context.Context, good, failed, tip string) []Commit {
+	if tip == "" || good == failed || !d.repo.isAncestor(ctx, failed, tip) || !d.repo.isAncestor(ctx, good, failed) {
+		return nil
+	}
+	if n, err := d.repo.git(ctx, "rev-list", "--merges", "--count", "--end-of-options", good+".."+failed, "--"); err != nil || strings.TrimSpace(n) != "0" {
+		return nil
+	}
+	out, err := d.repo.git(ctx, "log", logFormat, fmt.Sprintf("-n%d", maxCulprits+1), "--end-of-options", good+".."+failed, "--")
+	if cs := parseLog(out); err == nil && len(cs) <= maxCulprits {
+		return cs
+	}
+	return nil
 }
 
 // drift compares what each machine last said it runs with what the commit it
@@ -667,7 +703,7 @@ func (d *Deployments) removed(ctx context.Context, model *Model, reports map[str
 		last := reports[h][0]
 		// comin's ref is <remote>/<branch>; older reports have none.
 		fromBranch := last.Ref == "" || last.Ref == branch || strings.HasSuffix(last.Ref, "/"+branch)
-		return !fromBranch || !d.isAncestor(ctx, last.Commit, tip)
+		return !fromBranch || !d.repo.isAncestor(ctx, last.Commit, tip)
 	})
 	slices.Sort(gone)
 	return gone
@@ -708,14 +744,14 @@ func (d *Deployments) Forget(hosts ...string) error {
 	return nil
 }
 
-// follows maps the fleet's machines to the branches their comin follows: those
-// set for the remote this console pushes to, else for its first remote.
-func (d *Deployments) follows(ctx context.Context, model *Model) map[string]CominBranches {
+// cominFollows maps the fleet's machines to the branches their comin follows:
+// those set for the remote this console pushes to, else for its first remote.
+func cominFollows(ctx context.Context, r *Repo, model *Model) map[string]CominBranches {
 	out := map[string]CominBranches{}
 	if model == nil {
 		return out
 	}
-	o, err := ParseRemote(d.repo.Remote(ctx))
+	o, err := ParseRemote(r.Remote(ctx))
 	known := err == nil && o.Kind != "local"
 	for _, h := range model.Hosts {
 		if bs := h.Checks.CominBranches; len(bs) > 0 {
@@ -762,9 +798,4 @@ func (d *Deployments) branchTips(ctx context.Context) (map[string]string, error)
 		}
 	}
 	return tips, nil
-}
-
-func (d *Deployments) isAncestor(ctx context.Context, a, b string) bool {
-	_, err := d.repo.git(ctx, "merge-base", "--is-ancestor", "--end-of-options", a, b)
-	return err == nil
 }

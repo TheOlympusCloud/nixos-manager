@@ -18,8 +18,11 @@ import (
 // of the file, so editing it changes that machine. In a machine's file,
 // "broken" fails its build, "kernel=<x>" is what only a reboot applies,
 // "system=<s>" its platform; the file $FAILEVAL makes every machine fail to
-// evaluate. A dry run reports 2 derivations to build and 1 path to fetch, and
-// a build with --out-link links to a store path named after the machine.
+// evaluate. Every machine runs comin from the remote "remote" on main and its
+// testing branch, testing-<name> unless "testing=<x>" names another ("testing="
+// none); "nocomin" turns comin off. A dry run reports 2 derivations to build and
+// 1 path to fetch, and a build with --out-link links to a store path named after
+// the machine.
 const buildNix = `#!/bin/sh
 flake=${NIXMGR_FLAKE#path:}
 case "$*" in
@@ -33,7 +36,10 @@ case "$*" in
     h=$(sha256sum < "$f" | cut -c1-12)
     sys=$(grep -o 'system=[a-z0-9_-]*' "$f" | cut -d= -f2); sys=${sys:-x86_64-linux}
     boot=$(grep -o 'kernel=[a-z0-9]*' "$f")
-    printf '{"system":"%s","toplevel":"/nix/store/%s-nixos-system-%s.drv","boot":"%s"}\n' "$sys" "$h" "$NIXMGR_HOST" "$boot"; exit 0 ;;
+    testing=testing-$NIXMGR_HOST; grep -q 'testing=' "$f" && testing=$(grep -o 'testing=[a-z0-9-]*' "$f" | cut -d= -f2)
+    comin='"checks":{"comin":true,"cominBranches":[{"url":"remote","main":"main","testing":"'$testing'"}]}'
+    grep -q nocomin "$f" && comin='"checks":{"comin":false,"cominBranches":[]}'
+    printf '{"system":"%s","toplevel":"/nix/store/%s-nixos-system-%s.drv","boot":"%s",%s}\n' "$sys" "$h" "$NIXMGR_HOST" "$boot" "$comin"; exit 0 ;;
   *"eval --json"*) echo '{}'; exit 0 ;;
 esac
 echo "nix $*"
