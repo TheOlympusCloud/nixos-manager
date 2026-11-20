@@ -36,7 +36,8 @@ export type Target = { kind: 'nixos' | 'home' | 'darwin'; name: string; attr: st
 export type JobState = 'queued' | 'running' | 'passed' | 'failed'
 export type Job = {
   id: string
-  kind: 'check' | 'lock' | 'update' | 'model' | 'options' | 'packages'
+  /** update-branch: nix flake update for a scheduled update, never in the working copy. */
+  kind: 'check' | 'lock' | 'update' | 'update-branch' | 'model' | 'options' | 'packages'
   state: JobState
   targets?: string[] | null
   tree?: string
@@ -321,6 +322,13 @@ export const api = {
   regenerateDeployTokens: () => post<void>('/api/deployments/token'),
   /** Stops accepting the shared fleet token of an install from before machine tokens. */
   dropSharedDeployToken: () => request<void>('DELETE', '/api/deployments/shared-token', {}),
+  updates: () => get<UpdateStatus>('/api/updates'),
+  setUpdateSchedule: (s: UpdateSchedule) => post<UpdateStatus>('/api/updates/schedule', s),
+  /** Pushes the update's branch: a full token's, or the web login's. */
+  runUpdate: () => post<UpdateStatus>('/api/updates/run'),
+  /** Fast-forwards the fleet's branch to the update, which deploys it. */
+  mergeUpdate: (commit: string) => post<{ message: string }>('/api/updates/merge', { commit }).then((r) => r.message),
+  discardUpdate: () => post<UpdateStatus>('/api/updates/discard'),
   notifications: () => get<{ settings: NotifySettings; status: ChannelStatus[] }>('/api/notifications'),
   saveNotifications: (settings: NotifySettings) => post<{ settings: NotifySettings }>('/api/notifications', settings).then((r) => r.settings),
   /** Sends a test message to every saved channel. */
@@ -375,6 +383,31 @@ export type NotifySettings = {
 }
 /** How the last send to a channel went. */
 export type ChannelStatus = { channel: 'ntfy' | 'webhook' | 'email'; ok: boolean; error?: string; at: string }
+
+// ---- scheduled updates of the flake inputs (Inputs) ----
+
+/** day: -1 every day, else 0 (Sunday) to 6; hour: 0 to 23 in the server's time zone. */
+export type UpdateSchedule = { enabled: boolean; day: number; hour: number }
+export type UpdateState = 'updating' | 'checking' | 'ready' | 'failed' | 'current' | 'error' | 'merged' | 'discarded'
+/** The latest update: every input on top of the fleet's branch on the remote, pushed to flake-update. */
+export type Update = {
+  state: UpdateState
+  scheduled: boolean
+  started: string
+  finished?: string
+  branch?: string
+  base?: string
+  commit?: string
+  inputs?: InputChange[]
+  job?: string
+  check?: string
+  summary?: CheckSummary
+  changed?: string[]
+  error?: string
+  merged?: string
+}
+/** outdated: the branch moved on since the update was made, so it cannot be merged. */
+export type UpdateStatus = { schedule: UpdateSchedule; next?: string; zone: string; update?: Update; outdated?: boolean }
 
 // ---- deployments (what comin reports from each machine) ----
 
