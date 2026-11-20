@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -22,26 +23,34 @@ const (
 	jobTimeout  = 30 * time.Minute
 	maxOutput   = 8 << 20 // per job; nix -L can be chatty
 	keepJobs    = 50
-	queueLength = 256  // skipped model jobs keep their slot until the worker drains them
+	queueLength = 256  // per lane; skipped model jobs keep their slot until the worker drains them
 	keepChecks  = 1000 // passed trees remembered; the oldest are forgotten first
 )
 
-// Jobs runs Nix commands one at a time, in submission order, and keeps their
-// output for the UI and MCP. It remembers which staged trees passed a check,
-// in checks.json once PersistChecks has named it.
+// Jobs runs Nix commands in two lanes, each one job at a time in submission
+// order: checks, which can take half an hour, and everything else (the fleet
+// model, search indexes, option values, lock and update), so the fleet views
+// never wait for a check. It keeps the jobs' output for the UI and MCP, and
+// remembers which staged trees passed a check, in checks.json once
+// PersistChecks has named it.
 type Jobs struct {
 	Repo   *Repo
 	Nix    string // nix binary
 	Nixfmt string // nixfmt binary
+	// EvalJobs is how many machines the fleet model evaluates at once. Each is a
+	// whole NixOS evaluation, which can take a gigabyte of memory.
+	EvalJobs int
 
 	mu          sync.Mutex
 	jobs        []*Job // oldest first
 	nextID      int
 	passed      map[string]bool
-	passedOrder []string // the passed trees, oldest first
-	checksPath  string   // "" keeps them in memory only
-	queue       chan *Job
+	passedOrder []string  // the passed trees, oldest first
+	checksPath  string    // "" keeps them in memory only
+	queue       chan *Job // every kind but check
+	checkQueue  chan *Job
 	models      map[string]*Model // by git tree
+	retry       *Model            // replaced by Evaluate again: the next evaluation of its tree keeps what evaluated
 	modelOrder  []string
 	indexes     map[string]any   // search indexes by key
 	indexErrs   map[string]error // why the last build of an index failed
@@ -49,8 +58,10 @@ type Jobs struct {
 }
 
 func newJobs(repo *Repo) *Jobs {
-	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", passed: map[string]bool{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{}, queue: make(chan *Job, queueLength)}
-	go j.worker()
+	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", EvalJobs: min(2, runtime.NumCPU()), passed: map[string]bool{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{},
+		queue: make(chan *Job, queueLength), checkQueue: make(chan *Job, queueLength)}
+	go j.worker(j.queue)
+	go j.worker(j.checkQueue)
 	return j
 }
 
@@ -192,19 +203,28 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 	return js.enqueue(req, tree, "")
 }
 
-// enqueue queues a job for the worker; js.mu must be held.
+// enqueue queues a job in its lane; js.mu must be held.
 func (js *Jobs) enqueue(req JobRequest, tree, key string) (*Job, error) {
 	js.nextID++
 	job := newJob(fmt.Sprintf("j%d", js.nextID), req)
 	job.tree, job.key = tree, key
+	lane := js.queue
+	if req.Kind == "check" {
+		lane = js.checkQueue
+	}
 	select {
-	case js.queue <- job:
+	case lane <- job:
 	default:
 		return nil, errorf(ErrConflict, "too many jobs are waiting; try again when they finish")
 	}
 	js.jobs = append(js.jobs, job)
-	for len(js.jobs) > keepJobs && js.jobs[0].finishedState() {
-		js.jobs = js.jobs[1:]
+	// Forget the oldest finished jobs; one lane may finish many while the other runs a long one.
+	for len(js.jobs) > keepJobs {
+		i := slices.IndexFunc(js.jobs, (*Job).finishedState)
+		if i < 0 {
+			break
+		}
+		js.jobs = slices.Delete(js.jobs, i, i+1)
 	}
 	return job, nil
 }
@@ -280,8 +300,8 @@ func (js *Jobs) pass(tree string) []string {
 	return slices.Clone(js.passedOrder)
 }
 
-func (js *Jobs) worker() {
-	for job := range js.queue {
+func (js *Jobs) worker(lane <-chan *Job) {
+	for job := range lane {
 		if job.skip.Load() {
 			fmt.Fprintln(job, "Skipped: the files changed again before this evaluation started.")
 			job.finish(false)
@@ -298,7 +318,7 @@ func (js *Jobs) worker() {
 			js.mu.Lock()
 			passed, path := js.pass(job.tree), js.checksPath
 			js.mu.Unlock()
-			if path != "" { // only this worker saves, so the writes cannot overtake each other
+			if path != "" { // only the check lane saves, so the writes cannot overtake each other
 				b, _ := json.Marshal(checksFile{Passed: passed}) // strings always marshal
 				if err := writeAtomic(path, b); err != nil {
 					fmt.Fprintf(job, "\nThe check passed, but saving that failed (%v): after a restart it must run again.\n", err)

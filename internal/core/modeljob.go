@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -207,13 +208,15 @@ func (js *Jobs) Model(ctx context.Context, at string) (*Model, *Job, error) {
 }
 
 // RefreshModel evaluates the working copy again, for when the last evaluation
-// failed for a reason outside the files (no network, a fixed Nix setup).
+// failed for a reason outside the files (no network, a fixed Nix setup). The
+// machines that evaluated are kept: their inputs, the same files, did not change.
 func (js *Jobs) RefreshModel(ctx context.Context) (*Job, error) {
 	tree, err := js.Repo.WorkingTree(ctx)
 	if err != nil {
 		return nil, err
 	}
 	js.mu.Lock()
+	js.retry = js.models[tree]
 	delete(js.models, tree)
 	js.mu.Unlock()
 	_, j, err := js.Model(ctx, "working")
@@ -261,24 +264,66 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 		return err
 	}
 	m.Darwin = names["darwin"]
-	for _, n := range names["nixos"] {
-		fmt.Fprintf(job, "Evaluating %s…\n", n)
-		h := Host{Name: n}
-		if err := js.evalJSON(ctx, src, n, nixExpr("host.nix"), &h); err != nil {
-			h = Host{Name: n, Error: err.Error()}
-			fmt.Fprintf(job, "%s: %v\n", n, err)
+	keptHosts, keptHomes := map[string]Host{}, map[string]Home{}
+	js.mu.Lock()
+	if js.retry != nil && js.retry.Tree == job.tree {
+		for _, h := range js.retry.Hosts {
+			if h.Error == "" {
+				keptHosts[h.Name] = h
+			}
 		}
-		m.Hosts = append(m.Hosts, normalizeHost(h))
-	}
-	for _, n := range names["home"] {
-		fmt.Fprintf(job, "Evaluating home %s…\n", n)
-		h := Home{Name: n}
-		if err := js.evalJSON(ctx, src, n, nixExpr("home.nix"), &h); err != nil {
-			h = Home{Name: n, Error: err.Error()}
+		for _, h := range js.retry.Homes {
+			if h.Error == "" {
+				keptHomes[h.Name] = h
+			}
 		}
-		h.Packages, h.Programs = orEmpty(h.Packages), orEmpty(h.Programs)
-		m.Homes = append(m.Homes, h)
+		js.retry = nil
 	}
+	js.mu.Unlock()
+	// Up to EvalJobs nix processes at once, each writing only its own slot.
+	hosts, homes := make([]Host, len(names["nixos"])), make([]Home, len(names["home"]))
+	slots := make(chan struct{}, max(1, js.EvalJobs))
+	var wg sync.WaitGroup
+	start := func(f func()) {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			f()
+		})
+	}
+	for i, n := range names["nixos"] {
+		if h, ok := keptHosts[n]; ok {
+			fmt.Fprintf(job, "Kept %s: it evaluated last time.\n", n)
+			hosts[i] = h
+			continue
+		}
+		start(func() {
+			fmt.Fprintf(job, "Evaluating %s…\n", n)
+			h := Host{Name: n}
+			if err := js.evalJSON(ctx, src, n, nixExpr("host.nix"), &h); err != nil {
+				h = Host{Name: n, Error: err.Error()}
+				fmt.Fprintf(job, "%s: %v\n", n, err)
+			}
+			hosts[i] = normalizeHost(h)
+		})
+	}
+	for i, n := range names["home"] {
+		if h, ok := keptHomes[n]; ok {
+			homes[i] = h
+			continue
+		}
+		start(func() {
+			fmt.Fprintf(job, "Evaluating home %s…\n", n)
+			h := Home{Name: n}
+			if err := js.evalJSON(ctx, src, n, nixExpr("home.nix"), &h); err != nil {
+				h = Home{Name: n, Error: err.Error()}
+			}
+			h.Packages, h.Programs = orEmpty(h.Packages), orEmpty(h.Programs)
+			homes[i] = h
+		})
+	}
+	wg.Wait()
+	m.Hosts, m.Homes = hosts, homes
 	slices.SortFunc(m.Hosts, func(a, b Host) int { return strings.Compare(a.Name, b.Name) })
 	fmt.Fprintf(job, "Evaluated %d machine(s).\n", len(m.Hosts))
 	return nil

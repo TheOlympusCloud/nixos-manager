@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -188,6 +190,93 @@ func TestEditsDoNotSkipAnEvaluationHistoryWaitsOn(t *testing.T) {
 	s.Jobs.Model(ctx, "working")
 	if info := wait(t, shared); info.State != "passed" {
 		t.Fatalf("the evaluation History waits on was skipped: %+v", info)
+	}
+}
+
+// countingNix wraps the fixture fake-nix: each machine evaluation lasts 0.4 s
+// and logs its name, and how many were running half way, to $COUNTS.
+func countingNix(t *testing.T, s *Service) (counts string) {
+	t.Helper()
+	dir := t.TempDir()
+	counts = filepath.Join(dir, "counts")
+	t.Setenv("COUNTS", counts)
+	s.Jobs.Nix = script(t, "nix", `#!/bin/sh
+case "$*" in *"nixmgr:host"*)
+  run="$COUNTS.run.$NIXMGR_HOST"
+  touch "$run"; sleep 0.2
+  echo "$NIXMGR_HOST $(ls "$COUNTS".run.* | wc -l)" >> "$COUNTS"
+  sleep 0.2; rm "$run" ;;
+esac
+exec `+s.Jobs.Nix+` "$@"
+`)
+	return counts
+}
+
+// evaluated reads countingNix's log: the machines evaluated, and the most at once.
+func evaluated(t *testing.T, counts string) (hosts []string, most int) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(fileOf(t, counts)), "\n") {
+		var h string
+		var n int
+		if _, err := fmt.Sscan(line, &h, &n); err != nil {
+			t.Fatalf("log line %q: %v", line, err)
+		}
+		hosts, most = append(hosts, h), max(most, n)
+	}
+	slices.Sort(hosts)
+	return hosts, most
+}
+
+func fileOf(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// Machines evaluate side by side, never more than EvalJobs at once, and the
+// model lists them in the same order whatever finished first.
+func TestMachinesEvaluateInParallelWithinTheLimit(t *testing.T) {
+	s := fleetService(t, "testdata/fleet")
+	counts := countingNix(t, s)
+	s.Jobs.EvalJobs = 2
+	m := readyModel(t, s, "working")
+	hosts, most := evaluated(t, counts)
+	if strings.Join(hosts, ",") != "homeserver,oldbox,pi,workstation" || most != 2 {
+		t.Fatalf("evaluated %v, at most %d at once; want all four, 2 at once", hosts, most)
+	}
+	if got := strings.Join(names(m.Hosts, func(h Host) string { return h.Name }), ","); got != "homeserver,oldbox,pi,workstation" {
+		t.Fatalf("model hosts %s", got)
+	}
+	if m.Hosts[1].Error == "" || m.Hosts[3].Error != "" || len(m.Homes) != 1 {
+		t.Fatalf("one broken machine must not hide the others: %+v", m)
+	}
+}
+
+// Evaluate again keeps the machines that evaluated: the files did not change,
+// so neither did they. It evaluates again only what failed.
+func TestEvaluateAgainOnlyRetriesWhatFailed(t *testing.T) {
+	fixtures := t.TempDir()
+	ok(t, os.CopyFS(fixtures, os.DirFS("testdata/fleet")))
+	s := fleetService(t, fixtures)
+	counts := countingNix(t, s)
+	before := readyModel(t, s, "working")
+	if before.Hosts[1].Name != "oldbox" || before.Hosts[1].Error == "" {
+		t.Fatalf("oldbox should fail first: %+v", before.Hosts[1])
+	}
+	// What was missing (the network, say) is back.
+	pi := strings.Replace(fileOf(t, filepath.Join(fixtures, "host-pi.json")), `"pi"`, `"oldbox"`, -1)
+	ok(t, os.WriteFile(filepath.Join(fixtures, "host-oldbox.json"), []byte(pi), 0o644))
+	ok(t, os.Remove(counts))
+	wait(t, must[*Job](t)(s.Jobs.RefreshModel(context.Background())))
+	after := readyModel(t, s, "working")
+	if hosts, _ := evaluated(t, counts); strings.Join(hosts, ",") != "oldbox" {
+		t.Fatalf("evaluated again %v, want only oldbox", hosts)
+	}
+	if after.Hosts[1].Error != "" || after.Hosts[1].Name != "oldbox" || !reflect.DeepEqual(after.Hosts[3], before.Hosts[3]) || len(after.Homes) != 1 {
+		t.Fatalf("model after evaluating again: %+v", after)
 	}
 }
 

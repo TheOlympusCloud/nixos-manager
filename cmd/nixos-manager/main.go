@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,6 +41,7 @@ Environment:
   NIXMGR_REMOTE    git remote to clone from and push to (optional; also settable in Settings)
   NIXMGR_LISTEN    address to listen on (default 127.0.0.1:8080)
   NIXMGR_NIX, NIXMGR_NIXFMT, NIXMGR_NIXD   tool commands (default nix, nixfmt, nixd)
+  NIXMGR_EVAL_JOBS machines evaluated at once (default 2, or 1 on a single CPU; about 1 GB each)
 `
 
 func main() {
@@ -95,6 +97,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("NIXMGR_TRUSTED_PROXIES: %w", err)
 	}
+	evalJobs := 0 // the default
+	if v := os.Getenv("NIXMGR_EVAL_JOBS"); v != "" {
+		if evalJobs, err = strconv.Atoi(v); err != nil || evalJobs < 1 {
+			return fmt.Errorf("NIXMGR_EVAL_JOBS: want how many machines to evaluate at once, 1 or more, not %q", v)
+		}
+	}
 	data := env("NIXMGR_DATA", "/var/lib/nixos-manager")
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		return err
@@ -117,6 +125,9 @@ func run() error {
 	}
 	svc := core.NewService(repo)
 	svc.Jobs.Nix, svc.Jobs.Nixfmt = env("NIXMGR_NIX", "nix"), env("NIXMGR_NIXFMT", "nixfmt")
+	if evalJobs > 0 {
+		svc.Jobs.EvalJobs = evalJobs
+	}
 	if err := svc.Jobs.PersistChecks(filepath.Join(data, "checks.json")); err != nil {
 		return err
 	}

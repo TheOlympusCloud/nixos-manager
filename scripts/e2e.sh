@@ -56,6 +56,13 @@ export NIXMGR_DATA=$work/data NIXMGR_LISTEN=127.0.0.1:$port NIXMGR_REMOTE=$work/
   NIXMGR_NIX=$nix_bin NIXMGR_NIXFMT=$nixfmt_bin
 NIXMGR_PASSWORD_HASH=$(printf 'pw\n' | "$work/nixos-manager" hash-password)
 export NIXMGR_PASSWORD_HASH
+if timeout 10 env NIXMGR_EVAL_JOBS=0 "$work/nixos-manager" > "$work/server.log" 2>&1 ||
+  ! grep -q NIXMGR_EVAL_JOBS "$work/server.log"; then
+  fail "NIXMGR_EVAL_JOBS=0 was accepted"
+fi
+: > "$work/server.log"
+echo "ok   a bad NIXMGR_EVAL_JOBS stops the start"
+export NIXMGR_EVAL_JOBS=2 # machines evaluated at once
 start() {
   "$work/nixos-manager" >> "$work/server.log" 2>&1 &
   pid=$!
