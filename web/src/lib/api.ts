@@ -291,8 +291,12 @@ export const api = {
   revokeToken: (id: string) => request<void>('DELETE', `/api/tokens/${encodeURIComponent(id)}`, {}),
 
   deployments: () => get<DeployOverview>('/api/deployments'),
-  deployToken: () => get<{ token: string }>('/api/deployments/token').then((r) => r.token),
-  regenerateDeployToken: () => post<{ token: string }>('/api/deployments/token').then((r) => r.token),
+  /** One machine's own report token. */
+  deployToken: (host: string) => get<{ token: string }>('/api/deployments/token', { host }).then((r) => r.token),
+  /** New tokens for every machine: those with an old one stop reporting until they get the new one. */
+  regenerateDeployTokens: () => post<void>('/api/deployments/token'),
+  /** Stops accepting the shared fleet token of an install from before machine tokens. */
+  dropSharedDeployToken: () => request<void>('DELETE', '/api/deployments/shared-token', {}),
   /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
   forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
 }
@@ -330,4 +334,5 @@ export type MachineDeployment = {
   failure?: DeployReport
   reports: DeployReport[]
 }
-export type DeployOverview = { reporting: boolean; branch: string; commits: Commit[]; machines: MachineDeployment[] }
+/** sharedToken: the shared fleet token of an install from before machine tokens is still accepted. */
+export type DeployOverview = { reporting: boolean; sharedToken: boolean; branch: string; commits: Commit[]; machines: MachineDeployment[] }

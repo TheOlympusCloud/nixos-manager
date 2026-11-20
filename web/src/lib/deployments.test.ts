@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Commit, DeployOverview, MachineDeployment } from './api'
-import { excerpt, forgetQuestion, installCommand, localOnly, pollInterval, progress, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, urlLine } from './deployments'
+import { excerpt, forgetQuestion, installCommand, onSharedToken, localOnly, pollInterval, progress, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, urlLine } from './deployments'
 
 const commit = (sha: string, subject = sha): Commit => ({ sha, short: sha.slice(0, 7), author: 'Pablo', email: 'p@x', date: '2026-11-19T10:00:00Z', subject })
 const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', behind: 0, reports: [], silent: false, silentAfter: 2, heartbeats: true, ...extra })
 const now = Date.parse('2026-11-19T12:00:00Z')
 const ov: DeployOverview = {
   reporting: true,
+  sharedToken: false,
   branch: 'main',
   commits: [commit('c3'), commit('c2'), commit('c1')],
   machines: [
@@ -86,9 +87,15 @@ describe('deployments', () => {
     expect(excerpt(undefined)).toBe('')
   })
 
+  it('lists the machines still on the shared token', () => {
+    const shared = { ...ov, sharedToken: true, machines: [m('pi', { sharedToken: true }), m('nas'), m('box', { sharedToken: true })] }
+    expect(onSharedToken(shared)).toEqual(['box', 'pi'])
+    expect(onSharedToken(ov)).toEqual([])
+  })
+
   it('writes the setup lines', () => {
     expect(urlLine('http://manager.lan:8080')).toBe('fleet.deployReport.url = "http://manager.lan:8080";')
-    expect(installCommand('nxd_ABC', 'pi')).toBe("echo 'nxd_ABC' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'")
+    expect(installCommand('nxh_ABC', 'pi')).toBe("echo 'nxh_ABC' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'")
     expect(localOnly('localhost')).toBe(true)
     expect(localOnly('nixmgr.home.lan')).toBe(false)
   })

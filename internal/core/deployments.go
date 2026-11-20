@@ -3,9 +3,12 @@ package core
 import (
 	"cmp"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base32"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -31,7 +34,7 @@ import (
 const (
 	MaxReportBody  = 16 << 10
 	keepReports    = 20     // per machine
-	maxReporters   = 200    // machines; the token is shared, so one machine could invent others
+	maxReporters   = 200    // machines; with the shared token, one machine could invent others
 	legacySilence  = 7 * 24 // hours; machines without heartbeats: behind and no report for this long
 	maxSilentAfter = 24 * 366
 	// silenceWarmup is how long after a start no machine is called silent: the
@@ -109,25 +112,29 @@ func (r DeployReport) failed() bool { return r.Status == "failed" }
 
 // Deployments keeps the last reports of each machine in deployments.json,
 // what its latest report of any kind (heartbeats too) said in heartbeats.json,
-// and the fleet report token machines send them with.
+// and the key each machine's report token is derived from.
 type Deployments struct {
 	repo      *Repo
 	path      string
 	livePath  string
-	tokenPath string
+	keyPath   string
+	tokenPath string    // the shared fleet token of installs from before host tokens
 	started   time.Time // when this process opened them, for the silence warm-up
 
 	mu      sync.Mutex
-	token   string
+	key     []byte
+	token   string                    // the shared token while it is accepted, else ""
 	reports map[string][]DeployReport // newest first
 	live    map[string]liveState
 }
 
-// OpenDeployments loads dataDir/deployments.json and the report token,
-// creating the token on first use.
+// OpenDeployments loads dataDir/deployments.json, heartbeats.json and the
+// report key, creating the key on first use, and the shared token of an
+// older install if there is one.
 func OpenDeployments(dataDir string, repo *Repo) (*Deployments, error) {
 	d := &Deployments{repo: repo, path: filepath.Join(dataDir, "deployments.json"), livePath: filepath.Join(dataDir, "heartbeats.json"),
-		tokenPath: filepath.Join(dataDir, "deploy-token"), started: time.Now(), reports: map[string][]DeployReport{}, live: map[string]liveState{}}
+		keyPath: filepath.Join(dataDir, "report-key"), tokenPath: filepath.Join(dataDir, "deploy-token"), started: time.Now(),
+		reports: map[string][]DeployReport{}, live: map[string]liveState{}}
 	for path, into := range map[string]any{d.path: &d.reports, d.livePath: &d.live} {
 		b, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -140,46 +147,113 @@ func OpenDeployments(dataDir string, repo *Repo) (*Deployments, error) {
 		}
 	}
 	t, err := os.ReadFile(d.tokenPath)
+	switch {
+	case err == nil:
+		d.token = strings.TrimSpace(string(t))
+		slog.Warn("machines may still report with the shared fleet token; give each its own (Deployments → Setup), then stop accepting it there")
+	case !errors.Is(err, os.ErrNotExist):
+		return nil, err
+	}
+	k, err := os.ReadFile(d.keyPath)
 	if errors.Is(err, os.ErrNotExist) {
-		_, err = d.RegenerateToken()
-		return d, err
+		return d, d.RotateKey()
 	}
-	d.token = strings.TrimSpace(string(t))
-	return d, err
+	if err != nil {
+		return nil, err
+	}
+	if d.key, err = hex.DecodeString(strings.TrimSpace(string(k))); err != nil || len(d.key) < 32 {
+		return nil, errorf(ErrInvalid, "reading %s: not a report key", d.keyPath)
+	}
+	return d, nil
 }
 
-// Token is the fleet report token, for the setup panel.
-func (d *Deployments) Token() string {
-	if d == nil {
-		return ""
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.token
-}
-
-// RegenerateToken replaces the token; machines with the old one stop reporting.
-func (d *Deployments) RegenerateToken() (string, error) {
+// HostToken is the report token of one machine: a keyed hash of its name, so
+// it is good for that machine only, and the server keeps no list of tokens.
+func (d *Deployments) HostToken(host string) (string, error) {
 	if d == nil {
 		return "", errorf(ErrNotFound, "deployment reports are not set up")
 	}
-	t := "nxd_" + rand.Text()
+	if !reportHost.MatchString(host) {
+		return "", errorf(ErrInvalid, "host must be a machine name")
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := writeAtomic(d.tokenPath, []byte(t+"\n")); err != nil {
-		return "", err
-	}
-	d.token = t
-	return t, nil
+	return hostToken(d.key, host), nil
 }
 
-// CheckToken compares a presented token with the fleet's in constant time.
-func (d *Deployments) CheckToken(secret string) bool {
-	if d == nil || secret == "" {
+func hostToken(key []byte, host string) string {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte("nixos-manager report token\x00" + host))
+	return "nxh_" + base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(m.Sum(nil))
+}
+
+// RotateKey makes a new report key: every machine's token changes, and
+// machines with an old one stop reporting until they get the new one.
+func (d *Deployments) RotateKey() error {
+	if d == nil {
+		return errorf(ErrNotFound, "deployment reports are not set up")
+	}
+	key := make([]byte, 32)
+	rand.Read(key)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := writeAtomic(d.keyPath, []byte(hex.EncodeToString(key)+"\n")); err != nil {
+		return err
+	}
+	d.key = key
+	return nil
+}
+
+// Authorize checks, in constant time, that a presented token is host's own,
+// or the shared fleet token while it is accepted.
+// shortcut: the shared token is accepted for one release after host tokens; drop it then.
+func (d *Deployments) Authorize(secret, host string) (shared, ok bool) {
+	if d == nil || secret == "" || !reportHost.MatchString(host) {
+		return false, false
+	}
+	d.mu.Lock()
+	own, fleet := hostToken(d.key, host), d.token
+	d.mu.Unlock()
+	same := func(a, b string) bool {
+		x, y := sha256.Sum256([]byte(a)), sha256.Sum256([]byte(b))
+		return subtle.ConstantTimeCompare(x[:], y[:]) == 1
+	}
+	if same(secret, own) {
+		return false, true
+	}
+	if fleet != "" && same(secret, fleet) {
+		return true, true
+	}
+	return false, false
+}
+
+// SharedToken says whether the shared fleet token of an older install is
+// still accepted.
+func (d *Deployments) SharedToken() bool {
+	if d == nil {
 		return false
 	}
-	a, b := sha256.Sum256([]byte(secret)), sha256.Sum256([]byte(d.Token()))
-	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.token != ""
+}
+
+// DropSharedToken stops accepting the shared fleet token: machines that still
+// use it stop reporting until they get their own.
+func (d *Deployments) DropSharedToken() error {
+	if d == nil {
+		return errorf(ErrNotFound, "deployment reports are not set up")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.token == "" {
+		return errorf(ErrNotFound, "the shared token is not accepted anyway")
+	}
+	if err := os.Remove(d.tokenPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	d.token = ""
+	return nil
 }
 
 // Record validates a machine's report and stores it: a deployment or build in
@@ -339,10 +413,12 @@ type MachineDeployment struct {
 }
 
 type DeployOverview struct {
-	Reporting bool                `json:"reporting"` // some machine has reported
-	Branch    string              `json:"branch"`    // the main branch most of the fleet follows
-	Commits   []Commit            `json:"commits"`   // the newest on the branch, for the rollout picture
-	Machines  []MachineDeployment `json:"machines"`
+	Reporting bool `json:"reporting"` // some machine has reported
+	// SharedToken: the shared fleet token of an older install is still accepted.
+	SharedToken bool                `json:"sharedToken"`
+	Branch      string              `json:"branch"`  // the main branch most of the fleet follows
+	Commits     []Commit            `json:"commits"` // the newest on the branch, for the rollout picture
+	Machines    []MachineDeployment `json:"machines"`
 }
 
 // hostNames lists the machines of an evaluated fleet.
@@ -366,6 +442,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	}
 	follows := d.follows(ctx, model)
 	ov.Branch = fleetBranch(follows)
+	ov.SharedToken = d.SharedToken()
 	d.mu.Lock()
 	reports := make(map[string][]DeployReport, len(d.reports))
 	for h, rs := range d.reports {
@@ -437,7 +514,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 		if l.Seen.After(m.LastSeen) { // reports from before heartbeats have no live state
 			m.LastSeen = l.Seen
 		}
-		m.Heartbeats, m.SharedToken, m.System = !l.Beat.IsZero(), l.SharedToken, l.System
+		m.Heartbeats, m.SharedToken, m.System = !l.Beat.IsZero(), l.SharedToken && ov.SharedToken, l.System
 		// What it runs: the last deployment, or a build that left its system unchanged ("already built").
 		// "built" is not running yet: comin switches (or waits for confirmation) after it, then reports.
 		if i := slices.IndexFunc(m.Reports, func(r DeployReport) bool { return !r.failed() && r.Status != "built" }); i >= 0 {

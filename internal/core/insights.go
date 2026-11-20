@@ -294,7 +294,7 @@ func list(xs []string) string {
 // heartbeats.
 func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	var out []Insight
-	var behind, silent, never, legacy []string
+	var behind, silent, never, legacy, shared []string
 	reporting := false
 	for _, d := range deploys {
 		reporting = reporting || len(d.Reports) > 0
@@ -306,6 +306,9 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 		}
 		if len(d.Reports) > 0 && !d.Heartbeats {
 			legacy = append(legacy, d.Host)
+		}
+		if d.SharedToken {
+			shared = append(shared, d.Host)
 		}
 		switch {
 		case d.State == "failed" && d.Failure != nil:
@@ -351,6 +354,11 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 		out = append(out, Insight{ID: "deploy-silent", Severity: "warning", Hosts: silent, Link: "#/deployments",
 			Title:  fmt.Sprintf("%s %s stopped reporting", list(silent), are(silent)),
 			Detail: "No report or heartbeat for longer than fleet.deployReport.silentAfter allows (7 days and a commit behind for a machine without heartbeats). Check that it is on, that comin and its report timer run, and that it still reaches this console. A machine that is often off can set silentAfter = null."})
+	}
+	if len(shared) > 0 {
+		out = append(out, Insight{ID: "deploy-shared-token", Severity: "warning", Hosts: shared, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s with the shared token", list(shared), map[bool]string{true: "reports", false: "report"}[len(shared) == 1]),
+			Detail: "Whoever holds the shared fleet token can report as any machine, for instance make a broken one look up to date. Put each machine's own token in its token file (Deployments → Setup), then stop accepting the shared token there. The next release no longer accepts it."})
 	}
 	if len(legacy) > 0 {
 		out = append(out, Insight{ID: "deploy-no-heartbeat", Severity: "info", Hosts: legacy, Link: "#/deployments",

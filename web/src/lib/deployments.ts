@@ -119,6 +119,10 @@ export function excerpt(error: string | undefined, lines = 4, chars = 360): stri
   return text.length > chars ? text.slice(0, chars).trimEnd() + '…' : text
 }
 
+/** The machines whose last report used the shared fleet token, while it is accepted. */
+export const onSharedToken = (ov: DeployOverview | null): string[] =>
+  ov?.sharedToken ? ov.machines.filter((m) => m.sharedToken).map((m) => m.host).sort() : []
+
 export const TOKEN_FILE = '/var/lib/nixos-manager-report/token'
 
 /** The line that turns reporting on, for modules/common.nix. */

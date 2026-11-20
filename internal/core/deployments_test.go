@@ -55,27 +55,53 @@ func TestDeploymentReportsAreValidatedAndKept(t *testing.T) {
 	}
 }
 
-func TestDeploymentTokenAndMachineCap(t *testing.T) {
+// Each machine has its own report token, derived from a key only the server
+// knows; a token is only good for the machine it was made for.
+func TestHostTokensAndMachineCap(t *testing.T) {
 	dir := t.TempDir()
 	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
-	tok := d.Token()
-	if !strings.HasPrefix(tok, "nxd_") || !d.CheckToken(tok) || d.CheckToken("") || d.CheckToken(tok+"x") || d.CheckToken(" "+tok) {
-		t.Fatalf("token %q checks wrong", tok)
+	pi, nas := must[string](t)(d.HostToken("pi")), must[string](t)(d.HostToken("nas"))
+	if !strings.HasPrefix(pi, "nxh_") || len(pi) != 4+52 || pi == nas || pi != must[string](t)(d.HostToken("pi")) {
+		t.Fatalf("tokens %q %q", pi, nas)
 	}
-	if fi, err := os.Stat(filepath.Join(dir, "deploy-token")); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("token file: %v %v", fi, err)
+	for _, c := range []struct {
+		secret, host string
+		ok           bool
+	}{
+		{pi, "pi", true}, {nas, "nas", true}, {pi, "nas", false}, {"", "pi", false}, {pi + "x", "pi", false},
+		{" " + pi, "pi", false}, {pi, "", false}, {pi, "../pi", false},
+	} {
+		if shared, ok := d.Authorize(c.secret, c.host); ok != c.ok || shared {
+			t.Errorf("%q for %q: ok %v shared %v", c.secret, c.host, ok, shared)
+		}
 	}
-	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); again.Token() != tok {
+	if _, err := d.HostToken("../pi"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a token for an invalid name: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "report-key")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key file: %v %v", fi, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deploy-token")); !os.IsNotExist(err) || d.SharedToken() {
+		t.Fatalf("a new install has a shared token: %v", err)
+	}
+	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); must[string](t)(again.HostToken("pi")) != pi {
 		t.Fatal("the token changed on reopening")
 	}
-	fresh := must[string](t)(d.RegenerateToken())
-	if fresh == tok || d.CheckToken(tok) || !d.CheckToken(fresh) {
-		t.Fatal("regenerating did not replace the token")
+	ok(t, d.RotateKey())
+	if fresh := must[string](t)(d.HostToken("pi")); fresh == pi {
+		t.Fatal("rotating the key kept the tokens")
 	}
+	if _, ok := d.Authorize(pi, "pi"); ok {
+		t.Fatal("an old token still reports")
+	}
+	isErr(t, d.DropSharedToken(), ErrNotFound)
 
 	var nilD *Deployments
-	if nilD.CheckToken(fresh) || nilD.Record(ReportIn{}, time.Now()) == nil {
+	if _, ok := nilD.Authorize(pi, "pi"); ok || nilD.Record(ReportIn{}, time.Now()) == nil {
 		t.Fatal("a missing store accepted a report")
+	}
+	if _, err := nilD.HostToken("pi"); err == nil {
+		t.Fatal("a missing store made a token")
 	}
 
 	for i := range maxReporters {
@@ -83,6 +109,59 @@ func TestDeploymentTokenAndMachineCap(t *testing.T) {
 	}
 	isErr(t, d.Record(ReportIn{Host: "onemore", Commit: sha('a'), Status: "done"}, time.Now()), ErrInvalid)
 	ok(t, d.Record(ReportIn{Host: "ma", Commit: sha('b'), Status: "done"}, time.Now())) // known machines still report
+}
+
+// An install from before host tokens keeps accepting its shared fleet token,
+// marks the machines that still use it, and stops accepting it on request.
+func TestSharedTokenStillReportsUntilDropped(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "deploy-token"), []byte("nxd_OLDFLEETTOKEN\n"), 0o600)
+	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
+	if !d.SharedToken() {
+		t.Fatal("the shared token is not accepted")
+	}
+	for _, h := range []string{"pi", "nas"} {
+		if shared, ok := d.Authorize("nxd_OLDFLEETTOKEN", h); !ok || !shared {
+			t.Fatalf("%s with the shared token: ok %v shared %v", h, ok, shared)
+		}
+	}
+	if shared, ok := d.Authorize(must[string](t)(d.HostToken("nas")), "nas"); !ok || shared {
+		t.Fatalf("nas with its own token: ok %v shared %v", ok, shared)
+	}
+	if _, ok := d.Authorize("nxd_OLDFLEETTOKENX", "pi"); ok {
+		t.Fatal("a wrong shared token reports")
+	}
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('a'), Status: "done", SharedToken: true}, time.Now()))
+	ok(t, d.Record(ReportIn{Host: "nas", Commit: sha('a'), Status: "done"}, time.Now()))
+	shared := func() (out []string) {
+		ov := must[DeployOverview](t)(d.Overview(ctx, nil, time.Now()))
+		for _, m := range ov.Machines {
+			if m.SharedToken {
+				out = append(out, m.Host)
+			}
+		}
+		if ov.SharedToken != d.SharedToken() {
+			t.Errorf("overview says the shared token is accepted: %v", ov.SharedToken)
+		}
+		return out
+	}
+	if got := shared(); !slices.Equal(got, []string{"pi"}) {
+		t.Fatalf("machines on the shared token: %v", got)
+	}
+	ok(t, d.DropSharedToken())
+	if _, ok := d.Authorize("nxd_OLDFLEETTOKEN", "pi"); ok || d.SharedToken() {
+		t.Fatal("the dropped token still reports")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deploy-token")); !os.IsNotExist(err) {
+		t.Fatalf("the token file stays: %v", err)
+	}
+	if got := shared(); len(got) != 0 {
+		t.Fatalf("still marked after dropping it: %v", got)
+	}
+	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); again.SharedToken() {
+		t.Fatal("the shared token is back after reopening")
+	}
 }
 
 func TestDeploymentOverview(t *testing.T) {

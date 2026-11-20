@@ -457,18 +457,32 @@ To turn it on (the **Deployments** view walks you through it):
    Over plain HTTP the token crosses the LAN readable; a Tailscale address or
    an `https://` one keeps it private.
 
-2. Put the fleet report token on each machine. The view shows the token and the
+2. Put each machine's own report token on it. The view shows the token and the
    command for each machine; the token travels on stdin:
 
    ```sh
-   echo 'nxd_…' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'
+   echo 'nxh_…' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'
    ```
 
+   A token only reports for its own machine: nixos-manager refuses a report
+   whose machine name is not the one the token was made for, so a machine (or
+   whoever reads its token) cannot pass for another. The tokens are derived
+   from a key in `$NIXMGR_DATA/report-key`, so nothing lists them.
    With sops-nix or agenix, point `fleet.deployReport.tokenFile` at the secret
-   instead. Never commit the token. **Regenerate** replaces it; machines with
-   the old one stop reporting until they get the new one.
+   instead. Never commit a token. **New tokens for every machine** replaces the
+   key; machines with an old token stop reporting until they get the new one.
 
-3. The first report arrives with the next deployment after both are in place.
+3. The first report arrives with the next deployment after both are in place,
+   and the first heartbeat a few minutes after the deployment that installs
+   the timer.
+
+**Upgrading from one fleet token.** Installs from before machine tokens kept a
+single token for every machine in `$NIXMGR_DATA/deploy-token`. This release
+still accepts it, and marks the machines that report with it in **Deployments**
+and **Health**. Install each machine's own token in its token file (the same
+file, step 2), wait for its next report, and when no machine is listed any
+more, click **Stop accepting the shared token** in the setup, which deletes the
+file. The next release no longer accepts it.
 
 `modules/report-deployments.nix` hooks comin's `postDeploymentCommand` and, on
 comin versions that have it, `postBuildCommand`, which also reports failed

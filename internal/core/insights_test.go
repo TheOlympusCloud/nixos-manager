@@ -161,7 +161,7 @@ func TestDeployInsights(t *testing.T) {
 		// Behind because it is off: silent says it, behind would only repeat it.
 		{Host: "off", State: "behind", Behind: 3, BehindSince: now.Add(-9 * time.Hour), Silent: true, Reports: rep, Heartbeats: true},
 		{Host: "quiet", State: "current", Silent: true, Reports: rep, Heartbeats: true},           // up to date, but gone quiet
-		{Host: "old", State: "current", Reports: rep},                                             // an older report module: no heartbeats
+		{Host: "old", State: "current", Reports: rep, SharedToken: true},                          // an older report module: no heartbeats, the shared token
 		{Host: "box", State: "never", Reports: []DeployReport{}, LastSeen: now, Heartbeats: true}, // set up, nothing deployed since
 		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep},   // not in the fleet
 	}
@@ -176,6 +176,9 @@ func TestDeployInsights(t *testing.T) {
 	}
 	if s := insightByID(got, "deploy-silent"); s.Severity != "warning" || strings.Join(s.Hosts, ",") != "off,quiet" || s.Title != "off and quiet have stopped reporting" {
 		t.Errorf("deploy-silent: %+v", s)
+	}
+	if h := insightByID(got, "deploy-shared-token"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "old" || h.Title != "old reports with the shared token" {
+		t.Errorf("deploy-shared-token: %+v", h)
 	}
 	if h := insightByID(got, "deploy-no-heartbeat"); h.Severity != "info" || strings.Join(h.Hosts, ",") != "old" || h.Title != "old sends no heartbeats" {
 		t.Errorf("deploy-no-heartbeat: %+v", h)
