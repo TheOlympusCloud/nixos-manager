@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -136,6 +137,7 @@ func Insights(m *Model, deploys []MachineDeployment, origin string, now time.Tim
 		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
 	out = append(out, missingPackages(healthy)...)
 	out = append(out, releaseInsights(healthy, now)...)
+	out = append(out, inputEOL(m.Inputs, healthy, now)...)
 	out = append(out, deployInsights(m, deploys, now)...)
 	out = append(out, cominInsights(healthy, origin)...)
 	slices.SortStableFunc(out, func(a, b Insight) int {
@@ -241,6 +243,30 @@ func releaseInsights(healthy []Host, now time.Time) []Insight {
 	return out
 }
 
+// releaseBranch finds a NixOS release in an input's branch: nixos-26.05,
+// nixos-26.05-small, nixpkgs-26.05-darwin, release-26.05.
+var releaseBranch = regexp.MustCompile(`(?:^|[/=])((?:nixos|nixpkgs|release)-(\d\d\.\d\d)(?:-[a-z]+)?)(?:$|[&#])`)
+
+// inputEOL flags inputs that follow a release branch whose support ended,
+// except a release the machines already run (release-eol says it for them).
+func inputEOL(inputs []Input, healthy []Host, now time.Time) []Insight {
+	var out []Insight
+	for _, in := range inputs {
+		m := releaseBranch.FindStringSubmatch(in.URL)
+		if m == nil {
+			continue
+		}
+		end, ok := releaseEnd(m[2])
+		if !ok || now.Before(end) || slices.ContainsFunc(healthy, func(h Host) bool { return strings.HasPrefix(h.Release, m[2]) }) {
+			continue
+		}
+		out = append(out, Insight{ID: "input-eol:" + in.Name, Severity: "warning", Hosts: []string{},
+			Title:  fmt.Sprintf("%s follows %s, which no longer gets updates", in.Name, m[1]),
+			Detail: fmt.Sprintf("NixOS %s reached its end of life on %s. Point the input in flake.nix at a supported release branch (the one nixpkgs follows), update it, then check the machines.", m[2], end.AddDate(0, 0, -1).Format("2 Jan 2006"))})
+	}
+	return out
+}
+
 // cominInsights: a push only deploys machines whose comin pulls the repository this console pushes to.
 func cominInsights(healthy []Host, origin string) []Insight {
 	off, other := []string{}, []string{}
@@ -290,15 +316,34 @@ func list(xs []string) string {
 }
 
 // deployInsights flags fleet machines whose last deployment failed, that lag
-// behind their branch, or that stopped reporting while others report.
+// behind their branch, that stopped reporting, or that report without
+// heartbeats.
 func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	var out []Insight
-	var behind, silent, never []string
+	var behind, silent, never, legacy, shared, manual, unfinished, reboot []string
 	reporting := false
 	for _, d := range deploys {
 		reporting = reporting || len(d.Reports) > 0
 		if !slices.ContainsFunc(m.Hosts, func(h Host) bool { return h.Name == d.Host }) {
 			continue // reported by a machine that is not in this fleet (any more)
+		}
+		if d.Silent {
+			silent = append(silent, d.Host)
+		}
+		if len(d.Reports) > 0 && !d.Heartbeats {
+			legacy = append(legacy, d.Host)
+		}
+		if d.SharedToken {
+			shared = append(shared, d.Host)
+		}
+		switch d.Drift {
+		case "manual":
+			manual = append(manual, d.Host)
+		case "unfinished":
+			unfinished = append(unfinished, d.Host)
+		}
+		if d.System != nil && d.System.Reboot {
+			reboot = append(reboot, d.Host)
 		}
 		switch {
 		case d.State == "failed" && d.Failure != nil:
@@ -324,12 +369,10 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 			out = append(out, Insight{ID: "deploy-failed:" + d.Host, Severity: "error", Hosts: []string{d.Host}, Link: "#/deployments",
 				Title:  fmt.Sprintf("%s failed to %s %.7s", d.Host, what, f.Commit),
 				Detail: fmt.Sprintf("%s %s Deployments shows the error; journalctl -u comin on the machine has the whole log.", msg, runs)})
-		case d.State == "behind" && now.Sub(d.BehindSince) > behindAfter:
+		case d.State == "behind" && !d.Silent && now.Sub(d.BehindSince) > behindAfter: // silent says why it is behind
 			behind = append(behind, d.Host)
-		case d.State == "never":
+		case d.State == "never" && d.LastSeen.IsZero():
 			never = append(never, d.Host)
-		case d.State == "silent":
-			silent = append(silent, d.Host)
 		}
 	}
 	are := func(hs []string) string { return map[bool]string{true: "has", false: "have"}[len(hs) == 1] }
@@ -342,10 +385,36 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 			Title:  fmt.Sprintf("%s %s not caught up for over an hour", list(behind), are(behind)),
 			Detail: fmt.Sprintf("%s still %s an older commit of the branch comin follows. comin may fail to evaluate or build the new one (older comin versions do not report that), or cannot reach Forgejo: run journalctl -u comin on %s.", it, runs, them)})
 	}
-	if reporting && len(silent) > 0 {
-		out = append(out, Insight{ID: "deploy-silent", Severity: "info", Hosts: silent, Link: "#/deployments",
-			Title:  fmt.Sprintf("%s %s not reported a deployment in 7 days", list(silent), are(silent)),
-			Detail: "They reported before. Check that they are on, that comin runs, and that they still reach this console."})
+	if len(silent) > 0 {
+		out = append(out, Insight{ID: "deploy-silent", Severity: "warning", Hosts: silent, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s stopped reporting", list(silent), are(silent)),
+			Detail: "No report or heartbeat for longer than fleet.deployReport.silentAfter allows (7 days and a commit behind for a machine without heartbeats). Check that it is on, that comin and its report timer run, and that it still reaches this console. A machine that is often off can set silentAfter = null."})
+	}
+	runs := func(hs []string) string { return map[bool]string{true: "runs", false: "run"}[len(hs) == 1] }
+	if len(manual) > 0 {
+		out = append(out, Insight{ID: "drift-manual", Severity: "warning", Hosts: manual, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s a system no deployment made", list(manual), runs(manual)),
+			Detail: "What runs is neither what its deployed commit builds nor what it boots into from comin: someone ran nixos-rebuild there, or rolled back. comin replaces it with the next commit that changes the machine; to keep the change, make it in the repository."})
+	}
+	if len(unfinished) > 0 {
+		out = append(out, Insight{ID: "drift-unfinished", Severity: "warning", Hosts: unfinished, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s did not finish switching", list(unfinished)),
+			Detail: "What runs is not what its deployed commit builds, but comin got it there: a switch stopped or failed partway (a service that did not start, say), or the new system is installed and waits for a reboot. journalctl -u comin on the machine says why."})
+	}
+	if len(reboot) > 0 {
+		out = append(out, Insight{ID: "reboot-pending", Severity: "info", Hosts: reboot, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s a reboot", list(reboot), map[bool]string{true: "needs", false: "need"}[len(reboot) == 1]),
+			Detail: "A deployment changed the kernel, its modules or the initrd, which only a reboot loads: until then the machine runs the old kernel."})
+	}
+	if len(shared) > 0 {
+		out = append(out, Insight{ID: "deploy-shared-token", Severity: "warning", Hosts: shared, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s with the shared token", list(shared), map[bool]string{true: "reports", false: "report"}[len(shared) == 1]),
+			Detail: "Whoever holds the shared fleet token can report as any machine, for instance make a broken one look up to date. Put each machine's own token in its token file (Deployments → Setup), then stop accepting the shared token there. The next release no longer accepts it."})
+	}
+	if len(legacy) > 0 {
+		out = append(out, Insight{ID: "deploy-no-heartbeat", Severity: "info", Hosts: legacy, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s no heartbeats", list(legacy), map[bool]string{true: "sends", false: "send"}[len(legacy) == 1]),
+			Detail: "Its report module only reports deployments, so a machine that stops while up to date shows only once a commit is 7 days late, and what it runs is not compared with its commit. Copy report-deployment.sh and report-deployments.nix from the starter fleet's modules into the repository's modules (README, Deployments)."})
 	}
 	if reporting && len(never) > 0 {
 		out = append(out, Insight{ID: "deploy-never", Severity: "info", Hosts: never, Link: "#/deployments",

@@ -43,7 +43,8 @@ type Server struct {
 	MCP  http.Handler // MCP endpoint, guarded here by bearer tokens
 	Nixd []string     // language server command
 
-	Forgejo *core.Forgejo // Settings → Forgejo and the push webhook; nil turns them off
+	Forgejo *core.Forgejo  // Settings → Forgejo and the push webhook; nil turns them off
+	Notify  *core.Notifier // Settings → Notifications; nil turns them off
 
 	// TrustedProxies are reverse proxies, besides loopback, whose X-Forwarded-For
 	// names the client for the login limits (e.g. the Docker gateway).
@@ -337,6 +338,7 @@ func (s *Server) apiMux() *http.ServeMux {
 	api.HandleFunc("GET /api/lsp", s.lsp)
 	s.forgejoRoutes(api)
 	s.deploymentRoutes(api)
+	s.notifyRoutes(api)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API route")
 	})

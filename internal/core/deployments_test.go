@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,27 +55,53 @@ func TestDeploymentReportsAreValidatedAndKept(t *testing.T) {
 	}
 }
 
-func TestDeploymentTokenAndMachineCap(t *testing.T) {
+// Each machine has its own report token, derived from a key only the server
+// knows; a token is only good for the machine it was made for.
+func TestHostTokensAndMachineCap(t *testing.T) {
 	dir := t.TempDir()
 	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
-	tok := d.Token()
-	if !strings.HasPrefix(tok, "nxd_") || !d.CheckToken(tok) || d.CheckToken("") || d.CheckToken(tok+"x") || d.CheckToken(" "+tok) {
-		t.Fatalf("token %q checks wrong", tok)
+	pi, nas := must[string](t)(d.HostToken("pi")), must[string](t)(d.HostToken("nas"))
+	if !strings.HasPrefix(pi, "nxh_") || len(pi) != 4+52 || pi == nas || pi != must[string](t)(d.HostToken("pi")) {
+		t.Fatalf("tokens %q %q", pi, nas)
 	}
-	if fi, err := os.Stat(filepath.Join(dir, "deploy-token")); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("token file: %v %v", fi, err)
+	for _, c := range []struct {
+		secret, host string
+		ok           bool
+	}{
+		{pi, "pi", true}, {nas, "nas", true}, {pi, "nas", false}, {"", "pi", false}, {pi + "x", "pi", false},
+		{" " + pi, "pi", false}, {pi, "", false}, {pi, "../pi", false},
+	} {
+		if shared, ok := d.Authorize(c.secret, c.host); ok != c.ok || shared {
+			t.Errorf("%q for %q: ok %v shared %v", c.secret, c.host, ok, shared)
+		}
 	}
-	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); again.Token() != tok {
+	if _, err := d.HostToken("../pi"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a token for an invalid name: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "report-key")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key file: %v %v", fi, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deploy-token")); !os.IsNotExist(err) || d.SharedToken() {
+		t.Fatalf("a new install has a shared token: %v", err)
+	}
+	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); must[string](t)(again.HostToken("pi")) != pi {
 		t.Fatal("the token changed on reopening")
 	}
-	fresh := must[string](t)(d.RegenerateToken())
-	if fresh == tok || d.CheckToken(tok) || !d.CheckToken(fresh) {
-		t.Fatal("regenerating did not replace the token")
+	ok(t, d.RotateKey())
+	if fresh := must[string](t)(d.HostToken("pi")); fresh == pi {
+		t.Fatal("rotating the key kept the tokens")
 	}
+	if _, ok := d.Authorize(pi, "pi"); ok {
+		t.Fatal("an old token still reports")
+	}
+	isErr(t, d.DropSharedToken(), ErrNotFound)
 
 	var nilD *Deployments
-	if nilD.CheckToken(fresh) || nilD.Record(ReportIn{}, time.Now()) == nil {
+	if _, ok := nilD.Authorize(pi, "pi"); ok || nilD.Record(ReportIn{}, time.Now()) == nil {
 		t.Fatal("a missing store accepted a report")
+	}
+	if _, err := nilD.HostToken("pi"); err == nil {
+		t.Fatal("a missing store made a token")
 	}
 
 	for i := range maxReporters {
@@ -82,6 +109,59 @@ func TestDeploymentTokenAndMachineCap(t *testing.T) {
 	}
 	isErr(t, d.Record(ReportIn{Host: "onemore", Commit: sha('a'), Status: "done"}, time.Now()), ErrInvalid)
 	ok(t, d.Record(ReportIn{Host: "ma", Commit: sha('b'), Status: "done"}, time.Now())) // known machines still report
+}
+
+// An install from before host tokens keeps accepting its shared fleet token,
+// marks the machines that still use it, and stops accepting it on request.
+func TestSharedTokenStillReportsUntilDropped(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "deploy-token"), []byte("nxd_OLDFLEETTOKEN\n"), 0o600)
+	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
+	if !d.SharedToken() {
+		t.Fatal("the shared token is not accepted")
+	}
+	for _, h := range []string{"pi", "nas"} {
+		if shared, ok := d.Authorize("nxd_OLDFLEETTOKEN", h); !ok || !shared {
+			t.Fatalf("%s with the shared token: ok %v shared %v", h, ok, shared)
+		}
+	}
+	if shared, ok := d.Authorize(must[string](t)(d.HostToken("nas")), "nas"); !ok || shared {
+		t.Fatalf("nas with its own token: ok %v shared %v", ok, shared)
+	}
+	if _, ok := d.Authorize("nxd_OLDFLEETTOKENX", "pi"); ok {
+		t.Fatal("a wrong shared token reports")
+	}
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('a'), Status: "done", SharedToken: true}, time.Now()))
+	ok(t, d.Record(ReportIn{Host: "nas", Commit: sha('a'), Status: "done"}, time.Now()))
+	shared := func() (out []string) {
+		ov := must[DeployOverview](t)(d.Overview(ctx, nil, time.Now()))
+		for _, m := range ov.Machines {
+			if m.SharedToken {
+				out = append(out, m.Host)
+			}
+		}
+		if ov.SharedToken != d.SharedToken() {
+			t.Errorf("overview says the shared token is accepted: %v", ov.SharedToken)
+		}
+		return out
+	}
+	if got := shared(); !slices.Equal(got, []string{"pi"}) {
+		t.Fatalf("machines on the shared token: %v", got)
+	}
+	ok(t, d.DropSharedToken())
+	if _, ok := d.Authorize("nxd_OLDFLEETTOKEN", "pi"); ok || d.SharedToken() {
+		t.Fatal("the dropped token still reports")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deploy-token")); !os.IsNotExist(err) {
+		t.Fatalf("the token file stays: %v", err)
+	}
+	if got := shared(); len(got) != 0 {
+		t.Fatalf("still marked after dropping it: %v", got)
+	}
+	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); again.SharedToken() {
+		t.Fatal("the shared token is back after reopening")
+	}
 }
 
 func TestDeploymentOverview(t *testing.T) {
@@ -103,6 +183,7 @@ func TestDeploymentOverview(t *testing.T) {
 	gitOut(t, r.Dir, "branch", "testing-stale", c1)
 
 	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	d.started = time.Time{}
 	now := time.Now()
 	at := func(ago time.Duration, host, commit, phase, status, msg string) {
 		t.Helper()
@@ -132,11 +213,16 @@ func TestDeploymentOverview(t *testing.T) {
 	if len(got) != 10 {
 		t.Fatalf("machines: %v", ov.Machines)
 	}
-	want := map[string]string{"homeserver": "current", "workstation": "behind", "oldbox": "silent", "laptop": "failed",
+	want := map[string]string{"homeserver": "current", "workstation": "behind", "oldbox": "behind", "laptop": "failed",
 		"nas": "current", "pi": "current", "stale": "current", "ghost": "unknown", "newbox": "never", "pc": "behind"}
 	for h, st := range want {
 		if got[h].State != st {
 			t.Errorf("%s: state %q, want %q (%+v)", h, got[h].State, st, got[h])
+		}
+	}
+	for h, m := range got {
+		if m.Silent != (h == "oldbox") {
+			t.Errorf("%s: silent %v", h, m.Silent)
 		}
 	}
 	if w := got["workstation"]; w.Behind != 2 || w.Commit != c1 || w.Subject != "first" || w.BehindSince.IsZero() || now.Sub(w.BehindSince) > time.Minute || w.Target != c3 {
@@ -327,5 +413,233 @@ func TestCommitsBetween(t *testing.T) {
 	}
 	if _, _, err := r.CommitsBetween(ctx, sha('e'), c3); err == nil {
 		t.Fatal("an unknown commit was counted")
+	}
+}
+
+// storePath is a valid store path for a system.
+func storePath(c byte, name string) string {
+	return "/nix/store/" + strings.Repeat(string(c), 32) + "-nixos-system-" + name
+}
+
+// Heartbeats keep what a machine runs and when it last reported, without
+// filling its deployment history; every report kind updates them.
+func TestHeartbeatsAndSystemSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
+	now := time.Now().UTC().Truncate(time.Second)
+	beat := ReportIn{Host: "pi", Phase: "heartbeat", Current: storePath('a', "pi"), Booted: storePath('b', "pi"), Profile: storePath('a', "pi"), Reboot: true, SilentAfter: 2}
+	for name, in := range map[string]ReportIn{
+		"commit":       {Host: "pi", Phase: "heartbeat", Commit: sha('a')},
+		"status":       {Host: "pi", Phase: "heartbeat", Status: "done"},
+		"store path":   {Host: "pi", Phase: "heartbeat", Current: "/etc/passwd"},
+		"short hash":   {Host: "pi", Phase: "heartbeat", Current: "/nix/store/abc-nixos-system-pi"},
+		"booted":       {Host: "pi", Phase: "heartbeat", Current: storePath('a', "pi"), Booted: "/nix/store/" + strings.Repeat("e", 32) + "-x"},
+		"profile":      {Host: "pi", Phase: "heartbeat", Profile: storePath('a', "pi") + "\n"},
+		"negative":     {Host: "pi", Phase: "heartbeat", SilentAfter: -1},
+		"a year":       {Host: "pi", Phase: "heartbeat", SilentAfter: 24*366 + 1},
+		"deploy paths": {Host: "pi", Commit: sha('a'), Status: "done", Current: "relative"},
+	} {
+		if err := d.Record(in, now); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: got %v, want ErrInvalid", name, err)
+		}
+	}
+	ok(t, d.Record(beat, now.Add(-time.Hour)))
+	if len(d.reports) != 0 {
+		t.Fatalf("a heartbeat became a deployment report: %v", d.reports)
+	}
+	l := d.live["pi"]
+	if !l.Seen.Equal(now.Add(-time.Hour)) || !l.Beat.Equal(l.Seen) || l.SilentAfter != 2 || l.System == nil || l.System.Current != beat.Current || !l.System.Reboot || l.System.Booted != beat.Booted {
+		t.Fatalf("after a heartbeat: %+v %+v", l, l.System)
+	}
+	// A deployment report moves the snapshot and the last report, not the heartbeat.
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('c'), Status: "done", Current: storePath('c', "pi"), Profile: storePath('c', "pi")}, now))
+	l = d.live["pi"]
+	if !l.Seen.Equal(now) || !l.Beat.Equal(now.Add(-time.Hour)) || l.System.Current != storePath('c', "pi") || l.System.Reboot || !l.System.At.Equal(now) {
+		t.Fatalf("after a deployment: %+v %+v", l, l.System)
+	}
+	// An older report script sends no system: the last snapshot stays.
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('c'), Phase: "build", Status: "already built", SharedToken: true}, now.Add(time.Minute)))
+	if l = d.live["pi"]; l.System.Current != storePath('c', "pi") || !l.SharedToken {
+		t.Fatalf("after a report without a system: %+v", l)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "heartbeats.json")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("heartbeats.json: %v %v", fi, err)
+	}
+	again := must[*Deployments](t)(OpenDeployments(dir, d.repo))
+	if g := again.live["pi"]; !g.Beat.Equal(l.Beat) || g.System == nil || g.System.Current != l.System.Current || len(again.reports["pi"]) != 2 {
+		t.Fatalf("after reopening: %+v", g)
+	}
+	// Machines that only send heartbeats count towards the cap too.
+	for i := range maxReporters - 1 {
+		ok(t, d.Record(ReportIn{Host: fmt.Sprintf("m%d", i), Phase: "heartbeat"}, now))
+	}
+	isErr(t, d.Record(ReportIn{Host: "onemore", Phase: "heartbeat"}, now), ErrInvalid)
+	ok(t, d.Forget("m0"))
+	ok(t, d.Record(ReportIn{Host: "onemore", Phase: "heartbeat"}, now))
+	isErr(t, d.Forget("nobody"), ErrNotFound)
+}
+
+// A machine that sends heartbeats is flagged as silent once it has not reported
+// for longer than it allows, whatever its deployment state. One that only
+// reports deployments keeps the old rule: behind and quiet for 7 days.
+func TestSilentMachines(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	write(t, r, "flake.nix", "2\n")
+	c2 := commitAll(t, r, "second")
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	d.started = time.Time{} // up for long: no warm-up
+	now := time.Now()
+	rec := func(ago time.Duration, in ReportIn) {
+		t.Helper()
+		ok(t, d.Record(in, now.Add(-ago)))
+	}
+	deploy := func(host, commit string) ReportIn { return ReportIn{Host: host, Commit: commit, Status: "done"} }
+	beat := func(host string, hours int) ReportIn {
+		return ReportIn{Host: host, Phase: "heartbeat", SilentAfter: hours}
+	}
+	rec(3*time.Hour, deploy("server", c2))
+	rec(3*time.Hour, beat("server", 2))
+	rec(5*time.Hour, ReportIn{Host: "broken", Commit: c2, Status: "failed", Error: "boom"})
+	rec(5*time.Hour, beat("broken", 2))
+	rec(30*24*time.Hour, deploy("laptop", c1))
+	rec(30*24*time.Hour, beat("laptop", 0)) // often off: never flagged
+	rec(10*time.Minute, deploy("fresh", c2))
+	rec(10*time.Minute, beat("fresh", 2))
+	rec(10*24*time.Hour, deploy("legacy-current", c2))
+	rec(10*24*time.Hour, deploy("legacy-behind", c1))
+	rec(time.Minute, beat("newbox", 2)) // set up, nothing deployed since
+
+	got := func() map[string]MachineDeployment {
+		out := map[string]MachineDeployment{}
+		for _, m := range must[DeployOverview](t)(d.Overview(ctx, nil, now)).Machines {
+			out[m.Host] = m
+		}
+		return out
+	}
+	ms := got()
+	for h, want := range map[string]struct {
+		state      string
+		silent     bool
+		after      int
+		heartbeats bool
+	}{
+		"server": {"current", true, 2, true}, "broken": {"failed", true, 2, true}, "laptop": {"behind", false, 0, true},
+		"fresh": {"current", false, 2, true}, "legacy-current": {"current", false, 168, false},
+		"legacy-behind": {"behind", true, 168, false}, "newbox": {"never", false, 2, true},
+	} {
+		m := ms[h]
+		if m.State != want.state || m.Silent != want.silent || m.SilentAfter != want.after || m.Heartbeats != want.heartbeats {
+			t.Errorf("%s: %s silent=%v after=%d heartbeats=%v, want %+v", h, m.State, m.Silent, m.SilentAfter, m.Heartbeats, want)
+		}
+	}
+	if n := ms["newbox"]; n.LastSeen.IsZero() || n.Commit != "" {
+		t.Errorf("newbox: %+v", n)
+	}
+	if s := ms["server"]; !s.LastSeen.Equal(now.Add(-3 * time.Hour).UTC().Truncate(time.Second)) {
+		t.Errorf("server last seen %v", s.LastSeen)
+	}
+
+	// Just after a start, machines have not had the time to report again: none is silent.
+	d.started = now.Add(-5 * time.Minute)
+	for h, m := range got() {
+		if m.Silent {
+			t.Errorf("%s is silent during the warm-up", h)
+		}
+	}
+}
+
+// fakeSystems answers what each machine builds at a commit, and records what was asked.
+type fakeSystems struct {
+	paths map[string]string // commit/host -> path; absent: not evaluated yet
+	asked map[string][]string
+}
+
+func (f *fakeSystems) ExpectedSystems(commit string, hosts []string) map[string]SystemEval {
+	f.asked[commit] = append(f.asked[commit], hosts...)
+	out := map[string]SystemEval{}
+	for _, h := range hosts {
+		if p, ok := f.paths[systemKey(commit, h)]; ok {
+			out[h] = SystemEval{Path: p}
+		}
+	}
+	return out
+}
+
+// What a machine says it runs is compared with what its deployed commit
+// builds: the same, a system no deployment made (manual), or a deployment
+// that did not finish switching (unfinished). No verdict while comin
+// switches, before the deployed commit is evaluated, or from a snapshot
+// older than the deployment.
+func TestDrift(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	write(t, r, "flake.nix", "2\n")
+	c2 := commitAll(t, r, "second")
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	src := &fakeSystems{paths: map[string]string{}, asked: map[string][]string{}}
+	d.Systems = src
+	hosts := []string{"same", "manual", "boot", "partway", "switching", "stale", "pending", "elsewhere", "old"}
+	e := func(c, h string) string { return storePath(map[bool]byte{true: '1', false: '2'}[c == c1], h) } // what h builds at c
+	for _, h := range hosts {
+		for _, c := range []string{c1, c2} {
+			if h != "pending" {
+				src.paths[systemKey(c, h)] = e(c, h)
+			}
+		}
+	}
+	other := storePath('x', "by-hand")
+	now := time.Now()
+	rec := func(ago time.Duration, in ReportIn) {
+		t.Helper()
+		ok(t, d.Record(in, now.Add(-ago)))
+	}
+	deploy := func(h, c, current, profile string) ReportIn {
+		return ReportIn{Host: h, Commit: c, Status: "done", Current: current, Profile: profile}
+	}
+	rec(time.Hour, deploy("same", c2, e(c2, "same"), e(c2, "same")))
+	rec(time.Minute, ReportIn{Host: "same", Phase: "heartbeat", Current: e(c2, "same"), Reboot: true})
+	rec(time.Hour, deploy("manual", c2, e(c2, "manual"), e(c2, "manual")))
+	rec(time.Minute, ReportIn{Host: "manual", Phase: "heartbeat", Current: other, Profile: other}) // nixos-rebuild switch by hand
+	rec(time.Hour, deploy("boot", c2, e(c1, "boot"), e(c2, "boot")))                               // installed, not running
+	rec(2*time.Hour, deploy("partway", c1, e(c1, "partway"), e(c1, "partway")))
+	rec(time.Hour, ReportIn{Host: "partway", Commit: c2, Status: "failed", Error: "unit failed", Current: e(c2, "partway"), Profile: e(c2, "partway")})
+	rec(2*time.Hour, deploy("switching", c1, e(c1, "switching"), e(c1, "switching")))
+	rec(10*time.Minute, ReportIn{Host: "switching", Commit: c2, Phase: "build", Status: "built"})
+	rec(5*time.Minute, ReportIn{Host: "switching", Phase: "heartbeat", Current: e(c2, "switching")}) // switched, not reported yet
+	rec(2*time.Hour, ReportIn{Host: "stale", Phase: "heartbeat", Current: other})
+	rec(time.Hour, ReportIn{Host: "stale", Commit: c2, Status: "done"}) // an older script: no system with the deployment
+	rec(time.Hour, deploy("pending", c2, other, other))
+	rec(time.Hour, deploy("elsewhere", sha('e'), other, other)) // a commit this working copy does not have
+	rec(time.Hour, ReportIn{Host: "old", Commit: c2, Status: "done"})
+
+	ov := must[DeployOverview](t)(d.Overview(ctx, nil, now))
+	got := map[string]MachineDeployment{}
+	for _, m := range ov.Machines {
+		got[m.Host] = m
+	}
+	for h, want := range map[string][2]string{
+		"same": {"", e(c2, "same")}, "manual": {"manual", e(c2, "manual")}, "boot": {"unfinished", e(c2, "boot")},
+		"partway": {"unfinished", e(c1, "partway")}, "switching": {"", ""}, "stale": {"", ""}, "pending": {"", ""},
+		"elsewhere": {"", ""}, "old": {"", ""},
+	} {
+		if m := got[h]; m.Drift != want[0] || m.Expected != want[1] {
+			t.Errorf("%s: drift %q expected %q, want %v", h, m.Drift, m.Expected, want)
+		}
+	}
+	if s := got["same"].System; s == nil || !s.Reboot {
+		t.Errorf("same: a pending reboot is not passed on: %+v", s)
+	}
+	slices.Sort(src.asked[c1])
+	slices.Sort(src.asked[c2])
+	if !slices.Equal(src.asked[c1], []string{"partway"}) || !slices.Equal(src.asked[c2], []string{"boot", "manual", "partway", "pending", "same"}) {
+		t.Errorf("asked for %v", src.asked)
+	}
+	if _, ok := src.asked[sha('e')]; ok {
+		t.Error("asked to evaluate a commit the working copy does not have")
 	}
 }

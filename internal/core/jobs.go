@@ -28,10 +28,11 @@ const (
 	keepChecks   = 1000 // passed trees remembered; the oldest are forgotten first
 )
 
-// Jobs runs Nix commands in two lanes, each one job at a time in submission
-// order: checks, which build machines and can take long, and everything else
-// (the fleet model, search indexes, option values, lock and update), so the
-// fleet views never wait for a check. It keeps the jobs' output for the UI and
+// Jobs runs Nix commands in three lanes, each one job at a time in submission
+// order: checks, which build machines and can take long; the systems deployed
+// machines should run, for Deployments; and everything else (the fleet model,
+// search indexes, option values, lock and update), so the fleet views never
+// wait for either. It keeps the jobs' output for the UI and
 // MCP, and remembers which staged trees passed a check, in checks.json once
 // PersistChecks has named it.
 type Jobs struct {
@@ -52,8 +53,11 @@ type Jobs struct {
 	passed      map[string]CheckPass // by tree
 	passedOrder []string             // the passed trees, oldest first
 	checksPath  string               // "" keeps them in memory only
-	queue       chan *Job            // every kind but check
+	queue       chan *Job            // every kind but check and system
 	checkQueue  chan *Job
+	systemQueue chan *Job
+	systems     map[string]SystemEval // by commit/host
+	systemOrder []string
 	models      map[string]*Model // by git tree
 	retry       *Model            // replaced by Evaluate again: the next evaluation of its tree keeps what evaluated
 	modelOrder  []string
@@ -64,9 +68,10 @@ type Jobs struct {
 
 func newJobs(repo *Repo) *Jobs {
 	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", EvalJobs: min(2, runtime.NumCPU()), passed: map[string]CheckPass{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{},
-		queue: make(chan *Job, queueLength), checkQueue: make(chan *Job, queueLength)}
+		queue: make(chan *Job, queueLength), checkQueue: make(chan *Job, queueLength), systemQueue: make(chan *Job, queueLength), systems: map[string]SystemEval{}}
 	go j.worker(j.queue)
 	go j.worker(j.checkQueue)
+	go j.worker(j.systemQueue)
 	return j
 }
 
@@ -225,8 +230,11 @@ func (js *Jobs) enqueue(req JobRequest, tree, key string) (*Job, error) {
 	job := newJob(fmt.Sprintf("j%d", js.nextID), req)
 	job.tree, job.key = tree, key
 	lane := js.queue
-	if req.Kind == "check" {
+	switch req.Kind {
+	case "check":
 		lane = js.checkQueue
+	case "system":
+		lane = js.systemQueue
 	}
 	select {
 	case lane <- job:
@@ -382,6 +390,8 @@ func (js *Jobs) run(job *Job) error {
 		return js.runIndex(ctx, job)
 	case "values":
 		return js.runValues(ctx, job)
+	case "system":
+		return js.runSystems(ctx, job)
 	}
 	var dir string
 	var steps [][]string

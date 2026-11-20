@@ -145,22 +145,53 @@ func TestReleaseInsights(t *testing.T) {
 	if got := byID(fleet("26.05", "26.05", ""), now); len(got) != 0 {
 		t.Errorf("one supported release (and an unknown one) is healthy: %v", got)
 	}
+
+	// Inputs that follow a release branch whose support ended, unless the
+	// machines' own release already says it.
+	m := fleet("26.05", "25.05")
+	m.Inputs = []Input{
+		{Name: "nixpkgs", URL: "github:NixOS/nixpkgs/nixos-25.05", LastModified: now.Unix()},
+		{Name: "home-manager", URL: "github:nix-community/home-manager/release-24.11", LastModified: now.Unix()},
+		{Name: "stable", URL: "git+https://git.example/nixpkgs?ref=nixos-26.05-small", LastModified: now.Unix()}, // supported
+		{Name: "darwin", URL: "github:NixOS/nixpkgs/nixpkgs-24.05-darwin", LastModified: now.Unix()},
+		{Name: "unstable", URL: "github:NixOS/nixpkgs/nixos-unstable", LastModified: now.Unix()},
+		{Name: "pinned", URL: "github:owner/repo/release-29.05", LastModified: now.Unix()},
+	}
+	got = byID(m, now)
+	if in := got["input-eol:home-manager"]; in.Severity != "warning" || in.Title != "home-manager follows release-24.11, which no longer gets updates" || len(in.Hosts) != 0 {
+		t.Errorf("home-manager: %+v", in)
+	}
+	if in := got["input-eol:darwin"]; in.Title != "darwin follows nixpkgs-24.05-darwin, which no longer gets updates" {
+		t.Errorf("darwin: %+v", in)
+	}
+	for _, id := range []string{"input-eol:nixpkgs", "input-eol:stable", "input-eol:unstable", "input-eol:pinned"} {
+		if in, ok := got[id]; ok {
+			t.Errorf("%s: %+v", id, in)
+		}
+	}
 }
 
 func TestDeployInsights(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
-	m := &Model{Hosts: []Host{{Name: "web"}, {Name: "pi"}, {Name: "nas"}, {Name: "new"}, {Name: "off"}, {Name: "fresh"}}}
+	m := &Model{Hosts: []Host{{Name: "web"}, {Name: "pi"}, {Name: "nas"}, {Name: "new"}, {Name: "off"}, {Name: "fresh"}, {Name: "quiet"}, {Name: "old"}, {Name: "box"}}}
 	rep := []DeployReport{{At: now}}
 	deploys := []MachineDeployment{
-		{Host: "web", State: "current", Reports: rep},
-		{Host: "pi", State: "failed", Commit: strings.Repeat("a", 40), Reports: rep,
+		{Host: "web", State: "current", Reports: rep, Heartbeats: true},
+		{Host: "pi", State: "failed", Commit: strings.Repeat("a", 40), Reports: rep, Heartbeats: true,
 			Failure: &DeployReport{Commit: strings.Repeat("b", 40), Phase: "build", Status: "failed", Error: "error: attribute 'foo' missing"}},
-		{Host: "nas", State: "behind", Behind: 2, BehindSince: now.Add(-2 * time.Hour), Reports: rep},
-		{Host: "fresh", State: "behind", Behind: 1, BehindSince: now.Add(-10 * time.Minute), Reports: rep},
+		{Host: "nas", State: "behind", Behind: 2, BehindSince: now.Add(-2 * time.Hour), Reports: rep, Heartbeats: true},
+		{Host: "fresh", State: "behind", Behind: 1, BehindSince: now.Add(-10 * time.Minute), Reports: rep, Heartbeats: true},
 		{Host: "new", State: "never", Reports: []DeployReport{}},
-		{Host: "off", State: "silent", Reports: rep},
-		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep}, // not in the fleet
+		// Behind because it is off: silent says it, behind would only repeat it.
+		{Host: "off", State: "behind", Behind: 3, BehindSince: now.Add(-9 * time.Hour), Silent: true, Reports: rep, Heartbeats: true},
+		{Host: "quiet", State: "current", Silent: true, Reports: rep, Heartbeats: true},                          // up to date, but gone quiet
+		{Host: "old", State: "current", Reports: rep, SharedToken: true},                                         // an older report module: no heartbeats, the shared token
+		{Host: "box", State: "never", Reports: []DeployReport{}, LastSeen: now, Heartbeats: true},                // set up, nothing deployed since
+		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep, Drift: "manual"}, // not in the fleet
+		{Host: "hand", State: "current", Reports: rep, Heartbeats: true, Commit: strings.Repeat("c", 40), Drift: "manual", System: &SystemState{Reboot: true}},
+		{Host: "half", State: "current", Reports: rep, Heartbeats: true, Commit: strings.Repeat("c", 40), Drift: "unfinished"},
 	}
+	m.Hosts = append(m.Hosts, Host{Name: "hand"}, Host{Name: "half"})
 	got := Insights(m, deploys, "", now)
 	f := insightByID(got, "deploy-failed:pi")
 	if f.Severity != "error" || f.Link != "#/deployments" || f.Title != "pi failed to build bbbbbbb" ||
@@ -170,8 +201,23 @@ func TestDeployInsights(t *testing.T) {
 	if b := insightByID(got, "deploy-behind"); b.Severity != "warning" || strings.Join(b.Hosts, ",") != "nas" {
 		t.Errorf("deploy-behind: %+v", b)
 	}
-	if s := insightByID(got, "deploy-silent"); s.Severity != "info" || strings.Join(s.Hosts, ",") != "off" {
+	if s := insightByID(got, "deploy-silent"); s.Severity != "warning" || strings.Join(s.Hosts, ",") != "off,quiet" || s.Title != "off and quiet have stopped reporting" {
 		t.Errorf("deploy-silent: %+v", s)
+	}
+	if h := insightByID(got, "drift-manual"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "hand" || h.Title != "hand runs a system no deployment made" {
+		t.Errorf("drift-manual: %+v", h)
+	}
+	if h := insightByID(got, "drift-unfinished"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "half" || h.Title != "half did not finish switching" {
+		t.Errorf("drift-unfinished: %+v", h)
+	}
+	if h := insightByID(got, "reboot-pending"); h.Severity != "info" || strings.Join(h.Hosts, ",") != "hand" || h.Title != "hand needs a reboot" {
+		t.Errorf("reboot-pending: %+v", h)
+	}
+	if h := insightByID(got, "deploy-shared-token"); h.Severity != "warning" || strings.Join(h.Hosts, ",") != "old" || h.Title != "old reports with the shared token" {
+		t.Errorf("deploy-shared-token: %+v", h)
+	}
+	if h := insightByID(got, "deploy-no-heartbeat"); h.Severity != "info" || strings.Join(h.Hosts, ",") != "old" || h.Title != "old sends no heartbeats" {
+		t.Errorf("deploy-no-heartbeat: %+v", h)
 	}
 	if n := insightByID(got, "deploy-never"); n.Severity != "info" || strings.Join(n.Hosts, ",") != "new" || n.Title != "new has never reported a deployment" {
 		t.Errorf("deploy-never: %+v", n)

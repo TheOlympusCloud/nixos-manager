@@ -128,7 +128,8 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
      4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
      holds a few nixpkgs revisions and the machines' systems the checks build.
      More cores make checks faster. The fleet views evaluate two machines at once (about 1 GB
-     each), and a check can run next to them. On a tight container set
+     each), and a check can run next to them, as can one evaluation of what a
+     newly deployed machine should run (Deployments). On a tight container set
      `services.nixos-manager.extraEnvironment.NIXMGR_EVAL_JOBS = "1";`, or
      raise it when memory is to spare.
 
@@ -434,8 +435,34 @@ one): its `branches.main.name`, or its `branches.testing.name`
 (`testing-<hostname>` by default) when that branch is on top of the main one. Per machine it shows the
 commit, when it was deployed, and comin's error when a build or switch failed;
 the machine page has the same in its **Deployment** card, and the fleet graph
-marks each machine deployed, behind or failed. **Health** flags a failed
+marks each machine deployed, behind, failed or silent. **Health** flags a failed
 deployment, a machine behind for over an hour, and one that stopped reporting.
+
+Every 15 minutes each machine also sends a heartbeat with the system it runs,
+the one it booted and the one it boots next. A machine that has not reported for
+`fleet.deployReport.silentAfter` hours (2 by default) is flagged as silent,
+whatever its deployment state: an up-to-date machine that dies no longer stays
+green. Set `silentAfter = null;` on a machine that is often off, such as a
+laptop, so it is never flagged. No machine is called silent in the first 20
+minutes after nixos-manager starts, while the machines report in again.
+
+nixos-manager also evaluates what each machine's deployed commit builds,
+the way comin does (the commit itself, `git+file://…?rev=…`, so a
+configuration that records `self.rev` matches), one machine at a time in its
+own job lane, and compares it with what the machine says it runs:
+
+- **Changed by hand**: it runs a system that neither its commit builds nor it
+  boots into from comin, after a `nixos-rebuild` on the machine or a rollback.
+  comin replaces it with the next commit that changes the machine.
+- **Switch unfinished**: comin installed the commit's system as the boot
+  default but it does not run, or a switch failed partway and left the failed
+  commit's system running.
+- **Reboot pending**: the running kernel, its modules or the initrd are not the
+  booted ones.
+
+There is no verdict while comin switches to a new build, or before the commit
+is evaluated; the result of each commit is kept until nixos-manager restarts,
+and a failed evaluation is tried again after an hour.
 
 To turn it on (the **Deployments** view walks you through it):
 
@@ -449,34 +476,94 @@ To turn it on (the **Deployments** view walks you through it):
    Over plain HTTP the token crosses the LAN readable; a Tailscale address or
    an `https://` one keeps it private.
 
-2. Put the fleet report token on each machine. The view shows the token and the
+2. Put each machine's own report token on it. The view shows the token and the
    command for each machine; the token travels on stdin:
 
    ```sh
-   echo 'nxd_…' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'
+   echo 'nxh_…' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'
    ```
 
+   A token only reports for its own machine: nixos-manager refuses a report
+   whose machine name is not the one the token was made for, so a machine (or
+   whoever reads its token) cannot pass for another. The tokens are derived
+   from a key in `$NIXMGR_DATA/report-key`, so nothing lists them.
    With sops-nix or agenix, point `fleet.deployReport.tokenFile` at the secret
-   instead. Never commit the token. **Regenerate** replaces it; machines with
-   the old one stop reporting until they get the new one.
+   instead. Never commit a token. **New tokens for every machine** replaces the
+   key; machines with an old token stop reporting until they get the new one.
 
-3. The first report arrives with the next deployment after both are in place.
+3. The first report arrives with the next deployment after both are in place,
+   and the first heartbeat a few minutes after the deployment that installs
+   the timer.
+
+**Upgrading from one fleet token.** Installs from before machine tokens kept a
+single token for every machine in `$NIXMGR_DATA/deploy-token`. This release
+still accepts it, and marks the machines that report with it in **Deployments**
+and **Health**. Install each machine's own token in its token file (the same
+file, step 2), wait for its next report, and when no machine is listed any
+more, click **Stop accepting the shared token** in the setup, which deletes the
+file. The next release no longer accepts it.
 
 `modules/report-deployments.nix` hooks comin's `postDeploymentCommand` and, on
 comin versions that have it, `postBuildCommand`, which also reports failed
 builds and commits that leave a machine unchanged. Without it, a machine whose
 configuration a commit does not change looks behind until a commit does change
-it. The hook posts with `curl` to `/api/deployments/report`, does nothing
-without the token file, and never fails a deployment. nixos-manager keeps the
-last 20 reports per machine in `$NIXMGR_DATA/deployments.json`; the token is in
-`$NIXMGR_DATA/deploy-token`. The reports of a machine that is no longer in the
+it. A systemd timer, `nixos-manager-heartbeat.timer`, sends the heartbeat. The
+hook posts with `curl` to `/api/deployments/report`, does nothing without the
+token file, and never fails a deployment. Reports that cannot be delivered
+(nixos-manager is down, say) wait in order in
+`/var/lib/nixos-manager-report/pending.jsonl` (the newest 20), and the next
+heartbeat or comin report sends them first. A report sent late is dated when
+it arrives, so **Deployed** can be later than the switch itself.
+nixos-manager keeps the last 20 reports per machine in
+`$NIXMGR_DATA/deployments.json`, and what each machine's latest report or
+heartbeat said in `$NIXMGR_DATA/heartbeats.json`. The reports of a machine that is no longer in the
 flake are deleted once the working copy is exactly the tip of the branch comin
 deploys, if the machine last reported a commit of that branch, deployed from
 it. A machine deleted but not pushed, or one that comin deploys from another
 branch, keeps them. **Forget** on a machine's row deletes its reports by hand; it comes
 back if it reports again. A repository made from an older starter fleet has
-no hook yet: copy both `report-deployment*` files from `templates/fleet/modules/`
-into its `modules/` and import `report-deployments.nix` from `common.nix`.
+no hook, or one without heartbeats (Health lists the machines that send none):
+copy both `report-deployment*` files from `templates/fleet/modules/` into its
+`modules/` and import `report-deployments.nix` from `common.nix`. Until then such
+a machine is only flagged as silent when it is behind and has not reported for
+7 days.
+
+## Notifications
+
+**Settings → Notifications** sends a message when:
+
+- a machine fails to build or deploy a commit (once per machine and commit);
+- a machine has been behind its branch for over an hour (and is not silent);
+- a machine stops reporting (see `silentAfter` above);
+- the commit the fleet's branch points at does not evaluate, as a whole or for
+  a machine, so comin cannot deploy it (told only after a second evaluation
+  fails too, so a network hiccup does not page you);
+- a NixOS release the machines run reaches, or is a month from, its end of
+  life, or a flake input follows a release branch whose support ended.
+
+Channels, any or all of them:
+
+- **ntfy**: the topic's address (`https://ntfy.sh/<topic>` or a server of your
+  own) and, for a protected topic, an access token. On ntfy.sh anyone who
+  knows the topic can read it, so pick a name nobody guesses.
+- **Webhook**: a JSON `POST` with `key`, `kind` (`deploy-failed`,
+  `deploy-stuck`, `host-silent`, `eval-failed`, `eol`, `test`), `severity`,
+  `title`, `message`, `hosts`, `url` (a link into the console) and `at`.
+- **Email** over SMTP, with STARTTLS (587), TLS (465) or, to a local relay
+  only, none. A password is only ever sent encrypted.
+
+Each event goes once to each channel while it lasts; when it ends it is
+forgotten, so it is sent again only if it comes back. A channel only gets
+events that start after it was set up or pointed somewhere new: what is
+already wrong is in **Health**. A failed send is tried again a minute later,
+then waiting twice as long each time, up to an hour; Settings shows how the
+last send to each channel went, and **Send a test message** checks a channel
+right away. Nothing is sent in the first 20 minutes after a start, while the
+machines report in. The channels are in `$NIXMGR_DATA/notify.json`. The ntfy
+token and the SMTP password are never shown again once saved, but the ntfy
+topic and the webhook address are, to whoever is logged in: for ntfy.sh, Slack,
+Discord or Home Assistant those addresses are secrets too. What was sent is in
+`$NIXMGR_DATA/notify-state.json`, so a restart does not send it twice.
 
 ## Binary cache
 

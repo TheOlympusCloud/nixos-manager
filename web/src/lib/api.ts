@@ -291,21 +291,56 @@ export const api = {
   revokeToken: (id: string) => request<void>('DELETE', `/api/tokens/${encodeURIComponent(id)}`, {}),
 
   deployments: () => get<DeployOverview>('/api/deployments'),
-  deployToken: () => get<{ token: string }>('/api/deployments/token').then((r) => r.token),
-  regenerateDeployToken: () => post<{ token: string }>('/api/deployments/token').then((r) => r.token),
+  /** One machine's own report token. */
+  deployToken: (host: string) => get<{ token: string }>('/api/deployments/token', { host }).then((r) => r.token),
+  /** New tokens for every machine: those with an old one stop reporting until they get the new one. */
+  regenerateDeployTokens: () => post<void>('/api/deployments/token'),
+  /** Stops accepting the shared fleet token of an install from before machine tokens. */
+  dropSharedDeployToken: () => request<void>('DELETE', '/api/deployments/shared-token', {}),
+  notifications: () => get<{ settings: NotifySettings; status: ChannelStatus[] }>('/api/notifications'),
+  saveNotifications: (settings: NotifySettings) => post<{ settings: NotifySettings }>('/api/notifications', settings).then((r) => r.settings),
+  /** Sends a test message to every saved channel. */
+  testNotifications: () => post<{ status: ChannelStatus[] }>('/api/notifications/test').then((r) => r.status),
   /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
   forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
 }
+
+// ---- notifications (Settings) ----
+
+export type EmailSecurity = 'starttls' | 'tls' | 'none'
+/** Channels as saved. Secrets are write-only: read back empty with has* set; sent back empty with has* set, the saved one stays. */
+export type NotifySettings = {
+  consoleUrl?: string
+  ntfy?: { url: string; token?: string; hasToken?: boolean }
+  webhook?: { url: string }
+  email?: { host: string; port: number; security: EmailSecurity; username?: string; password?: string; hasPassword?: boolean; from: string; to: string[] }
+}
+/** How the last send to a channel went. */
+export type ChannelStatus = { channel: 'ntfy' | 'webhook' | 'email'; ok: boolean; error?: string; at: string }
 
 // ---- deployments (what comin reports from each machine) ----
 
 /** One report: comin deployed (phase deploy: done, failed) or built (phase build: built, already built, failed) a commit. */
 export type DeployReport = { at: string; commit: string; ref?: string; phase: 'deploy' | 'build'; status: string; error?: string; generation?: string }
-/** never: no report; unknown: its commit is not in the working copy or not on the branch; silent: behind with no report for 7 days. */
-export type DeployState = 'current' | 'behind' | 'failed' | 'silent' | 'unknown' | 'never'
+/** never: no deployment reported; unknown: its commit is not in the working copy or not on the branch. */
+export type DeployState = 'current' | 'behind' | 'failed' | 'unknown' | 'never'
+/** What a machine last said it runs (/run/current-system), booted, and boots next (the system profile). */
+export type SystemState = { at: string; current: string; booted?: string; profile?: string; reboot: boolean }
 export type MachineDeployment = {
   host: string
   state: DeployState
+  /** No report for more than silentAfter hours (0: never flagged), whatever the state. */
+  silent: boolean
+  silentAfter: number
+  /** It sends heartbeats (a report module from before them does not). */
+  heartbeats: boolean
+  /** Its last report used the shared fleet token, not its own. */
+  sharedToken?: boolean
+  system?: SystemState
+  /** The system its commit builds, as comin evaluates it, once the console evaluated it. */
+  expected?: string
+  /** manual: it runs a system no deployment made; unfinished: a switch stopped or failed partway. */
+  drift?: 'manual' | 'unfinished'
   /** The main branch its comin follows, or its testing branch when that is on top of it. */
   branch: string
   target?: string
@@ -320,4 +355,5 @@ export type MachineDeployment = {
   failure?: DeployReport
   reports: DeployReport[]
 }
-export type DeployOverview = { reporting: boolean; branch: string; commits: Commit[]; machines: MachineDeployment[] }
+/** sharedToken: the shared fleet token of an install from before machine tokens is still accepted. */
+export type DeployOverview = { reporting: boolean; sharedToken: boolean; branch: string; commits: Commit[]; machines: MachineDeployment[] }

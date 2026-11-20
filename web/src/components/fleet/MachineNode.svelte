@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte'
-  import { stateDetail, stateLabel, stateTone } from '../../lib/deployments'
+  import { silenceDetail, stateDetail, stateLabel, stateTone } from '../../lib/deployments'
   import { deployOf } from '../../lib/deployments.svelte'
   import type { GNode } from '../../lib/graph'
   import { graphUi } from '../../lib/graphui.svelte'
@@ -10,15 +10,16 @@
   let { id, data, sourcePosition, targetPosition }: NodeProps & { data: GNode & { kind: 'machine' } } = $props()
   const dim = $derived(!!graphUi.lit && !graphUi.lit.has(id))
   const dep = $derived(deployOf(data.host.name))
-  const depText = $derived(dep?.state === 'current' ? 'deployed' : dep ? stateLabel(dep).toLowerCase() : '')
+  const depText = $derived(dep?.silent && dep.state !== 'failed' ? 'silent' : dep?.state === 'current' ? 'deployed' : dep ? stateLabel(dep).toLowerCase() : '')
 </script>
 
 <!-- Double-click opens the machine page (from the keyboard: Enter selects, the details panel links to it). -->
 <div class="node machine" class:dim class:sel={graphUi.selected === id} class:err={!!data.host.error} role="presentation" ondblclick={() => go(machineLink(data.host.name))}>
   <Handle type="target" position={targetPosition ?? Position.Left} isConnectable={false} />
   <div class="card-slot"><MachineCard host={data.host} /></div>
-  {#if dep && ['current', 'behind', 'failed', 'silent'].includes(dep.state)}
-    <span class="dep t-{stateTone[dep.state]}" title={stateDetail(dep)}><span class="dot" aria-hidden="true"></span>{depText}</span>
+  {#if dep && (dep.silent || ['current', 'behind', 'failed'].includes(dep.state))}
+    {@const quiet = dep.silent && dep.state !== 'failed'}
+    <span class="dep t-{quiet ? 'off' : stateTone[dep.state]}" title={quiet ? silenceDetail(dep) : stateDetail(dep)}><span class="dot" aria-hidden="true"></span>{depText}</span>
   {/if}
   {#if data.chips.length}
     <!-- What only this machine runs: shared features are nodes of their own. -->

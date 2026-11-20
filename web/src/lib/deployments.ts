@@ -1,5 +1,6 @@
 // Deployments as comin reports them: wording, the rollout picture and the setup commands.
 import type { Commit, DeployOverview, DeployState, MachineDeployment } from './api'
+import { ago } from './util'
 
 export const short = (sha?: string) => (sha ?? '').slice(0, 7)
 
@@ -7,9 +8,28 @@ export const stateTone: Record<DeployState, 'ok' | 'warn' | 'err' | 'off'> = {
   current: 'ok',
   behind: 'warn',
   failed: 'err',
-  silent: 'off',
   unknown: 'off',
   never: 'off',
+}
+
+/** The tile a machine counts in: silence hides what it runs now, unless it failed. */
+export function tileOf(m: MachineDeployment): 'current' | 'behind' | 'failed' | 'silent' {
+  if (m.state === 'failed') return 'failed'
+  if (m.silent || m.state === 'unknown' || m.state === 'never') return 'silent'
+  return m.state
+}
+
+/** Failures first, then the machines that went quiet, then those that need a look, then the rest. */
+export function sortRank(m: MachineDeployment): number {
+  if (m.state === 'failed') return 0
+  if (m.silent) return 1
+  return { behind: 2, unknown: 3, never: 4, current: 5 }[m.state]
+}
+
+/** Why a silent machine is flagged, for titles and the machine page. */
+export function silenceDetail(m: MachineDeployment, now = Date.now()): string {
+  const since = ago(m.lastSeen, now).replace(/ ago$/, '')
+  return `No report for ${since}, more than the ${m.silentAfter} hours it may stay silent: it may be off, comin or its report timer may have stopped, or it cannot reach this console.`
 }
 
 export function stateLabel(m: MachineDeployment): string {
@@ -20,12 +40,10 @@ export function stateLabel(m: MachineDeployment): string {
       return `${m.behind} behind`
     case 'failed':
       return m.failure?.phase === 'build' ? 'Build failed' : 'Deploy failed'
-    case 'silent':
-      return 'Silent'
     case 'unknown':
       return 'Unknown commit'
     case 'never':
-      return 'Not reporting'
+      return m.lastSeen ? 'No deployment yet' : 'Not reporting'
   }
 }
 
@@ -39,12 +57,12 @@ export function stateDetail(m: MachineDeployment): string {
       return `${c(m.behind)} behind ${m.branch}; comin should pick ${m.behind === 1 ? 'it' : 'them'} up within minutes.`
     case 'failed':
       return m.failure?.phase === 'build' ? `comin could not build ${short(m.failure?.commit)}.` : `comin could not switch to ${short(m.failure?.commit)}.`
-    case 'silent':
-      return `${c(m.behind)} behind ${m.branch} and no report for over 7 days: probably off, or comin stopped.`
     case 'unknown':
       return `Runs ${short(m.commit)}, which is not on ${m.branch} in this working copy: pull, or it ran a branch that is gone.`
     case 'never':
-      return 'Has not reported a deployment: the report token or the address is missing there.'
+      return m.lastSeen
+        ? 'Sends heartbeats but has not reported a deployment yet: comin reports the next one.'
+        : 'Has not reported a deployment: its report token or the address is missing there.'
   }
 }
 
@@ -100,6 +118,22 @@ export function excerpt(error: string | undefined, lines = 4, chars = 360): stri
   const text = (error ?? '').trim().split('\n').slice(0, lines).join('\n')
   return text.length > chars ? text.slice(0, chars).trimEnd() + '…' : text
 }
+
+/** How what a machine runs differs from what its deployed commit builds, or "". */
+export function driftDetail(m: MachineDeployment): string {
+  switch (m.drift) {
+    case 'manual':
+      return `Runs a system that no deployment made: not what ${short(m.commit)} builds, and not what it boots into from comin. Someone ran nixos-rebuild there, or rolled back; the next commit that changes it replaces it.`
+    case 'unfinished':
+      return `Did not finish switching: what runs is not what ${short(m.commit)} builds, but comin got it there. A switch stopped or failed partway, or the new system waits for a reboot: journalctl -u comin says why.`
+    default:
+      return ''
+  }
+}
+
+/** The machines whose last report used the shared fleet token, while it is accepted. */
+export const onSharedToken = (ov: DeployOverview | null): string[] =>
+  ov?.sharedToken ? ov.machines.filter((m) => m.sharedToken).map((m) => m.host).sort() : []
 
 export const TOKEN_FILE = '/var/lib/nixos-manager-report/token'
 

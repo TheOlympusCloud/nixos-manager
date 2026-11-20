@@ -3,8 +3,8 @@
   import DeployBadge from '../components/deployments/DeployBadge.svelte'
   import DeploySetup from '../components/deployments/DeploySetup.svelte'
   import Rollout from '../components/deployments/Rollout.svelte'
-  import { api, type DeployState, type MachineDeployment } from '../lib/api'
-  import { excerpt, forgetQuestion, rollingOut, short } from '../lib/deployments'
+  import { api, type MachineDeployment } from '../lib/api'
+  import { excerpt, forgetQuestion, rollingOut, short, sortRank, tileOf } from '../lib/deployments'
   import { deploys, loadDeployments, watchDeployments } from '../lib/deployments.svelte'
   import { link, machineLink } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
@@ -22,16 +22,14 @@
 
   const ov = $derived(deploys.overview)
   const live = $derived(rollingOut(ov))
-  const count = (...s: DeployState[]) => ov?.machines.filter((m) => s.includes(m.state)).length ?? 0
+  const count = (tile: ReturnType<typeof tileOf>) => ov?.machines.filter((m) => tileOf(m) === tile).length ?? 0
   const tiles = $derived([
     { label: 'Up to date', value: count('current'), tone: 'ok', note: `on the last commit of their branch` },
     { label: 'Behind', value: count('behind'), tone: 'warn', note: live ? 'catching up now' : 'an older commit' },
     { label: 'Failed', value: count('failed'), tone: 'err', note: 'the last deployment failed' },
-    { label: 'Silent or unknown', value: count('silent', 'unknown', 'never'), tone: 'off', note: 'no recent report, or none' },
+    { label: 'Silent or unknown', value: count('silent'), tone: 'off', note: 'no recent report, or none' },
   ])
-  // Failures first, then the machines that need a look, then the rest.
-  const order: Record<DeployState, number> = { failed: 0, behind: 1, unknown: 2, silent: 3, never: 4, current: 5 }
-  const rows = $derived([...(ov?.machines ?? [])].sort((a, b) => order[a.state] - order[b.state] || a.host.localeCompare(b.host)))
+  const rows = $derived([...(ov?.machines ?? [])].sort((a, b) => sortRank(a) - sortRank(b) || a.host.localeCompare(b.host)))
   let refreshing = $state(false)
   async function refresh() {
     refreshing = true
@@ -114,7 +112,7 @@
                   <td class="mono branch">{m.branch}</td>
                   <td class="when muted">{m.lastSeen ? ago(m.lastSeen) : 'never'}</td>
                   <td class="act">
-                    {#if m.reports.length}
+                    {#if m.reports.length || m.lastSeen}
                       <button class="small forget" onclick={() => forget(m)} aria-label="Forget {m.host}" title="Delete its deployment reports, e.g. once it left the fleet">Forget</button>
                     {/if}
                   </td>
