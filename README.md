@@ -270,6 +270,10 @@ like every other machine:
 
 The alternative, on any host with Docker. The image carries its own Nix.
 
+> **Upgrading from an image that ran as root?** With Compose, nothing to do.
+> With plain `docker run`, give the volume to the new user once first; the
+> command is below.
+
 1. Pick a login password and store its hash:
 
    ```sh
@@ -280,6 +284,20 @@ The alternative, on any host with Docker. The image carries its own Nix.
 2. Edit `compose.yaml`: set `NIXMGR_AUTHOR_NAME` and `NIXMGR_AUTHOR_EMAIL` (the
    identity of every commit).
 3. `docker compose up -d --build`, then open `http://<server>:8080`.
+
+The server and its Nix run as the unprivileged `nixos-manager` user (uid and gid
+10001), and nothing in its container runs as root. Before each start, Compose runs
+`data-owner`, a one-shot container of its own that gives the data volume to that
+user: volumes of earlier images, which ran as root, are root-owned. Without
+Compose, a new volume needs nothing; give an earlier image's volume to the user
+once with `docker run --rm --user root --entrypoint chown -v <volume>:/var/lib/nixos-manager
+<image> -R -h nixos-manager:nixos-manager /var/lib/nixos-manager`.
+
+Files you mount must be readable by uid 10001: the password hash, and a key in
+`~/.ssh`. An SSH `config` there must also belong to root or to uid 10001, or ssh
+refuses it. The user owns the container's Nix store, so it can replace any program
+in it: never run commands in the server's container as root
+(`docker compose exec` runs them as the user).
 
 Either way, without a remote the app starts a new repository with a starter
 flake (an example host, a home-manager user and comin). Run **Lock** once to
@@ -327,8 +345,9 @@ another host, port or http under **Web address** if Forgejo's web UI is elsewher
 
 Other setups keep working:
 
-- A key you mount at `~/.ssh` (`/root/.ssh` in the container, see
-  `compose.yaml`) is used as before, until you choose **Create a deploy key** in
+- A key you mount at `~/.ssh` (`/home/nixos-manager/.ssh` in the container,
+  see `compose.yaml`; it was `/root/.ssh` before the image ran as its own user)
+  is used as before, until you choose **Create a deploy key** in
   Settings. A `GIT_SSH_COMMAND` in the environment always wins.
 - HTTPS: put `https://<user>:<token>@forgejo.lan` in a git credentials file,
   mount it, and add `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=credential.helper`,
@@ -528,6 +547,13 @@ go test -race ./...
 go build ./cmd/nixos-manager
 ```
 
+CI (`.github/workflows/ci.yml`) runs all of this on every branch push and
+nightly on `main`: Go, web, the stubbed end-to-end run and ShellCheck, the tests
+and the end-to-end run below with real Nix, and `scripts/docker-smoke.sh`, which
+builds the Docker image and checks that it runs as its own user (an earlier
+image's volume included) with real Nix inside. When a Nix or Docker step fails,
+the end of its output is repeated as an annotation on the run's page.
+
 `scripts/e2e.sh` runs the real server against a fresh flake and a bare git
 remote: login, lock, check, commit gate, commit, push, edit, history and
 restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
@@ -535,7 +561,8 @@ restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking
 win without dropping the hand-written users and SSH settings around them, the
-deployment reporter wires into comin, new LXC and VM machines evaluate, and
+deployment reporter wires into comin, new LXC and VM machines evaluate, a
+standalone home-manager configuration shows its packages and programs, and
 the flake builds the package and passes `nix flake check`.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers

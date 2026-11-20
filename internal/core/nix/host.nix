@@ -71,7 +71,8 @@ let
   ];
 
   hm = if config ? home-manager then try (config.home-manager.users or { }) { } else { };
-  enabledPrograms = ps: builtins.attrNames (lib.filterAttrs (_: p: builtins.isAttrs p && try (p.enable or false) false == true) ps);
+  # Inside try as a whole: reading a removed option (programs.octant) throws.
+  enabledPrograms = ps: builtins.attrNames (lib.filterAttrs (_: p: try (builtins.isAttrs p && (p.enable or false) == true) false) ps);
   users = lib.mapAttrsToList (n: u: {
     name = n;
     description = u.description or "";

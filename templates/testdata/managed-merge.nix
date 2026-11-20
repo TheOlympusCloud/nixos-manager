@@ -19,7 +19,10 @@ let
       (import ../fleet/modules/managed.nix managed)
       {
         boot.loader.grub.enable = false;
-        fileSystems."/".device = "nodev";
+        fileSystems."/" = {
+          device = "nodev";
+          fsType = "tmpfs";
+        };
         system.stateVersion = "26.05";
         users.users.pablo = {
           isNormalUser = true;
