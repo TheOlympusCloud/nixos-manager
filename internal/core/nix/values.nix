@@ -1,11 +1,12 @@
-# nixmgr:values - the effective value of some options on one machine (NIXMGR_HOST),
-# for the option paths in NIXMGR_PATHS (a JSON list of lists), keyed by their JSON.
+# nixmgr:values - the effective value of some options on one machine (host),
+# for the option paths in pathsJSON (a JSON list of lists), keyed by their JSON.
+{ flakeRef, host, pathsJSON }:
 let
-  flake = builtins.getFlake (builtins.getEnv "NIXMGR_FLAKE");
-  machine = flake.nixosConfigurations.${builtins.getEnv "NIXMGR_HOST"};
+  flake = builtins.getFlake flakeRef;
+  machine = flake.nixosConfigurations.${host};
   inherit (machine) config options;
   lib = machine.pkgs.lib;
-  paths = builtins.fromJSON (builtins.getEnv "NIXMGR_PATHS");
+  paths = builtins.fromJSON pathsJSON;
 
   root = "${toString flake.outPath}/";
   try = v: default: let r = builtins.tryEval v; in if r.success then r.value else default;

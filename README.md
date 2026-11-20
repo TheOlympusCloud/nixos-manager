@@ -505,6 +505,13 @@ working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
 ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
 `flake.lock` is saved while they run, they write nothing: run them again.
 
+The machine views, settings and option search evaluate the flake in pure mode,
+like `nix build` and comin: fleet code cannot read the server's files or
+environment (`builtins.readFile "/var/lib/nixos-manager/sops-age-key"` fails
+with "forbidden in pure evaluation mode"), and only the inputs `flake.lock`
+pins are fetched. After adding an input to `flake.nix`, run **Lock**; until
+then the machines show "flake.lock does not pin every input".
+
 ### Try a change on one machine first
 
 comin also follows a testing branch on each machine, `testing-<hostname>`

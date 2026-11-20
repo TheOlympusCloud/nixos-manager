@@ -221,9 +221,10 @@ func countingNix(t *testing.T, s *Service) (counts string) {
 	t.Setenv("COUNTS", counts)
 	s.Jobs.Nix = script(t, "nix", `#!/bin/sh
 case "$*" in *"nixmgr:host"*)
-  run="$COUNTS.run.$NIXMGR_HOST"
+  host=$(printf '%s\n' "$*" | sed -n 's/.* host = "\([^"]*\)";.*/\1/p')
+  run="$COUNTS.run.$host"
   touch "$run"; sleep 0.2
-  echo "$NIXMGR_HOST $(ls "$COUNTS".run.* | wc -l)" >> "$COUNTS"
+  echo "$host $(ls "$COUNTS".run.* | wc -l)" >> "$COUNTS"
   sleep 0.2; rm "$run" ;;
 esac
 exec `+s.Jobs.Nix+` "$@"
@@ -334,6 +335,109 @@ func TestCappedOutput(t *testing.T) {
 	}
 }
 
+func TestNixString(t *testing.T) {
+	for in, want := range map[string]string{
+		"pi":           `"pi"`,
+		`a"b\c`:        `"a\"b\\c"`,
+		"${x} $y\n''z": `"\${x} \$y` + "\n" + `''z"`,
+	} {
+		if got := nixString(in); got != want {
+			t.Errorf("nixString(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+// Fleet code is evaluated in pure mode: the flake is pinned by its NAR hash and
+// the arguments are in the expression, never --impure or the environment.
+func TestEvalIsPure(t *testing.T) {
+	ctx := context.Background()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("NIXMGR_CALLS", calls)
+	js := &Jobs{Nix: script(t, "nix", `#!/bin/sh
+printf '%s\n' "$*" >> "$NIXMGR_CALLS"
+case "$*" in *" hash path /src") echo sha256-a+b/c=; exit 0 ;; esac
+case "$*" in *"unlocked"*) echo "error: cannot update unlocked flake input 'nixpkgs' in pure mode" >&2; exit 1 ;; esac
+echo '{"ok":true}'
+`)}
+	var out struct{ OK bool }
+	ok(t, js.evalJSON(ctx, "/src", map[string]string{"host": "pi", "pathsJSON": `[["a"]]`}, "{ flakeRef, host, pathsJSON }: { }", &out))
+	got := fileOf(t, calls)
+	want := `) { flakeRef = "path:/src?narHash=sha256-a%2Bb%2Fc%3D"; host = "pi"; pathsJSON = "[[\"a\"]]"; }` + "\n"
+	if !out.OK || strings.Contains(got, "--impure") || !strings.HasSuffix(got, want) {
+		t.Fatalf("calls:\n%s\nwant the call to end with %s", got, want)
+	}
+	if err := js.evalJSON(ctx, "/src", nil, "unlocked", &out); err == nil || !strings.Contains(err.Error(), "run Lock") {
+		t.Fatalf("an input missing from flake.lock: %v", err)
+	}
+	// No hash, no evaluation.
+	ok(t, os.Remove(calls))
+	err := js.evalJSON(ctx, "/other", nil, "{ flakeRef }: { }", &out)
+	if err == nil || !strings.Contains(err.Error(), "nix hash path") || strings.Count(fileOf(t, calls), "\n") != 1 {
+		t.Fatalf("a failed hash: %v\n%s", err, fileOf(t, calls))
+	}
+}
+
+// With real Nix: fleet code cannot read the server's files, and the arguments
+// reach the expression as they are. No network: the flake has no inputs.
+func TestEvalIsPureWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	secret := filepath.Join(t.TempDir(), "sops-age-key")
+	ok(t, os.WriteFile(secret, []byte("AGE-SECRET-KEY-1TEST"), 0o600))
+	src := t.TempDir()
+	ok(t, os.WriteFile(filepath.Join(src, "flake.nix"), []byte(`{ outputs = _: { leak = builtins.readFile `+nixString(secret)+`; }; }`), 0o644))
+	js := &Jobs{Nix: "nix"}
+	odd := `a"b\c ${d} $e` + "\n'' f"
+	var got string
+	ok(t, js.evalJSON(ctx, src, map[string]string{"s": odd}, `{ flakeRef, s }: builtins.seq (builtins.getFlake flakeRef).outPath s`, &got))
+	if got != odd {
+		t.Fatalf("the argument came back as %q", got)
+	}
+	err := js.evalJSON(ctx, src, nil, `{ flakeRef }: (builtins.getFlake flakeRef).leak`, &got)
+	if err == nil || !strings.Contains(err.Error(), "forbidden in pure eval") || strings.Contains(err.Error(), "AGE-SECRET") {
+		t.Fatalf("reading a file of the server: %v", err)
+	}
+}
+
+// With real Nix: a machine whose configuration reads the server's age key does
+// not evaluate, and the key shows nowhere in the model.
+func TestHostCannotReadServerFilesWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	secret := filepath.Join(t.TempDir(), "sops-age-key")
+	ok(t, os.WriteFile(secret, []byte("AGE-SECRET-KEY-1TEST"), 0o600))
+	s := NewService(newRepo(t))
+	if _, err := s.Repo.Seed(templates.Fleet); err != nil {
+		t.Fatal(err)
+	}
+	def := fileText(t, s.Repo, "hosts/example/default.nix")
+	write(t, s.Repo, "hosts/example/default.nix", strings.Replace(def, "system.stateVersion",
+		"users.motd = builtins.readFile "+nixString(secret)+";\n  system.stateVersion", 1))
+	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+	if info := wait40(t, lock); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
+	_, j, err := s.Jobs.Model(ctx, "working")
+	ok(t, err)
+	wait40(t, j)
+	m, _, err := s.Jobs.Model(ctx, "working")
+	ok(t, err)
+	b, _ := json.Marshal(m)
+	var example *Host
+	for i := range m.Hosts {
+		if m.Hosts[i].Name == "example" {
+			example = &m.Hosts[i]
+		}
+	}
+	if example == nil || !strings.Contains(example.Error, "forbidden in pure eval") || bytes.Contains(b, []byte("AGE-SECRET")) {
+		t.Fatalf("model: %s\n%s", b, j.Info(true).Output)
+	}
+}
+
 // A standalone home-manager configuration with real Nix. Its programs include removed
 // options, which throw when read (programs.octant): they must not hide the rest.
 func TestHomeModelWithRealNix(t *testing.T) {
@@ -369,6 +473,11 @@ func TestHomeModelWithRealNix(t *testing.T) {
     };
 }
 `)
+	// Pure evaluation fetches only the inputs flake.lock pins.
+	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+	if info := wait40(t, lock); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
 	_, j, err := s.Jobs.Model(ctx, "working")
 	ok(t, err)
 	select {

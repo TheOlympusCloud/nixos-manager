@@ -86,7 +86,7 @@ func newEnv(t *testing.T) *env {
 	svc := core.NewService(repo)
 	nix := filepath.Join(t.TempDir(), "nix")
 	// Evaluations answer a flake without machines, so a check builds nothing; the rest echoes.
-	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\necho \"nix $*\"\n"), 0o755)
+	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\" hash path \"*) echo sha256-fake; exit ;; esac\ncase \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\necho \"nix $*\"\n"), 0o755)
 	svc.Jobs.Nix = nix
 	tools := fakesops.Tools(t)
 	svc.Secrets = core.OpenSecrets(t.TempDir(), repo)

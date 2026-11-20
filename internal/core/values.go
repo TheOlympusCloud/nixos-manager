@@ -143,7 +143,7 @@ func (js *Jobs) runValues(ctx context.Context, job *Job) (err error) {
 	for _, h := range hosts {
 		fmt.Fprintf(job, "Evaluating %d option(s) on %s…\n", len(paths), h)
 		var raw map[string]HostValue
-		evalErr := js.evalJSONEnv(ctx, src, []string{"NIXMGR_HOST=" + h, "NIXMGR_PATHS=" + string(pathsJSON)}, nixExpr("values.nix"), &raw)
+		evalErr := js.evalJSON(ctx, src, map[string]string{"host": h, "pathsJSON": string(pathsJSON)}, nixExpr("values.nix"), &raw)
 		for i, p := range paths {
 			hv := HostValue{Host: h, Files: []string{}}
 			if evalErr != nil {

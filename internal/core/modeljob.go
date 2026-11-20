@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -362,7 +364,7 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 			}
 			out.Name = n
 			h := Host{Name: n}
-			if err := js.evalJSON(ctx, src, n, nixExpr("host.nix"), &out); err != nil {
+			if err := js.evalJSON(ctx, src, map[string]string{"host": n}, nixExpr("host.nix"), &out); err != nil {
 				h.Error = err.Error()
 				fmt.Fprintf(job, "%s: %v\n", n, err)
 			} else {
@@ -380,7 +382,7 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 		start(func() {
 			fmt.Fprintf(job, "Evaluating home %s…\n", n)
 			h := Home{Name: n}
-			if err := js.evalJSON(ctx, src, n, nixExpr("home.nix"), &h); err != nil {
+			if err := js.evalJSON(ctx, src, map[string]string{"host": n}, nixExpr("home.nix"), &h); err != nil {
 				h = Home{Name: n, Error: err.Error()}
 			}
 			h.Packages, h.Programs = orEmpty(h.Packages), orEmpty(h.Programs)
@@ -436,23 +438,28 @@ func (js *Jobs) snapshot(ctx context.Context, tree string) (string, func(), erro
 
 func (js *Jobs) discover(ctx context.Context, src string) (map[string][]string, error) {
 	var names map[string][]string
-	if err := js.evalJSON(ctx, src, "", nixExpr("discover.nix"), &names); err != nil {
+	if err := js.evalJSON(ctx, src, nil, nixExpr("discover.nix"), &names); err != nil {
 		return nil, err // the UI already says the flake does not evaluate
 	}
 	return names, nil
 }
 
-// evalJSON runs a nix expression against the flake in src (and machine host)
-// and decodes its JSON result into out.
-func (js *Jobs) evalJSON(ctx context.Context, src, host, expr string, out any) error {
-	return js.evalJSONEnv(ctx, src, []string{"NIXMGR_HOST=" + host}, expr, out)
-}
-
-func (js *Jobs) evalJSONEnv(ctx context.Context, src string, env []string, expr string, out any) error {
+// evalJSON calls a nix expression, a function of flakeRef and args, for the
+// flake in src and decodes its JSON result into out. The evaluation is pure:
+// fleet code must not read the server's files, such as the age key.
+func (js *Jobs) evalJSON(ctx context.Context, src string, args map[string]string, expr string, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--json", "--impure", "--expr", expr)...)
-	cmd.Env = append(append(os.Environ(), "NIXMGR_FLAKE=path:"+src), env...)
+	ref, err := js.lockedFlake(ctx, src)
+	if err != nil {
+		return err
+	}
+	// In the expression: nix eval does not pass --argstr to a top-level function.
+	call := "(" + expr + "\n) { flakeRef = " + nixString(ref) + ";"
+	for _, k := range slices.Sorted(maps.Keys(args)) {
+		call += " " + k + " = " + nixString(args[k]) + ";"
+	}
+	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--json", "--expr", call+" }")...)
 	var stderr bytes.Buffer
 	stdout := capped{max: maxEvalOutput}
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -464,12 +471,39 @@ func (js *Jobs) evalJSONEnv(ctx context.Context, src string, env []string, expr 
 		if !errors.As(err, &ee) {
 			return fmt.Errorf("cannot run nix (%v); is Nix installed?", err)
 		}
-		return errors.New(tail(stderr.String(), 25))
+		msg := tail(stderr.String(), 25)
+		if strings.Contains(msg, "cannot update unlocked flake input") { // pure mode fetches only what flake.lock pins
+			msg += "\nflake.lock does not pin every input of flake.nix: run Lock."
+		}
+		return errors.New(msg)
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.buf.Bytes()), out); err != nil {
 		return fmt.Errorf("unexpected nix output: %v", err)
 	}
 	return nil
+}
+
+// lockedFlake is src as a flake reference pure evaluation accepts: pinned by
+// its NAR hash, which nix checks as it copies src to the store.
+func (js *Jobs) lockedFlake(ctx context.Context, src string) (string, error) {
+	out, err := exec.CommandContext(ctx, js.Nix, js.nixArgs("hash", "path", src)...).Output()
+	var ee *exec.ExitError
+	switch {
+	case errors.As(err, &ee):
+		return "", errors.New(tail(string(ee.Stderr), 25))
+	case err != nil:
+		return "", fmt.Errorf("cannot run nix (%v); is Nix installed?", err)
+	}
+	hash := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(hash, "sha256-") {
+		return "", fmt.Errorf("unexpected output of nix hash path: %q", tail(hash, 1))
+	}
+	return "path:" + src + "?narHash=" + url.QueryEscape(hash), nil
+}
+
+// nixString quotes s as a Nix string: no escape sequence, no interpolation.
+func nixString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`).Replace(s) + `"`
 }
 
 const maxEvalOutput = 64 << 20

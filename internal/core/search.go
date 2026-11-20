@@ -333,7 +333,7 @@ func (js *Jobs) runIndex(ctx context.Context, job *Job) (err error) {
 		}
 		defer cleanup()
 		var idx []OptionDoc
-		if err := js.evalJSON(ctx, src, job.Req.Host, nixExpr("options.nix"), &idx); err != nil {
+		if err := js.evalJSON(ctx, src, map[string]string{"host": job.Req.Host}, nixExpr("options.nix"), &idx); err != nil {
 			return err
 		}
 		fmt.Fprintf(job, "Indexed %d options.\n", len(idx))

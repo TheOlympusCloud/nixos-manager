@@ -16,6 +16,7 @@ import (
 // path: flake it is given, fails for targets named "broken", and answers the
 // target discovery eval.
 const fakeNix = `#!/bin/sh
+case "$*" in *" hash path "*) echo sha256-fake; exit 0 ;; esac
 case "$*" in *"eval --json"*) echo "{\"nixos\":[\"web\"],\"home\":[\"pablo@web\"],\"darwin\":[]}"; exit 0 ;; esac
 echo "nix $*"
 for a in "$@"; do
@@ -188,6 +189,7 @@ func TestFailingCheckDoesNotPass(t *testing.T) {
 // writes a flake.lock for nix flake lock, so a test can keep a check running.
 // Its flake has no machines.
 const gateNix = `#!/bin/sh
+case "$*" in *" hash path "*) echo sha256-fake; exit 0 ;; esac
 case "$*" in *"eval --json"*) echo '{"nixos":[],"home":[],"darwin":[]}'; exit 0 ;; esac
 echo "nix $*"
 case "$*" in

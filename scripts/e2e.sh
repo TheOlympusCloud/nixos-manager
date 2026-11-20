@@ -37,11 +37,14 @@ if [ "${E2E_STUB_NIX:-}" = 1 ]; then
 # Evaluations answer with JSON only, like nix eval --json; other commands echo.
 # The example machine's system derivation follows its default.nix.
 case "$*" in
-  *"eval --json"*) ;;
+  *"eval --json"*|*" hash path "*) ;;
   *) echo "nix $*" ;;
 esac
+# The flake is called as { flakeRef = "path:<src>?narHash=…"; … }.
+flake=$(printf '%s\n' "$*" | sed -n 's/.* flakeRef = "path:\([^"?]*\)?.*/\1/p')
 case "$*" in
-  *"nixmgr:host"*) drv=$(sha256sum < "${NIXMGR_FLAKE#path:}/hosts/example/default.nix" | cut -c1-32)
+  *" hash path "*) echo "sha256-fake" ;;
+  *"nixmgr:host"*) drv=$(sha256sum < "$flake/hosts/example/default.nix" | cut -c1-32)
     echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","systemPath":"/nix/store/'"$drv"'-nixos-system-example-26.05","units":{"example.service":{"hash":"'"$drv"'","reload":{},"flags":{}}},"etc":{"example.conf":"'"$drv"'"},"managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"],"checks":{"comin":true,"cominBranches":[{"url":"https://forgejo.example.lan/pablo/nixos-config.git","main":"main","testing":"testing-example"}]}}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
