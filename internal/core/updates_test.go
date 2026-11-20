@@ -374,7 +374,7 @@ func TestUpdateTick(t *testing.T) {
 		isErr(t, err, ErrInvalid)
 	}
 	st := must[UpdateStatus](t)(u.SetSchedule(UpdateSchedule{Enabled: true, Day: -1, Hour: 4}))
-	if !st.Next.Equal(time.Date(2026, 11, 21, 4, 0, 0, 0, madrid)) || st.Update != nil {
+	if !st.Next.Equal(time.Date(2026, 11, 21, 4, 0, 0, 0, madrid)) || st.Update != nil || st.Zone != "CET" {
 		t.Fatalf("status %+v", st)
 	}
 	u.Tick(now.Add(time.Hour))

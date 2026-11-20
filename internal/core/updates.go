@@ -61,6 +61,7 @@ type Update struct {
 type UpdateStatus struct {
 	Schedule UpdateSchedule `json:"schedule"`
 	Next     time.Time      `json:"next,omitzero"` // the next scheduled run, while the schedule is on
+	Zone     string         `json:"zone"`          // the server's time zone the hour is in, e.g. CET
 	Update   *Update        `json:"update,omitempty"`
 	// Outdated: the fleet's branch moved on since the update was made, as
 	// last fetched, so it can no longer be merged.
@@ -145,6 +146,7 @@ func nextRun(s UpdateSchedule, after time.Time, loc *time.Location) time.Time {
 func (u *Updates) Status(ctx context.Context) UpdateStatus {
 	u.mu.Lock()
 	st := UpdateStatus{Schedule: u.f.Schedule}
+	st.Zone, _ = u.now().In(u.loc).Zone()
 	if u.f.Schedule.Enabled {
 		st.Next = nextRun(u.f.Schedule, u.f.Since, u.loc)
 	}
