@@ -344,9 +344,17 @@ like every other machine:
 
 The alternative, on any host with Docker. The image carries its own Nix.
 
-> **Upgrading from an image that ran as root?** With Compose, nothing to do.
-> With plain `docker run`, give the volume to the new user once first; the
-> command is below.
+> **Upgrading from an image that ran as root?** The image now runs as the
+> `nixos-manager` user (uid 10001). The earlier image left the data volume
+> owned by root with mode 0700, so the new server cannot open it and restarts
+> in a loop until the volume is given to that user:
+>
+> - With Compose, take the new `compose.yaml`, or copy its `data-owner` service
+>   (and the `depends_on` that waits for it) into yours: it gives the volume to
+>   the user before each start. With your old `compose.yaml` unchanged, or with
+>   plain `docker run`, run the `chown` command below once.
+> - A key mounted at `/root/.ssh` is no longer read: mount it at
+>   `/home/nixos-manager/.ssh` instead, readable by uid 10001.
 
 1. Pick a login password and store its hash:
 
@@ -372,6 +380,16 @@ Files you mount must be readable by uid 10001: the password hash, and a key in
 refuses it. The user owns the container's Nix store, so it can replace any program
 in it: never run commands in the server's container as root
 (`docker compose exec` runs them as the user).
+
+**Builds here can read the server's data.** Nix cannot sandbox builds in an
+unprivileged container, and the image's single-user Nix builds as the server's
+own user. Anything the fleet builds (a check, or an import from a derivation
+while the machines are evaluated) can read the data volume: the age key of the
+secrets, the tokens and the Forgejo key. Use the Docker image only when everyone
+who can push to the fleet repository or holds an edit token may see those.
+Otherwise run the [Proxmox LXC](#run-it-in-a-proxmox-lxc-recommended): the
+NixOS module builds through the Nix daemon, as the `nixbld` users, which cannot
+read the data folder.
 
 Either way, without a remote the app starts a new repository with a starter
 flake (an example host, a home-manager user and comin). Run **Lock** once to
