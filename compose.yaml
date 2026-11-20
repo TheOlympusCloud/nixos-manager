@@ -3,6 +3,9 @@ services:
   nixos-manager:
     build: .
     restart: unless-stopped
+    depends_on:
+      data-owner:
+        condition: service_completed_successfully
     ports:
       - "8080:8080" # LAN and Tailscale reach it through the host
     environment:
@@ -15,5 +18,14 @@ services:
       - nixmgr-data:/var/lib/nixos-manager
       - ./secrets:/run/secrets/nixmgr:ro
       # - ./secrets/ssh:/home/nixos-manager/.ssh:ro   # id_ed25519 + known_hosts for the Forgejo remote, readable by uid 10001
+  # Runs before the server, once per start, as root but in a container of its own (the
+  # server's never runs anything as root): it gives the data volume to the image's user.
+  # Volumes of images before it ran as that user are root-owned.
+  data-owner:
+    build: .
+    user: root
+    entrypoint: ["chown", "-R", "-h", "nixos-manager:nixos-manager", "/var/lib/nixos-manager"]
+    volumes:
+      - nixmgr-data:/var/lib/nixos-manager
 volumes:
   nixmgr-data:

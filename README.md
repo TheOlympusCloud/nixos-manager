@@ -279,13 +279,18 @@ The alternative, on any host with Docker. The image carries its own Nix.
 3. `docker compose up -d --build`, then open `http://<server>:8080`.
 
 The server and its Nix run as the unprivileged `nixos-manager` user (uid and gid
-10001). The container starts as root only to give the data volume to that user,
-then switches to it, as systemd does for the LXC module. A volume from an earlier
-image, which ran everything as root, is handed over the same way on the first
-start. Files you mount (the password hash, a key in `~/.ssh`) must be readable by
-uid 10001. To run nothing as root at all, add `user: nixos-manager` to the service
-in `compose.yaml`; the volume must then already belong to the user (a new volume
-does). Use `docker compose exec -u nixos-manager` for commands inside the container.
+10001), and nothing in its container runs as root. Before each start, Compose runs
+`data-owner`, a one-shot container of its own that gives the data volume to that
+user: volumes of earlier images, which ran as root, are root-owned. Without
+Compose, a new volume needs nothing; give an earlier image's volume to the user
+once with `docker run --rm --user root --entrypoint chown -v <volume>:/var/lib/nixos-manager
+<image> -R -h nixos-manager:nixos-manager /var/lib/nixos-manager`.
+
+Files you mount must be readable by uid 10001: the password hash, and a key in
+`~/.ssh`. An SSH `config` there must also belong to root or to uid 10001, or ssh
+refuses it. The user owns the container's Nix store, so it can replace any program
+in it: never run commands in the server's container as root
+(`docker compose exec` runs them as the user).
 
 Either way, without a remote the app starts a new repository with a starter
 flake (an example host, a home-manager user and comin). Run **Lock** once to
