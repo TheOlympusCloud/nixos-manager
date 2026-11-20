@@ -299,8 +299,9 @@ func (js *Jobs) worker() {
 			passed, path := js.pass(job.tree), js.checksPath
 			js.mu.Unlock()
 			if path != "" { // only this worker saves, so the writes cannot overtake each other
-				if b, err := json.Marshal(checksFile{Passed: passed}); err != nil || writeAtomic(path, b) != nil {
-					fmt.Fprintf(job, "\nThe check passed, but %s could not be saved: after a restart it must run again.\n", path)
+				b, _ := json.Marshal(checksFile{Passed: passed}) // strings always marshal
+				if err := writeAtomic(path, b); err != nil {
+					fmt.Fprintf(job, "\nThe check passed, but saving that failed (%v): after a restart it must run again.\n", err)
 				}
 			}
 		}

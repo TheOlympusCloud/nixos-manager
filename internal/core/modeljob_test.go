@@ -361,6 +361,14 @@ func TestWorkingTreeIsCachedUntilAnythingChanges(t *testing.T) {
 	}
 }
 
+// The index and info/exclude are found in a repository whose path has spaces.
+func TestWorkingTreeCacheWatchesTheIndexAnywhere(t *testing.T) {
+	r := must[*Repo](t)(OpenRepo(filepath.Join(t.TempDir(), "my fleet"), "", testName, testEmail))
+	if len(r.gitFiles) != 2 || filepath.Base(r.gitFiles[0]) != "index" || filepath.Base(r.gitFiles[1]) != "exclude" || !strings.Contains(r.gitFiles[0], "my fleet") {
+		t.Fatalf("git files %q", r.gitFiles)
+	}
+}
+
 // A file changed moments ago may change again within the same timestamp, so
 // the tree is not cached until it is older than the racy window.
 func TestRecentChangesAreNotCached(t *testing.T) {

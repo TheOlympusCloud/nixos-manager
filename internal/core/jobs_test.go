@@ -142,7 +142,7 @@ func TestPassedCheckThatCannotBeSaved(t *testing.T) {
 	write(t, s.Repo, "a.nix", "x\n")
 	ok(t, s.Stage(ctx, nil))
 	info := wait(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "check"})))
-	if info.State != "passed" || !strings.Contains(info.Output, "could not be saved") {
+	if info.State != "passed" || !strings.Contains(info.Output, "saving that failed") {
 		t.Fatalf("job %s:\n%s", info.State, info.Output)
 	}
 	if st := must[Status](t)(s.Status(ctx)); !st.StagedChecked {

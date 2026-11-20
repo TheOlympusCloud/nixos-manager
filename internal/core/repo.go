@@ -129,7 +129,7 @@ func OpenRepoSSH(dir, remote, name, email, sshDir string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range strings.Fields(out) {
+	for _, p := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(dir, p)
 		}
