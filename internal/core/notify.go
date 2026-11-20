@@ -490,7 +490,7 @@ func (n *Notifier) fleetEvents(ctx context.Context, now time.Time) ([]Event, map
 	var out []Event
 	if u := n.Svc.Updates; u != nil {
 		looked["update"] = true
-		out = u.events()
+		out = u.events(ctx)
 	}
 	working, _, err := n.Svc.Jobs.Model(ctx, "working")
 	if err != nil || working == nil || working.Error != "" || n.Svc.Deploys == nil {

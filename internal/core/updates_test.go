@@ -120,7 +120,7 @@ func TestUpdateOnABranchThenMerge(t *testing.T) {
 	if job, _ := s.Jobs.Get(up.Job); job == nil || job.Info(false).Kind != "update-branch" || job.Info(false).State != "passed" {
 		t.Fatal("no update-branch job")
 	}
-	ev := u.events()
+	ev := u.events(ctx)
 	if len(ev) != 1 || ev[0].Kind != "update-ready" || !strings.HasPrefix(ev[0].Key, "update-ready:") || ev[0].Title != "Flake update ready to merge into main" ||
 		!slices.Equal(ev[0].Hosts, []string{"db", "web"}) || ev[0].Link != "#/inputs" || ev[0].Message != up.Message {
 		t.Fatalf("events %+v", ev)
@@ -139,7 +139,7 @@ func TestUpdateOnABranchThenMerge(t *testing.T) {
 	if st := u.Status(ctx); st.Update.State != "merged" || st.Update.Merged.IsZero() || st.Outdated {
 		t.Fatalf("status %+v", st)
 	}
-	if ev := u.events(); len(ev) != 0 {
+	if ev := u.events(ctx); len(ev) != 0 {
 		t.Fatalf("events after the merge: %+v", ev)
 	}
 	if gitOut(t, s.Repo.Dir, "status", "--porcelain") != before {
@@ -168,7 +168,7 @@ func TestUpdateWithNothingNew(t *testing.T) {
 	ctx := context.Background()
 	s, u, _ := updateService(t) // nix flake update writes the same lock
 	up := runUpdate(t, ctx, u)
-	if up.State != "current" || up.Commit != "" || up.Finished.IsZero() || remoteRef(t, s, "flake-update") != "" || len(u.events()) != 0 {
+	if up.State != "current" || up.Commit != "" || up.Finished.IsZero() || remoteRef(t, s, "flake-update") != "" || len(u.events(ctx)) != 0 {
 		t.Fatalf("update %+v", up)
 	}
 	_, err := u.Discard()
@@ -187,7 +187,7 @@ func TestUpdateReplacesOnlyItsOwnBranch(t *testing.T) {
 	if second.State != "ready" || second.Commit == first.Commit || remoteRef(t, s, "flake-update") != second.Commit {
 		t.Fatalf("second update %+v", second)
 	}
-	ev := u.events()
+	ev := u.events(ctx)
 	if len(ev) != 1 || ev[0].Key == "update-ready:"+first.Started.UTC().Format(time.RFC3339Nano) {
 		t.Fatalf("events %+v", ev)
 	}
@@ -203,7 +203,7 @@ func TestUpdateReplacesOnlyItsOwnBranch(t *testing.T) {
 	if third.State != "error" || !strings.Contains(third.Error, "did not push there") || remoteRef(t, s, "flake-update") != theirs {
 		t.Fatalf("update over someone's branch %+v", third)
 	}
-	if ev := u.events(); len(ev) != 1 || ev[0].Kind != "update-failed" || ev[0].Title != "The flake update could not run" || ev[0].Message != third.Error {
+	if ev := u.events(ctx); len(ev) != 1 || ev[0].Kind != "update-failed" || ev[0].Title != "The flake update could not run" || ev[0].Message != third.Error {
 		t.Fatalf("events %+v", ev)
 	}
 }
@@ -238,14 +238,14 @@ func TestUpdateThatFailsItsCheck(t *testing.T) {
 		!strings.Contains(up.Message, "Its check failed: db and web do not build.") {
 		t.Fatalf("update %+v", up)
 	}
-	ev := u.events()
+	ev := u.events(ctx)
 	if len(ev) != 1 || ev[0].Kind != "update-failed" || ev[0].Severity != "warning" || !slices.Equal(ev[0].Hosts, []string{"db", "web"}) {
 		t.Fatalf("events %+v", ev)
 	}
 	_, err := u.Merge(ctx, up.Commit)
 	isErr(t, err, ErrNotChecked)
 	st := must[UpdateStatus](t)(u.Discard())
-	if st.Update.State != "discarded" || len(u.events()) != 0 {
+	if st.Update.State != "discarded" || len(u.events(ctx)) != 0 {
 		t.Fatalf("after discard %+v", st.Update)
 	}
 	_, err = u.Discard()
@@ -535,26 +535,43 @@ func TestUpdateWithRealNix(t *testing.T) {
 }
 
 // An update merged elsewhere (Forgejo, or before a restart could record the
-// merge) shows as merged, and Merge says so instead of failing.
+// merge) is merged: Merge says so, and once the console sees it (Inputs or
+// the notifier) it is recorded, its notification ends and it cannot be
+// discarded.
 func TestUpdateMergedElsewhere(t *testing.T) {
 	ctx := context.Background()
 	s, u, next := updateService(t)
+	clone := laptop(t, s)
+	mergeElsewhere := func() {
+		t.Helper()
+		gitOut(t, clone, "fetch", "-q", "origin", "flake-update")
+		gitOut(t, clone, "push", "-q", "origin", "FETCH_HEAD:main")
+		gitOut(t, s.Repo.Dir, "fetch", "-q", "origin")
+	}
 	ok(t, os.WriteFile(next, []byte(lockAt(newRev, 1794000000, "")), 0o644))
 	up := runUpdate(t, ctx, u)
-	clone := laptop(t, s)
-	gitOut(t, clone, "fetch", "-q", "origin", "flake-update")
-	gitOut(t, clone, "push", "-q", "origin", "FETCH_HEAD:main")
-	gitOut(t, s.Repo.Dir, "fetch", "-q", "origin")
-	if st := u.Status(ctx); st.Update.State != "merged" || st.Outdated {
-		t.Fatalf("status %+v %+v", st, st.Update)
-	}
+	mergeElsewhere()
 	msg := must[string](t)(u.Merge(ctx, up.Commit))
-	if !strings.Contains(msg, "main already has the update") {
+	if !strings.Contains(msg, "main already has the update") || u.Status(ctx).Update.State != "merged" {
 		t.Fatalf("merge: %s", msg)
 	}
-	if st := u.Status(ctx); st.Update.State != "merged" || len(u.events()) != 0 {
-		t.Fatalf("after %+v", st.Update)
+
+	ok(t, os.WriteFile(next, []byte(lockAt("ccccccc3333333333333333333333333333333333", 1795000000, "")), 0o644))
+	up = runUpdate(t, ctx, u)
+	mergeElsewhere()
+	if ev := u.events(ctx); len(ev) != 0 { // the notifier sees it first
+		t.Fatalf("events of an update merged elsewhere: %+v", ev)
 	}
+	u.mu.Lock()
+	state := u.f.Update.State
+	u.mu.Unlock()
+	if st := u.Status(ctx); state != "merged" || st.Update.State != "merged" || st.Outdated {
+		t.Fatalf("recorded %q, status %+v %+v", state, st, st.Update)
+	}
+	_, err := u.Discard()
+	isErr(t, err, ErrConflict)
+	_, err = u.Merge(ctx, up.Commit)
+	isErr(t, err, ErrConflict)
 }
 
 // When the server stopped after pushing flake-update but before it recorded
@@ -570,5 +587,65 @@ func TestUpdateKnowsItsBranchAfterACrashedSave(t *testing.T) {
 	ok(t, os.WriteFile(next, []byte(lockAt("ccccccc3333333333333333333333333333333333", 1795000000, "")), 0o644))
 	if up := runUpdate(t, ctx, u); up.State != "ready" || remoteRef(t, s, "flake-update") != up.Commit {
 		t.Fatalf("update %+v", up)
+	}
+}
+
+// flake-update deleted on the remote (Forgejo's "delete branch after merge",
+// or a foreign branch removed as the error asks) does not block the next
+// update: the remote is asked what it holds, not the last fetch.
+func TestUpdateAfterTheBranchWasDeleted(t *testing.T) {
+	ctx := context.Background()
+	s, u, next := updateService(t)
+	ok(t, os.WriteFile(next, []byte(lockAt(newRev, 1794000000, "")), 0o644))
+	runUpdate(t, ctx, u)
+	clone := laptop(t, s)
+	gitOut(t, clone, "fetch", "-q", "origin", "flake-update")
+	gitOut(t, clone, "push", "-q", "origin", "FETCH_HEAD:main", ":flake-update") // merged in Forgejo, branch deleted
+	for i, rev := range []string{"ccccccc3333333333333333333333333333333333", "ddddddd4444444444444444444444444444444444"} {
+		ok(t, os.WriteFile(next, []byte(lockAt(rev, 1795000000+int64(i), "")), 0o644))
+		if up := runUpdate(t, ctx, u); up.State != "ready" || remoteRef(t, s, "flake-update") != up.Commit {
+			t.Fatalf("update %d after the deletion: %+v", i, up)
+		}
+	}
+
+	// A foreign branch, refused, then deleted as the error asks.
+	gitOut(t, clone, "switch", "-q", "--no-track", "-c", "theirs", "origin/main")
+	ok(t, os.WriteFile(filepath.Join(clone, "mine"), []byte("theirs\n"), 0o644))
+	gitOut(t, clone, "add", "-A")
+	gitOut(t, clone, "commit", "-q", "-m", "theirs")
+	gitOut(t, clone, "push", "-q", "-f", "origin", "theirs:flake-update")
+	ok(t, os.WriteFile(next, []byte(lockAt("eeeeeee5555555555555555555555555555555555", 1796000000, "")), 0o644))
+	if up := runUpdate(t, ctx, u); up.State != "error" || !strings.Contains(up.Error, "did not push there") {
+		t.Fatalf("over a foreign branch %+v", up)
+	}
+	gitOut(t, clone, "push", "-q", "origin", ":flake-update")
+	if up := runUpdate(t, ctx, u); up.State != "ready" || remoteRef(t, s, "flake-update") != up.Commit {
+		t.Fatalf("after the foreign branch was deleted %+v", up)
+	}
+}
+
+// A push that fails does not make its unpushed commit the one the console
+// knows as its own: after a lost record and then a failed push, the branch is
+// still recognised.
+func TestUpdateKnowsItsBranchAfterACrashAndAFailedPush(t *testing.T) {
+	ctx := context.Background()
+	s, u, next := updateService(t)
+	ok(t, os.WriteFile(next, []byte(lockAt(newRev, 1794000000, "")), 0o644))
+	first := runUpdate(t, ctx, u)
+	u.mu.Lock()
+	u.f.Pushed = "" // the push of first went through, but was not recorded
+	u.mu.Unlock()
+	hook := filepath.Join(s.Repo.Remote(ctx), "hooks", "pre-receive")
+	ok(t, os.WriteFile(hook, []byte("#!/bin/sh\necho 'refused for the test' >&2\nexit 1\n"), 0o755))
+	ok(t, os.WriteFile(next, []byte(lockAt("ccccccc3333333333333333333333333333333333", 1795000000, "")), 0o644))
+	if up := runUpdate(t, ctx, u); up.State != "error" {
+		t.Fatalf("a refused push %+v", up)
+	}
+	if got := gitOut(t, s.Repo.Dir, "rev-parse", updateRef); got != first.Commit {
+		t.Fatalf("after a failed push the console's last update is %s, want %s", got, first.Commit)
+	}
+	ok(t, os.Remove(hook))
+	if up := runUpdate(t, ctx, u); up.State != "ready" || remoteRef(t, s, "flake-update") != up.Commit {
+		t.Fatalf("the next update %+v", up)
 	}
 }

@@ -148,6 +148,7 @@ func nextRun(s UpdateSchedule, after time.Time, loc *time.Location) time.Time {
 
 // Status is the schedule, the next run and the latest update.
 func (u *Updates) Status(ctx context.Context) UpdateStatus {
+	u.noticeMerged(ctx)
 	u.mu.Lock()
 	st := UpdateStatus{Schedule: u.f.Schedule}
 	st.Zone, _ = u.now().In(u.loc).Zone()
@@ -320,9 +321,16 @@ func (u *Updates) run(up *Update, via string) {
 
 	r.mu.Lock()
 	made, _ := r.git(ctx, "rev-parse", "--verify", "-q", updateRef) // the last update made, pushed or not
+	made = strings.TrimSpace(made)
 	sha, err := r.commitLock(ctx, base, updateMessage(inputs, via), lock)
 	if err == nil {
-		err = u.pushUpdate(ctx, sha, pushed, strings.TrimSpace(made))
+		if err = u.pushUpdate(ctx, sha, pushed, made); err != nil { // not pushed: the last one that may have been stays ours
+			if made != "" {
+				r.git(ctx, "update-ref", updateRef, made)
+			} else {
+				r.git(ctx, "update-ref", "-d", updateRef)
+			}
+		}
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -338,7 +346,8 @@ func (u *Updates) run(up *Update, via string) {
 }
 
 // fetchBase fetches origin and returns the last commit of branch there, its
-// tree, and the remote's flake-update ("" when there is none). Needs r.mu.
+// tree, and what flake-update holds on the remote now ("" when there is no
+// such branch). Needs r.mu.
 func (u *Updates) fetchBase(ctx context.Context, branch string) (string, string, string, error) {
 	r := u.Svc.Repo
 	if _, err := r.git(ctx, "remote", "get-url", "origin"); err != nil {
@@ -354,8 +363,14 @@ func (u *Updates) fetchBase(ctx context.Context, branch string) (string, string,
 	if err != nil || !found {
 		return "", "", "", errorf(ErrConflict, "%s is not on the remote yet: push it first", branch)
 	}
-	pushed, _ := r.git(ctx, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+updateBranch)
-	return base, tree, strings.TrimSpace(pushed), nil
+	// The remote itself: a fetch keeps the ref of a branch deleted there (merged
+	// in Forgejo and removed), and a lease on it would be refused for ever.
+	out, err = r.git(nctx, "ls-remote", "origin", "refs/heads/"+updateBranch)
+	if err != nil {
+		return "", "", "", err
+	}
+	pushed, _, _ := strings.Cut(strings.TrimSpace(out), "\t")
+	return base, tree, pushed, nil
 }
 
 // updateMessage is the update's commit message: which inputs moved, and how
@@ -432,8 +447,8 @@ func (r *Repo) commitLock(ctx context.Context, base, message string, lock []byte
 // pushUpdate pushes sha to flake-update on the remote, which holds remote
 // ("" for no such branch): only when that is a commit this console pushed
 // there, so a branch of that name someone else made is never lost. made is
-// the last update made before sha: pushed by a server that stopped before it
-// recorded the push. Needs r.mu.
+// the last update made before sha whose push did not fail: pushed by a server
+// that stopped before it recorded the push. Needs r.mu.
 func (u *Updates) pushUpdate(ctx context.Context, sha, remote, made string) error {
 	u.mu.Lock()
 	pushed := u.f.Pushed
@@ -701,9 +716,34 @@ func (u *Updates) Discard() (UpdateStatus, error) {
 	return u.Status(context.Background()), nil
 }
 
+// noticeMerged records the latest update as merged once the fleet's branch,
+// as last fetched, has it: merged in Forgejo, say, or by a merge whose push
+// went through just before a restart.
+func (u *Updates) noticeMerged(ctx context.Context) {
+	u.mu.Lock()
+	up := u.f.Update
+	waiting := up != nil && !u.busy && up.Commit != "" && (up.State == "ready" || up.State == "failed")
+	u.mu.Unlock()
+	if !waiting {
+		return
+	}
+	r := u.Svc.Repo
+	tip, _ := r.git(ctx, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+up.Branch)
+	if tip = strings.TrimSpace(tip); tip == "" || tip == up.Base || !r.isAncestor(ctx, up.Commit, tip) {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.f.Update == up && !u.busy && (up.State == "ready" || up.State == "failed") {
+		up.State = "merged"
+		u.save()
+	}
+}
+
 // events are the notifications the latest update calls for while it waits:
 // ready to merge, failed its check, or could not run.
-func (u *Updates) events() []Event {
+func (u *Updates) events(ctx context.Context) []Event {
+	u.noticeMerged(ctx)
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	up := u.f.Update

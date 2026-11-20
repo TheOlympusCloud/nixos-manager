@@ -551,7 +551,8 @@ the same at once.
    (or the session or token that clicked **Update now**), and pushed to the
    `flake-update` branch, which no machine follows. The branch belongs to the
    console: a later update replaces it, but a `flake-update` branch someone
-   else pushed is never overwritten (the update fails and says so).
+   else pushed is never overwritten (the update fails and says so). Deleting
+   the branch on the remote, after merging it in Forgejo say, is fine.
 3. The commit is checked like any pushed commit: `nix flake check`, then a
    build of every machine whose system it changes.
 4. Inputs shows the result, its log, which inputs moved, and per machine the
@@ -563,8 +564,8 @@ the same at once.
    (otherwise update again), and only once its check compared the machines
    with the newest checked commit of `main`, as **Push** asks (otherwise the
    console checks it again first). A working copy on `main` with nothing of
-   its own follows; otherwise **Pull** brings the update in. **Discard** sets it
-   aside.
+   its own follows; otherwise **Pull** brings the update in. An update merged
+   in Forgejo instead counts as merged. **Discard** sets it aside.
 
 Running an update pushes a branch and merging deploys, so both need the web
 login or a full token; the schedule is a setting, for the web login only. The
