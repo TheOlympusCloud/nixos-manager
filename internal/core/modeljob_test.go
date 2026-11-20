@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +217,58 @@ func TestCappedOutput(t *testing.T) {
 	}
 	if _, err := c.Write([]byte("de")); err == nil || !c.over || c.buf.String() != "abc" {
 		t.Fatalf("over the cap: %v %q", err, c.buf.String())
+	}
+}
+
+// A standalone home-manager configuration with real Nix. Its programs include removed
+// options, which throw when read (programs.octant): they must not hide the rest.
+func TestHomeModelWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	s := NewService(newRepo(t))
+	write(t, s.Repo, "flake.nix", `{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  inputs.home-manager = {
+    url = "github:nix-community/home-manager/release-26.05";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  outputs =
+    { nixpkgs, home-manager, ... }:
+    let
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+    in
+    {
+      homeConfigurations.pablo = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          {
+            home.username = "pablo";
+            home.homeDirectory = "/home/pablo";
+            home.stateVersion = "26.05";
+            home.packages = [ pkgs.hello ];
+            programs.git.enable = true;
+          }
+        ];
+      };
+    };
+}
+`)
+	_, j, err := s.Jobs.Model(ctx, "working")
+	ok(t, err)
+	select {
+	case <-j.Done():
+	case <-time.After(15 * time.Minute):
+		t.Fatal("the model did not finish")
+	}
+	m, _, err := s.Jobs.Model(ctx, "working")
+	ok(t, err)
+	if m == nil || m.Error != "" || len(m.Homes) != 1 {
+		t.Fatalf("model: %+v\n%s", m, j.Info(true).Output)
+	}
+	h := m.Homes[0]
+	if h.Error != "" || !slices.Contains(h.Packages, "hello") || !slices.Contains(h.Programs, "git") {
+		t.Fatalf("home: %+v", h)
 	}
 }
