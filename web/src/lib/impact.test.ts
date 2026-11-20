@@ -41,6 +41,67 @@ describe('impact', () => {
     expect(g[3].items[0]).toEqual({ text: 'jellyfin', title: 'services.jellyfin', kind: 'add' })
   })
 
+  const MiB = 1024 * 1024
+  const detailed: HostDiff = {
+    host: 'web',
+    status: 'changed',
+    versionsChanged: [{ name: 'nginx', from: '1.26.0', to: '1.28.0' }],
+    units: [
+      { name: 'dhcpcd.service', action: 'keep' },
+      { name: 'new.service', action: 'start' },
+      { name: 'nginx.service', action: 'restart' },
+      { name: 'old.service', action: 'stop' },
+      { name: 'phpfpm.service', action: 'reload' },
+    ],
+    etc: [
+      { path: '/etc/hosts', status: 'changed' },
+      { path: '/etc/new.conf', status: 'added' },
+      { path: '/etc/old.conf', status: 'removed' },
+    ],
+    closure: {
+      sizeFrom: 1300 * MiB,
+      sizeTo: 1318.4 * MiB,
+      changes: [
+        { name: 'glibc', delta: -12288 },
+        { name: 'hello', to: '2.12.2', delta: 268902 },
+        { name: 'nano', from: '8.6', delta: -2930176 },
+        { name: 'nginx', from: '1.26.0', to: '1.28.0' },
+      ],
+    },
+  }
+
+  it('lists units, /etc files, dependencies and the size of a built system', () => {
+    const g = impactGroups(detailed)
+    expect(g.map((x) => x.label)).toEqual(['Updated', 'Restarts', 'Reloads', 'Starts', 'Stops', 'Not restarted', '/etc', 'Dependencies', 'Size'])
+    const by = (label: string) => g.find((x) => x.label === label)!.items
+    expect(by('Restarts')).toEqual([{ text: 'nginx.service', kind: 'up' }])
+    expect(by('Starts')).toEqual([{ text: 'new.service', kind: 'add' }])
+    expect(by('Stops')).toEqual([{ text: 'old.service', kind: 'del' }])
+    expect(by('Not restarted')[0].title).toMatch(/old version until/)
+    expect(by('/etc').map((i) => [i.text, i.kind])).toEqual([
+      ['/etc/hosts', 'up'],
+      ['/etc/new.conf', 'add'],
+      ['/etc/old.conf', 'del'],
+    ])
+    expect(by('Dependencies')).toEqual([
+      { text: 'glibc', title: '−12.0 KiB', kind: 'up' },
+      { text: 'hello 2.12.2', title: 'Added, +262.6 KiB', kind: 'add' },
+      { text: 'nano 8.6', title: 'Removed, −2.8 MiB', kind: 'del' },
+      { text: 'nginx 1.26.0 → 1.28.0', title: undefined, kind: 'up' },
+    ])
+    expect(by('Size')).toEqual([{ text: '1.27 GiB → 1.29 GiB (+18.4 MiB)', kind: 'up' }])
+  })
+
+  it('says which units restart or stop and which /etc files change, and the size change last', () => {
+    expect(impactLine(detailed)).toBe('nginx 1.26.0 → 1.28.0 · nginx.service restarts · old.service stops · 3 /etc files change · +18.4 MiB')
+    const two = { host: 'x', status: 'changed' as const, units: [{ name: 'a.service', action: 'restart' as const }, { name: 'b.service', action: 'restart' as const }] }
+    expect(impactLine(two)).toBe('a.service and b.service restart')
+    expect(impactLine({ host: 'x', status: 'changed', etc: [{ path: '/etc/hosts', status: 'changed' }] })).toBe('/etc/hosts changes')
+    // Reloads and new units alone are not news in one line; the details list them.
+    expect(impactLine({ host: 'x', status: 'changed', units: [{ name: 'a.service', action: 'reload' }] })).toBe('Other configuration')
+    expect(impactLine({ host: 'x', status: 'changed', closure: { sizeFrom: 10, sizeTo: 10, changes: [] } })).toBe('Other configuration')
+  })
+
   it('keeps broken and unchanged machines apart from the changes', () => {
     const s = splitImpact([{ host: 'z', status: 'unchanged' }, changed, { host: 'b', status: 'error' }, { host: 'n', status: 'added' }, { host: 'r', status: 'removed' }])
     expect(s.changed.map((d) => d.host)).toEqual(['n', 'ws', 'r'])

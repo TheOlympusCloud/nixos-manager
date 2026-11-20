@@ -1,6 +1,6 @@
 // What a change does to the machines, in NixOS words: "firefox 145.0 → 146.0", "jellyfin turned on".
-import type { HostDiff, InputChange } from './api'
-import { plural } from './format'
+import type { ClosureChange, HostDiff, InputChange, UnitChange } from './api'
+import { bytes, plural, signedBytes } from './format'
 
 export type ImpactItem = { text: string; title?: string; kind: 'add' | 'del' | 'up' }
 export type ImpactGroup = { label: string; items: ImpactItem[] }
@@ -52,9 +52,22 @@ export function withSettings(ds: HostDiff[], settings: Record<string, SettingCha
 /** `services.desktopManager.plasma6` → `desktopManager.plasma6` (the group is shown by the label). */
 const featureName = (key: string) => key.replace(/^[a-z]+\./, '')
 
+const KEEP = 'Changed, but switching does not restart it: it runs the old version until it is restarted or the machine reboots.'
+const unitNames = (d: HostDiff, action: UnitChange['action']) => (d.units ?? []).filter((u) => u.action === action).map((u) => u.name)
+
+/** "hello 2.12.2" (added), "nginx 1.26.0 → 1.28.0", with the size change in the title. */
+function dependency(c: ClosureChange): ImpactItem {
+  const versions = c.from && c.to ? ` ${c.from} → ${c.to}` : ` ${c.to || c.from || ''}`
+  const title = [c.from && !c.to ? 'Removed' : !c.from && c.to ? 'Added' : '', c.delta ? signedBytes(c.delta) : ''].filter(Boolean).join(', ')
+  return { text: (c.name + versions).trim(), title: title || undefined, kind: c.from && !c.to ? 'del' : !c.from && c.to ? 'add' : 'up' }
+}
+
 /** The changes of one machine, grouped for the expanded view. Empty groups are left out. */
 export function impactGroups(d: Impact): ImpactGroup[] {
   const items = (xs: string[] | undefined, kind: ImpactItem['kind'], name = (s: string) => s) => (xs ?? []).map((s) => ({ text: name(s), title: s, kind }))
+  const units = (action: UnitChange['action'], kind: ImpactItem['kind'], title?: string) => unitNames(d, action).map((text) => ({ text, kind, ...(title && { title }) }))
+  const etcKind = { added: 'add', removed: 'del', changed: 'up' } as const
+  const c = d.closure
   return [
     { label: 'Updated', items: [...(d.kernel ? [d.kernel] : []), ...(d.versionsChanged ?? [])].map((v) => ({ text: `${v.name} ${v.from} → ${v.to}`, kind: 'up' as const })) },
     {
@@ -67,6 +80,14 @@ export function impactGroups(d: Impact): ImpactGroup[] {
     { label: 'Turned off', items: items(d.featuresRemoved, 'del', featureName) },
     { label: 'Users', items: [...items(d.usersAdded, 'add'), ...items(d.usersRemoved, 'del')] },
     { label: 'Ports', items: [...items(d.portsAdded, 'add'), ...items(d.portsRemoved, 'del')] },
+    { label: 'Restarts', items: units('restart', 'up') },
+    { label: 'Reloads', items: units('reload', 'up') },
+    { label: 'Starts', items: units('start', 'add') },
+    { label: 'Stops', items: units('stop', 'del') },
+    { label: 'Not restarted', items: units('keep', 'up', KEEP) },
+    { label: '/etc', items: (d.etc ?? []).map((e) => ({ text: e.path, kind: etcKind[e.status] })) },
+    { label: 'Dependencies', items: (c?.changes ?? []).map(dependency) },
+    { label: 'Size', items: c ? [{ text: `${bytes(c.sizeFrom)} → ${bytes(c.sizeTo)} (${signedBytes(c.sizeTo - c.sizeFrom)})`, kind: 'up' as const }] : [] },
   ].filter((g) => g.items.length)
 }
 
@@ -99,8 +120,18 @@ export function impactLine(d: Impact): string {
   if (d.usersRemoved?.length) parts.push(`${d.usersRemoved.length <= 2 ? 'user ' : ''}${few(d.usersRemoved, 'user')} removed`)
   if (d.portsAdded?.length) parts.push(`${d.portsAdded.length <= 2 ? 'port ' : ''}${few(d.portsAdded, 'port')} opened`)
   if (d.portsRemoved?.length) parts.push(`${d.portsRemoved.length <= 2 ? 'port ' : ''}${few(d.portsRemoved, 'port')} closed`)
-  // The system derivation moved, but in nothing listed: a unit, an /etc file, a sysctl…
+  for (const [action, one, many] of [
+    ['restart', 'restarts', 'restart'],
+    ['stop', 'stops', 'stop'],
+  ] as const) {
+    const names = unitNames(d, action)
+    if (names.length) parts.push(`${few(names, 'unit')} ${names.length === 1 ? one : many}`)
+  }
+  const etc = (d.etc ?? []).map((e) => e.path)
+  if (etc.length) parts.push(`${few(etc, '/etc file')} ${etc.length === 1 ? 'changes' : 'change'}`)
+  // The system derivation moved, but in nothing listed: a sysctl, a reload…
   if (!parts.length) parts.push(d.reboot ? 'other configuration' : 'Other configuration')
+  if (d.closure && d.closure.sizeTo !== d.closure.sizeFrom) parts.push(signedBytes(d.closure.sizeTo - d.closure.sizeFrom))
   // First, so a long line never cuts it off.
   if (d.reboot) parts.unshift('Reboot needed')
   return parts.join(' · ')

@@ -19,14 +19,19 @@
   }
 </script>
 
-<!-- Escape fires "cancel"; closing by any other route also resolves as cancelled. -->
-<dialog bind:this={el} onclose={() => dialog.spec && dialog.resolve(null)} aria-labelledby="dialog-title">
+<!-- Escape fires "cancel"; closing by any other route also resolves as cancelled. The close event comes a
+     moment after close(): when a next dialog has opened since (a push after its review), it is not about that one. -->
+<dialog bind:this={el} class:wide={dialog.spec?.wide} onclose={() => !el.open && dialog.spec && dialog.resolve(null)} aria-labelledby="dialog-title">
   {#if dialog.spec}
     {@const spec = dialog.spec}
     <form onsubmit={submit}>
       <h2 id="dialog-title">{spec.title}</h2>
       {#if spec.message}<p>{spec.message}</p>{/if}
       {#if spec.pre !== undefined}<pre>{spec.pre}</pre>{/if}
+      {#if spec.body}
+        {@const Body = spec.body}
+        <Body />
+      {/if}
       {#if spec.input}
         <label for="dialog-input">{spec.input.label}</label>
         <!-- svelte-ignore a11y_autofocus -->
@@ -54,6 +59,9 @@
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
     box-shadow: var(--edge), var(--shadow-3);
+  }
+  dialog.wide {
+    width: min(760px, 94vw);
   }
   dialog::backdrop {
     background: rgb(0 0 0 / 0.45);

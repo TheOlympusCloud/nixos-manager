@@ -1,4 +1,5 @@
 // Repository actions shared by the top bar, History, the command palette and Changes.
+import PushImpact from '../components/PushImpact.svelte'
 import { ApiError, api } from './api'
 import { go } from './router.svelte'
 import { app, fileTabs, refresh, syncOpenTabs } from './state.svelte'
@@ -18,6 +19,18 @@ export async function pullOrPush(kind: 'pull' | 'push') {
   if (repo.busy) return
   const why = noRemote()
   if (why) return toast(why, 'info', kind === 'pull' ? 'Cannot pull' : 'Cannot push', { label: 'Open Settings', run: () => go('#/settings') })
+  const st = app.status
+  // A push deploys: first show what it changes on each machine, unless it has nothing new to send.
+  if (kind === 'push' && !(st?.upstream && st.ahead === 0)) {
+    const ok = await confirmBox({
+      title: `Push ${st?.branch || 'this branch'}?`,
+      message: 'The machines deploy what is pushed. Each one gets this, compared with what is pushed now.',
+      body: PushImpact,
+      wide: true,
+      ok: 'Push',
+    })
+    if (!ok || repo.busy) return
+  }
   repo.busy = kind
   try {
     let out: string
