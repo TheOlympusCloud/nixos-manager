@@ -476,3 +476,60 @@ func TestUpdateNotice(t *testing.T) {
 		t.Fatalf("failed: %q", got)
 	}
 }
+
+// With real Nix and a local input that moved: nix flake update runs on an
+// export of main, the commit locks the input's new revision, nix flake check
+// passes with that lock, and the merge puts it on main.
+func TestUpdateWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix: set NIXMGR_NIX_TESTS=1")
+	}
+	ctx := context.Background()
+	dep := filepath.Join(t.TempDir(), "dep")
+	gitOut(t, t.TempDir(), "init", "-q", "-b", "main", dep)
+	commitDep := func(v string) string {
+		t.Helper()
+		ok(t, os.WriteFile(filepath.Join(dep, "flake.nix"), []byte("{ outputs = _: { lib.value = "+v+"; }; }\n"), 0o644))
+		gitOut(t, dep, "add", "-A")
+		gitOut(t, dep, "-c", "user.name=Dep", "-c", "user.email=dep@example.invalid", "commit", "-q", "-m", "value "+v)
+		return gitOut(t, dep, "rev-parse", "HEAD")
+	}
+	first := commitDep("1")
+	r, _ := remotePair(t)
+	s := NewService(r)
+	write(t, s.Repo, "flake.nix", "{\n  inputs.dep.url = \"git+file://"+dep+"\";\n  outputs = { self, dep }: { lib.value = dep.lib.value; };\n}\n")
+	finish := func(j *Job) JobInfo {
+		t.Helper()
+		select {
+		case <-j.Done():
+		case <-time.After(10 * time.Minute):
+			t.Fatal("the job did not finish")
+		}
+		return j.Info(true)
+	}
+	if info := finish(must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
+	ok(t, s.Stage(ctx, nil))
+	must[string](t)(s.Commit(ctx, "dep", true))
+	must[string](t)(s.Push(ctx, true))
+	second := commitDep("2")
+
+	u := must[*Updates](t)(OpenUpdates(t.TempDir(), s))
+	up := runUpdate(t, ctx, u)
+	if up.State != "ready" || len(up.Inputs) != 1 || up.Inputs[0].Name != "dep" || up.Inputs[0].FromRev != first || up.Inputs[0].ToRev != second {
+		job, _ := s.Jobs.Get(up.Check)
+		out := ""
+		if job != nil {
+			out = job.Info(true).Output
+		}
+		t.Fatalf("update %+v\n%s", up, out)
+	}
+	if lock := gitOut(t, s.Repo.Dir, "show", up.Commit+":flake.lock"); !strings.Contains(lock, second) || strings.Contains(lock, first) {
+		t.Fatalf("flake.lock of the update:\n%s", lock)
+	}
+	must[string](t)(u.Merge(ctx, up.Commit))
+	if remoteRef(t, s, "main") != up.Commit {
+		t.Fatal("main is not the update")
+	}
+}
