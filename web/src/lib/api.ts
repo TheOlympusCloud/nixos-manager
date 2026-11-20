@@ -33,7 +33,8 @@ export type JobRequest =
   | { kind: 'check'; targets: string[] }
   | { kind: 'lock' }
   | { kind: 'update'; inputs: string[] }
-export type Token = { id: string; name: string; created: string; last_used: string }
+export type TokenScope = 'read' | 'edit' | 'full'
+export type Token = { id: string; name: string; scope: TokenScope; created: string; expires?: string; last_used: string }
 
 // ---- fleet model (what Nix evaluates, machine by machine) ----
 
@@ -266,7 +267,8 @@ export const api = {
     get<SearchReply<OptionInfo>>('/api/search/options', { host, q, limit: opts.limit, exact: opts.exact ? 1 : undefined }),
 
   tokens: () => get<{ tokens: Token[] }>('/api/tokens').then((r) => r.tokens ?? []),
-  createToken: (name: string) => post<{ id: string; name: string; token: string }>('/api/tokens', { name }),
+  createToken: (name: string, scope: TokenScope, expires?: string) =>
+    post<Token & { token: string }>('/api/tokens', expires ? { name, scope, expires } : { name, scope }),
   revokeToken: (id: string) => request<void>('DELETE', `/api/tokens/${encodeURIComponent(id)}`, {}),
 
   deployments: () => get<DeployOverview>('/api/deployments'),

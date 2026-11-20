@@ -27,6 +27,14 @@ describe('request', () => {
     expect(fetch.mock.calls[1][1]!.body).toBe('{}')
   })
 
+  it('creates a token with its scope and expiry', async () => {
+    const fetch = mockFetch(200, '{"id":"T1","name":"ci","scope":"read","created":"","token":"nxm_x"}')
+    await api.createToken('ci', 'read', '2026-02-09T12:00:00.000Z')
+    expect(JSON.parse(fetch.mock.calls[0][1]!.body as string)).toEqual({ name: 'ci', scope: 'read', expires: '2026-02-09T12:00:00.000Z' })
+    await api.createToken('ci', 'full')
+    expect(JSON.parse(fetch.mock.calls[1][1]!.body as string)).toEqual({ name: 'ci', scope: 'full' })
+  })
+
   it('sends no body on GET and parses JSON', async () => {
     const fetch = mockFetch(200, '{"hash":"abc"}')
     expect(await request('GET', '/api/x')).toEqual({ hash: 'abc' })

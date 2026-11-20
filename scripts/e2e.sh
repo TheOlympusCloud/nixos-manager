@@ -98,7 +98,8 @@ sha=$(api POST /api/commit -d '{"message":"feat: initial machines"}' | json '["s
 api POST /api/push -d '{}' > /dev/null
 [ "$(git -C "$work/remote.git" rev-parse main)" = "$sha" ] || fail "remote does not have the commit"
 [ "$(git -C "$work/remote.git" log -1 --format='%an <%ae>|%cn <%ce>' main)" = "E2E Person <e2e@example.invalid>|E2E Person <e2e@example.invalid>" ] || fail "wrong commit identity"
-echo "ok   committed and pushed as the configured person"
+git -C "$work/remote.git" log -1 --format='%(trailers:key=Via,valueonly)' main | grep -Eq '^web session [0-9a-f]{8}$' || fail "commit lacks the Via trailer"
+echo "ok   committed and pushed as the configured person, via the web session"
 
 file=hosts/example/default.nix
 hash=$(api GET "/api/file?path=$file" | json '["hash"]')

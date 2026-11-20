@@ -17,6 +17,32 @@ func NewService(repo *Repo) *Service {
 	return &Service{Repo: repo, Jobs: newJobs(repo)}
 }
 
+// Caller is who asks for a change. The web API and the MCP server set it on
+// every request; the server's own work has none.
+type Caller struct {
+	Via    string // recorded in each commit's Via trailer, e.g. "token ci (K3J9QW2M4X1A)"
+	Person bool   // the person logged in to the web UI; only they may skip a check
+}
+
+type callerKey struct{}
+
+func WithCaller(ctx context.Context, c Caller) context.Context {
+	return context.WithValue(ctx, callerKey{}, c)
+}
+
+func callerOf(ctx context.Context) (Caller, bool) {
+	c, ok := ctx.Value(callerKey{}).(Caller)
+	return c, ok
+}
+
+// mayForce refuses to skip a check for anyone but the person in the web UI.
+func mayForce(ctx context.Context, what string) error {
+	if c, ok := callerOf(ctx); ok && !c.Person {
+		return errorf(ErrForbidden, "only the person logged in to the web UI can %s without a check", what)
+	}
+	return nil
+}
+
 // Status adds whether the staged changes passed a check.
 func (s *Service) Status(ctx context.Context) (Status, error) {
 	st, err := s.Repo.Status(ctx)
@@ -33,7 +59,11 @@ func (s *Service) Commit(ctx context.Context, message string, force bool) (strin
 	if err != nil {
 		return "", err
 	}
-	if !force && !s.Jobs.Passed(tree) {
+	if force {
+		if err := mayForce(ctx, "commit"); err != nil {
+			return "", err
+		}
+	} else if !s.Jobs.Passed(tree) {
 		return "", errorf(ErrNotChecked, "the staged changes have not passed a check yet: run the checks first, or commit without checks")
 	}
 	return s.Repo.commit(ctx, message)
@@ -48,7 +78,11 @@ func (s *Service) Push(ctx context.Context, force bool) (string, error) {
 	if _, err := s.Repo.currentBranch(ctx); err != nil { // no remote: nothing to push, checked or not
 		return "", err
 	}
-	if !force {
+	if force {
+		if err := mayForce(ctx, "push"); err != nil {
+			return "", err
+		}
+	} else {
 		if n, err := s.Repo.git(ctx, "rev-list", "--count", "@{upstream}..HEAD"); err == nil && strings.TrimSpace(n) == "0" {
 			return s.Repo.push(ctx) // nothing new to send
 		}

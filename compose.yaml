@@ -12,6 +12,9 @@ services:
       NIXMGR_AUTHOR_NAME: "Your Name" # every commit is made as this person
       NIXMGR_AUTHOR_EMAIL: "you@example.com"
       NIXMGR_PASSWORD_HASH_FILE: /run/secrets/nixmgr/password-hash
+      # With `tailscale serve` or another proxy on the host, the container sees it as the
+      # Docker gateway; name it so login limits count each client (the remote= of login log lines):
+      # NIXMGR_TRUSTED_PROXIES: "172.18.0.1"
       # Uncomment once the Forgejo repository exists (SSH deploy key with write access):
       # NIXMGR_REMOTE: "ssh://git@forgejo.lan:2222/pablo/nixos-config.git"
     volumes:
