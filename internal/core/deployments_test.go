@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -103,6 +104,7 @@ func TestDeploymentOverview(t *testing.T) {
 	gitOut(t, r.Dir, "branch", "testing-stale", c1)
 
 	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	d.started = time.Time{}
 	now := time.Now()
 	at := func(ago time.Duration, host, commit, phase, status, msg string) {
 		t.Helper()
@@ -132,11 +134,16 @@ func TestDeploymentOverview(t *testing.T) {
 	if len(got) != 10 {
 		t.Fatalf("machines: %v", ov.Machines)
 	}
-	want := map[string]string{"homeserver": "current", "workstation": "behind", "oldbox": "silent", "laptop": "failed",
+	want := map[string]string{"homeserver": "current", "workstation": "behind", "oldbox": "behind", "laptop": "failed",
 		"nas": "current", "pi": "current", "stale": "current", "ghost": "unknown", "newbox": "never", "pc": "behind"}
 	for h, st := range want {
 		if got[h].State != st {
 			t.Errorf("%s: state %q, want %q (%+v)", h, got[h].State, st, got[h])
+		}
+	}
+	for h, m := range got {
+		if m.Silent != (h == "oldbox") {
+			t.Errorf("%s: silent %v", h, m.Silent)
 		}
 	}
 	if w := got["workstation"]; w.Behind != 2 || w.Commit != c1 || w.Subject != "first" || w.BehindSince.IsZero() || now.Sub(w.BehindSince) > time.Minute || w.Target != c3 {
@@ -327,5 +334,140 @@ func TestCommitsBetween(t *testing.T) {
 	}
 	if _, _, err := r.CommitsBetween(ctx, sha('e'), c3); err == nil {
 		t.Fatal("an unknown commit was counted")
+	}
+}
+
+// storePath is a valid store path for a system.
+func storePath(c byte, name string) string {
+	return "/nix/store/" + strings.Repeat(string(c), 32) + "-nixos-system-" + name
+}
+
+// Heartbeats keep what a machine runs and when it last reported, without
+// filling its deployment history; every report kind updates them.
+func TestHeartbeatsAndSystemSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
+	now := time.Now().UTC().Truncate(time.Second)
+	beat := ReportIn{Host: "pi", Phase: "heartbeat", Current: storePath('a', "pi"), Booted: storePath('b', "pi"), Profile: storePath('a', "pi"), Reboot: true, SilentAfter: 2}
+	for name, in := range map[string]ReportIn{
+		"commit":       {Host: "pi", Phase: "heartbeat", Commit: sha('a')},
+		"status":       {Host: "pi", Phase: "heartbeat", Status: "done"},
+		"store path":   {Host: "pi", Phase: "heartbeat", Current: "/etc/passwd"},
+		"short hash":   {Host: "pi", Phase: "heartbeat", Current: "/nix/store/abc-nixos-system-pi"},
+		"booted":       {Host: "pi", Phase: "heartbeat", Current: storePath('a', "pi"), Booted: "/nix/store/" + strings.Repeat("e", 32) + "-x"},
+		"profile":      {Host: "pi", Phase: "heartbeat", Profile: storePath('a', "pi") + "\n"},
+		"negative":     {Host: "pi", Phase: "heartbeat", SilentAfter: -1},
+		"a year":       {Host: "pi", Phase: "heartbeat", SilentAfter: 24*366 + 1},
+		"deploy paths": {Host: "pi", Commit: sha('a'), Status: "done", Current: "relative"},
+	} {
+		if err := d.Record(in, now); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: got %v, want ErrInvalid", name, err)
+		}
+	}
+	ok(t, d.Record(beat, now.Add(-time.Hour)))
+	if len(d.reports) != 0 {
+		t.Fatalf("a heartbeat became a deployment report: %v", d.reports)
+	}
+	l := d.live["pi"]
+	if !l.Seen.Equal(now.Add(-time.Hour)) || !l.Beat.Equal(l.Seen) || l.SilentAfter != 2 || l.System == nil || l.System.Current != beat.Current || !l.System.Reboot || l.System.Booted != beat.Booted {
+		t.Fatalf("after a heartbeat: %+v %+v", l, l.System)
+	}
+	// A deployment report moves the snapshot and the last report, not the heartbeat.
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('c'), Status: "done", Current: storePath('c', "pi"), Profile: storePath('c', "pi")}, now))
+	l = d.live["pi"]
+	if !l.Seen.Equal(now) || !l.Beat.Equal(now.Add(-time.Hour)) || l.System.Current != storePath('c', "pi") || l.System.Reboot || !l.System.At.Equal(now) {
+		t.Fatalf("after a deployment: %+v %+v", l, l.System)
+	}
+	// An older report script sends no system: the last snapshot stays.
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('c'), Phase: "build", Status: "already built", SharedToken: true}, now.Add(time.Minute)))
+	if l = d.live["pi"]; l.System.Current != storePath('c', "pi") || !l.SharedToken {
+		t.Fatalf("after a report without a system: %+v", l)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "heartbeats.json")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("heartbeats.json: %v %v", fi, err)
+	}
+	again := must[*Deployments](t)(OpenDeployments(dir, d.repo))
+	if g := again.live["pi"]; !g.Beat.Equal(l.Beat) || g.System == nil || g.System.Current != l.System.Current || len(again.reports["pi"]) != 2 {
+		t.Fatalf("after reopening: %+v", g)
+	}
+	// Machines that only send heartbeats count towards the cap too.
+	for i := range maxReporters - 1 {
+		ok(t, d.Record(ReportIn{Host: fmt.Sprintf("m%d", i), Phase: "heartbeat"}, now))
+	}
+	isErr(t, d.Record(ReportIn{Host: "onemore", Phase: "heartbeat"}, now), ErrInvalid)
+	ok(t, d.Forget("m0"))
+	ok(t, d.Record(ReportIn{Host: "onemore", Phase: "heartbeat"}, now))
+	isErr(t, d.Forget("nobody"), ErrNotFound)
+}
+
+// A machine that sends heartbeats is flagged as silent once it has not reported
+// for longer than it allows, whatever its deployment state. One that only
+// reports deployments keeps the old rule: behind and quiet for 7 days.
+func TestSilentMachines(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	write(t, r, "flake.nix", "2\n")
+	c2 := commitAll(t, r, "second")
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), r))
+	d.started = time.Time{} // up for long: no warm-up
+	now := time.Now()
+	rec := func(ago time.Duration, in ReportIn) {
+		t.Helper()
+		ok(t, d.Record(in, now.Add(-ago)))
+	}
+	deploy := func(host, commit string) ReportIn { return ReportIn{Host: host, Commit: commit, Status: "done"} }
+	beat := func(host string, hours int) ReportIn {
+		return ReportIn{Host: host, Phase: "heartbeat", SilentAfter: hours}
+	}
+	rec(3*time.Hour, deploy("server", c2))
+	rec(3*time.Hour, beat("server", 2))
+	rec(5*time.Hour, ReportIn{Host: "broken", Commit: c2, Status: "failed", Error: "boom"})
+	rec(5*time.Hour, beat("broken", 2))
+	rec(30*24*time.Hour, deploy("laptop", c1))
+	rec(30*24*time.Hour, beat("laptop", 0)) // often off: never flagged
+	rec(10*time.Minute, deploy("fresh", c2))
+	rec(10*time.Minute, beat("fresh", 2))
+	rec(10*24*time.Hour, deploy("legacy-current", c2))
+	rec(10*24*time.Hour, deploy("legacy-behind", c1))
+	rec(time.Minute, beat("newbox", 2)) // set up, nothing deployed since
+
+	got := func() map[string]MachineDeployment {
+		out := map[string]MachineDeployment{}
+		for _, m := range must[DeployOverview](t)(d.Overview(ctx, nil, now)).Machines {
+			out[m.Host] = m
+		}
+		return out
+	}
+	ms := got()
+	for h, want := range map[string]struct {
+		state      string
+		silent     bool
+		after      int
+		heartbeats bool
+	}{
+		"server": {"current", true, 2, true}, "broken": {"failed", true, 2, true}, "laptop": {"behind", false, 0, true},
+		"fresh": {"current", false, 2, true}, "legacy-current": {"current", false, 168, false},
+		"legacy-behind": {"behind", true, 168, false}, "newbox": {"never", false, 2, true},
+	} {
+		m := ms[h]
+		if m.State != want.state || m.Silent != want.silent || m.SilentAfter != want.after || m.Heartbeats != want.heartbeats {
+			t.Errorf("%s: %s silent=%v after=%d heartbeats=%v, want %+v", h, m.State, m.Silent, m.SilentAfter, m.Heartbeats, want)
+		}
+	}
+	if n := ms["newbox"]; n.LastSeen.IsZero() || n.Commit != "" {
+		t.Errorf("newbox: %+v", n)
+	}
+	if s := ms["server"]; !s.LastSeen.Equal(now.Add(-3 * time.Hour).UTC().Truncate(time.Second)) {
+		t.Errorf("server last seen %v", s.LastSeen)
+	}
+
+	// Just after a start, machines have not had the time to report again: none is silent.
+	d.started = now.Add(-5 * time.Minute)
+	for h, m := range got() {
+		if m.Silent {
+			t.Errorf("%s is silent during the warm-up", h)
+		}
 	}
 }

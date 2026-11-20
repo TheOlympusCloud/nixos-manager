@@ -53,6 +53,10 @@ func (s *Server) deployReport(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
-	slog.Info("deployment reported", "host", in.Host, "commit", in.Commit[:12], "phase", cmp.Or(in.Phase, "deploy"), "status", in.Status)
+	if in.Phase == "heartbeat" { // every 15 minutes from every machine: not worth a line each
+		slog.Debug("heartbeat", "host", in.Host)
+	} else {
+		slog.Info("deployment reported", "host", in.Host, "commit", in.Commit[:12], "phase", cmp.Or(in.Phase, "deploy"), "status", in.Status)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

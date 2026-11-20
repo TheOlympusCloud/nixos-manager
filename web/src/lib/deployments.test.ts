@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Commit, DeployOverview, MachineDeployment } from './api'
-import { excerpt, forgetQuestion, installCommand, localOnly, pollInterval, progress, rollingOut, rollout, stateDetail, stateLabel, urlLine } from './deployments'
+import { excerpt, forgetQuestion, installCommand, localOnly, pollInterval, progress, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, urlLine } from './deployments'
 
 const commit = (sha: string, subject = sha): Commit => ({ sha, short: sha.slice(0, 7), author: 'Pablo', email: 'p@x', date: '2026-11-19T10:00:00Z', subject })
-const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', behind: 0, reports: [], ...extra })
+const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', behind: 0, reports: [], silent: false, silentAfter: 2, heartbeats: true, ...extra })
 const now = Date.parse('2026-11-19T12:00:00Z')
 const ov: DeployOverview = {
   reporting: true,
@@ -13,7 +13,7 @@ const ov: DeployOverview = {
     m('web', { commit: 'c3' }),
     m('nas', { state: 'behind', commit: 'c2', behind: 1, behindSince: '2026-11-19T11:50:00Z' }),
     m('pi', { branch: 'testing-pi', commit: 'tp' }),
-    m('old', { state: 'silent', commit: 'c0', behind: 3 }),
+    m('old', { state: 'behind', silent: true, silentAfter: 168, heartbeats: false, commit: 'c0', behind: 3, lastSeen: '2026-11-09T12:00:00Z' }),
     m('laptop', { state: 'failed', failure: { at: '', commit: 'c3', phase: 'build', status: 'failed', error: 'boom' } }),
     m('new', { state: 'never' }),
   ],
@@ -48,10 +48,30 @@ describe('deployments', () => {
   })
 
   it('words each state', () => {
-    expect(ov.machines.map(stateLabel)).toEqual(['Up to date', '1 behind', 'Up to date', 'Silent', 'Build failed', 'Not reporting'])
+    expect(ov.machines.map(stateLabel)).toEqual(['Up to date', '1 behind', 'Up to date', '3 behind', 'Build failed', 'Not reporting'])
+    expect(stateLabel(m('box', { state: 'never', lastSeen: '2026-11-19T11:59:00Z' }))).toBe('No deployment yet')
     expect(stateDetail(ov.machines[1])).toBe('1 commit behind main; comin should pick it up within minutes.')
     expect(stateDetail(ov.machines[2])).toBe('Runs the last commit of testing-pi.')
     expect(stateDetail(ov.machines[4])).toBe('comin could not build c3.')
+  })
+
+  it('says how long a machine has been silent', () => {
+    expect(silenceDetail(ov.machines[3], now)).toBe('No report for 10 d, more than the 168 hours it may stay silent: it may be off, comin or its report timer may have stopped, or it cannot reach this console.')
+    expect(silenceDetail(m('pi', { silent: true, lastSeen: '2026-11-19T09:00:00Z' }), now)).toMatch(/^No report for 3 h, more than the 2 hours it may stay silent/)
+  })
+
+  it('sorts and counts silent machines apart', () => {
+    const quiet = m('quiet', { silent: true }) // up to date, but gone quiet
+    expect([...ov.machines, quiet].map(tileOf)).toEqual(['current', 'behind', 'current', 'silent', 'failed', 'silent', 'silent'])
+    expect([...ov.machines, quiet].sort((a, b) => sortRank(a) - sortRank(b) || a.host.localeCompare(b.host)).map((x) => x.host)).toEqual([
+      'laptop',
+      'old',
+      'quiet',
+      'nas',
+      'new',
+      'pi',
+      'web',
+    ])
   })
 
   it('asks before forgetting a machine', () => {

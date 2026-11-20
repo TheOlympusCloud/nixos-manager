@@ -54,6 +54,7 @@ func TestDeploymentReportsOverHTTP(t *testing.T) {
 		{tok, "application/json", `{"host":"pi","commit":"HEAD","status":"done"}`, 400},
 		{tok, "application/json", `not json`, 400},
 		{tok, "application/json", good, 204},
+		{tok, "application/json", `{"host":"pi","phase":"heartbeat","current":"/nix/store/` + strings.Repeat("a", 32) + `-nixos-system-pi","silentAfter":2}`, 204},
 	} {
 		if code := report(t, e, c.token, c.ct, c.body); code != c.want {
 			t.Errorf("token %q, %s, %.40s: %d, want %d", c.token, c.ct, c.body, code, c.want)
@@ -65,7 +66,8 @@ func TestDeploymentReportsOverHTTP(t *testing.T) {
 	}
 	e.login(t)
 	var ov core.DeployOverview
-	if code := e.do(t, "GET", "/api/deployments", nil, &ov); code != 200 || !ov.Reporting || len(ov.Machines) != 1 || ov.Machines[0].Commit != sha {
+	if code := e.do(t, "GET", "/api/deployments", nil, &ov); code != 200 || !ov.Reporting || len(ov.Machines) != 1 || ov.Machines[0].Commit != sha ||
+		!ov.Machines[0].Heartbeats || ov.Machines[0].System == nil || ov.Machines[0].SilentAfter != 2 {
 		t.Fatalf("overview: %d %+v", code, ov)
 	}
 	var got struct{ Token string }

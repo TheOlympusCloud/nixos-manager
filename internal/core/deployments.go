@@ -24,13 +24,20 @@ import (
 // deployment (postDeploymentCommand, COMIN_STATUS done or failed) and, in comin
 // versions that have it, after each build (postBuildCommand, COMIN_PHASE=build,
 // built, already built or failed). A build that leaves the machine unchanged is
-// never deployed, so without the build report it would look behind.
+// never deployed, so without the build report it would look behind. A timer
+// also sends a heartbeat every 15 minutes, and every report says which system
+// the machine runs and boots.
 
 const (
 	MaxReportBody  = 16 << 10
-	keepReports    = 20  // per machine
-	maxReporters   = 200 // machines; the token is shared, so one machine could invent others
-	silentAfter    = 7 * 24 * time.Hour
+	keepReports    = 20     // per machine
+	maxReporters   = 200    // machines; the token is shared, so one machine could invent others
+	legacySilence  = 7 * 24 // hours; machines without heartbeats: behind and no report for this long
+	maxSilentAfter = 24 * 366
+	// silenceWarmup is how long after a start no machine is called silent: the
+	// server may have been down, and the machines report again within a
+	// heartbeat (15 minutes).
+	silenceWarmup  = 20 * time.Minute
 	behindAfter    = time.Hour
 	rolloutCommits = 12
 	defaultBranch  = "main" // comin's own default for a remote's main branch
@@ -41,7 +48,9 @@ var (
 	reportSHA  = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	reportRef  = regexp.MustCompile(`^[\x21-\x7e]{0,200}$`)
 	reportGen  = regexp.MustCompile(`^[A-Za-z0-9-]{0,64}$`)
-	reportOK   = map[string][]string{"deploy": {"done", "failed"}, "build": {"built", "already built", "failed"}}
+	reportOK   = map[string][]string{"deploy": {"done", "failed"}, "build": {"built", "already built", "failed"}, "heartbeat": {""}}
+	// A store path as readlink -f gives it: Nix's base-32 hash, then the name.
+	reportPath = regexp.MustCompile(`^(/nix/store/[0-9a-df-np-sv-z]{32}-[A-Za-z0-9+._?=-]{1,180})?$`)
 )
 
 // ReportIn is the body a machine posts.
@@ -53,6 +62,36 @@ type ReportIn struct {
 	Status     string `json:"status"`
 	Error      string `json:"error"`
 	Generation string `json:"generation"`
+	// What the machine runs (/run/current-system), booted (/run/booted-system)
+	// and boots next (the system profile); older report scripts send none.
+	Current string `json:"current"`
+	Booted  string `json:"booted"`
+	Profile string `json:"profile"`
+	Reboot  bool   `json:"reboot"` // the running kernel, initrd or kernel modules are not the booted ones
+	// SilentAfter is, in a heartbeat, how many hours the machine may go without
+	// reporting before it is flagged (fleet.deployReport.silentAfter); 0 never.
+	SilentAfter int `json:"silentAfter"`
+	// SharedToken is set by the server, never by the machine: it reported
+	// with the shared fleet token instead of its own.
+	SharedToken bool `json:"-"`
+}
+
+// SystemState is what a machine last said it runs.
+type SystemState struct {
+	At      time.Time `json:"at"`
+	Current string    `json:"current"`
+	Booted  string    `json:"booted,omitempty"`
+	Profile string    `json:"profile,omitempty"`
+	Reboot  bool      `json:"reboot"`
+}
+
+// liveState is what a machine's reports of any kind say about it now.
+type liveState struct {
+	Seen        time.Time    `json:"seen"`          // its last report
+	Beat        time.Time    `json:"beat,omitzero"` // its last heartbeat
+	SilentAfter int          `json:"silentAfter"`   // hours, from its last heartbeat
+	SharedToken bool         `json:"sharedToken,omitempty"`
+	System      *SystemState `json:"system,omitempty"`
 }
 
 // DeployReport is one report as stored.
@@ -68,29 +107,36 @@ type DeployReport struct {
 
 func (r DeployReport) failed() bool { return r.Status == "failed" }
 
-// Deployments keeps the last reports of each machine in deployments.json and
-// the fleet report token machines send them with.
+// Deployments keeps the last reports of each machine in deployments.json,
+// what its latest report of any kind (heartbeats too) said in heartbeats.json,
+// and the fleet report token machines send them with.
 type Deployments struct {
 	repo      *Repo
 	path      string
+	livePath  string
 	tokenPath string
+	started   time.Time // when this process opened them, for the silence warm-up
 
 	mu      sync.Mutex
 	token   string
 	reports map[string][]DeployReport // newest first
+	live    map[string]liveState
 }
 
 // OpenDeployments loads dataDir/deployments.json and the report token,
 // creating the token on first use.
 func OpenDeployments(dataDir string, repo *Repo) (*Deployments, error) {
-	d := &Deployments{repo: repo, path: filepath.Join(dataDir, "deployments.json"), tokenPath: filepath.Join(dataDir, "deploy-token"), reports: map[string][]DeployReport{}}
-	b, err := os.ReadFile(d.path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if err == nil {
-		if err := json.Unmarshal(b, &d.reports); err != nil {
-			return nil, errorf(ErrInvalid, "reading %s: %v", d.path, err)
+	d := &Deployments{repo: repo, path: filepath.Join(dataDir, "deployments.json"), livePath: filepath.Join(dataDir, "heartbeats.json"),
+		tokenPath: filepath.Join(dataDir, "deploy-token"), started: time.Now(), reports: map[string][]DeployReport{}, live: map[string]liveState{}}
+	for path, into := range map[string]any{d.path: &d.reports, d.livePath: &d.live} {
+		b, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		if err == nil {
+			if err := json.Unmarshal(b, into); err != nil {
+				return nil, errorf(ErrInvalid, "reading %s: %v", path, err)
+			}
 		}
 	}
 	t, err := os.ReadFile(d.tokenPath)
@@ -136,7 +182,8 @@ func (d *Deployments) CheckToken(secret string) bool {
 	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
 }
 
-// Record validates a machine's report and stores it.
+// Record validates a machine's report and stores it: a deployment or build in
+// its history, and what any report (a heartbeat too) says it runs now.
 func (d *Deployments) Record(in ReportIn, now time.Time) error {
 	if d == nil {
 		return errorf(ErrNotFound, "deployment reports are not set up")
@@ -144,10 +191,13 @@ func (d *Deployments) Record(in ReportIn, now time.Time) error {
 	if in.Phase == "" {
 		in.Phase = "deploy"
 	}
+	beat := in.Phase == "heartbeat"
 	switch {
 	case !reportHost.MatchString(in.Host):
 		return errorf(ErrInvalid, "host must be a machine name")
-	case !reportSHA.MatchString(in.Commit):
+	case beat && in.Commit != "":
+		return errorf(ErrInvalid, "a heartbeat names no commit")
+	case !beat && !reportSHA.MatchString(in.Commit):
 		return errorf(ErrInvalid, "commit must be a 40-character hex SHA")
 	case !slices.Contains(reportOK[in.Phase], in.Status):
 		return errorf(ErrInvalid, "unknown phase/status %q/%q", in.Phase, in.Status)
@@ -155,24 +205,66 @@ func (d *Deployments) Record(in ReportIn, now time.Time) error {
 		return errorf(ErrInvalid, "invalid ref or generation")
 	case len(in.Error) > 8192 || !utf8.ValidString(in.Error):
 		return errorf(ErrInvalid, "error must be UTF-8 text of at most 8 KiB")
+	case !reportPath.MatchString(in.Current) || !reportPath.MatchString(in.Booted) || !reportPath.MatchString(in.Profile):
+		return errorf(ErrInvalid, "current, booted and profile must be store paths")
+	case in.SilentAfter < 0 || in.SilentAfter > maxSilentAfter:
+		return errorf(ErrInvalid, "silentAfter must be 0 to %d hours", maxSilentAfter)
 	}
-	rep := DeployReport{At: now.UTC().Truncate(time.Second), Commit: in.Commit, Ref: in.Ref, Phase: in.Phase, Status: in.Status, Error: in.Error, Generation: in.Generation}
+	at := now.UTC().Truncate(time.Second)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	old, known := d.reports[in.Host]
-	if !known && len(d.reports) >= maxReporters {
+	oldLive, alive := d.live[in.Host]
+	if !known && !alive && d.machines() >= maxReporters {
 		return errorf(ErrInvalid, "already keeping reports of %d machines", maxReporters)
 	}
-	d.reports[in.Host] = append([]DeployReport{rep}, old[:min(len(old), keepReports-1)]...)
-	if err := d.save(); err != nil {
+	l := oldLive
+	l.Seen, l.SharedToken = at, in.SharedToken
+	if beat {
+		l.Beat, l.SilentAfter = at, in.SilentAfter
+	}
+	if in.Current != "" {
+		l.System = &SystemState{At: at, Current: in.Current, Booted: in.Booted, Profile: in.Profile, Reboot: in.Reboot}
+	}
+	d.live[in.Host] = l
+	if !beat {
+		d.reports[in.Host] = append([]DeployReport{{At: at, Commit: in.Commit, Ref: in.Ref, Phase: in.Phase, Status: in.Status, Error: in.Error, Generation: in.Generation}}, old[:min(len(old), keepReports-1)]...)
+	}
+	undo := func() {
+		if alive {
+			d.live[in.Host] = oldLive
+		} else {
+			delete(d.live, in.Host)
+		}
 		if known {
 			d.reports[in.Host] = old
 		} else {
 			delete(d.reports, in.Host)
 		}
+	}
+	if err := d.saveLive(); err != nil {
+		undo()
 		return err
 	}
+	if !beat {
+		if err := d.save(); err != nil {
+			undo()
+			d.saveLive() // best effort: back to what the files said before
+			return err
+		}
+	}
 	return nil
+}
+
+// machines counts the machines anything is kept about; d.mu must be held.
+func (d *Deployments) machines() int {
+	n := len(d.reports)
+	for h := range d.live {
+		if _, ok := d.reports[h]; !ok {
+			n++
+		}
+	}
+	return n
 }
 
 func (d *Deployments) save() error {
@@ -181,6 +273,14 @@ func (d *Deployments) save() error {
 		return err
 	}
 	return writeAtomic(d.path, b)
+}
+
+func (d *Deployments) saveLive() error {
+	b, err := json.MarshalIndent(d.live, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(d.livePath, b)
 }
 
 // writeAtomic replaces path with data, readable by the service user only:
@@ -209,10 +309,20 @@ func writeAtomic(path string, data []byte) error {
 // the branch comin follows for it.
 type MachineDeployment struct {
 	Host string `json:"host"`
-	// State: never (no report), failed (the last report is a failure), unknown
-	// (its commit is not in this working copy or not on the branch), current,
-	// behind, or silent (behind and no report for 7 days: probably off).
+	// State: never (no deployment reported), failed (the last report is a
+	// failure), unknown (its commit is not in this working copy or not on the
+	// branch), current or behind.
 	State string `json:"state"`
+	// Silent: no report for longer than SilentAfter hours (0: never flagged),
+	// whatever the state. A machine without heartbeats (an older report module)
+	// only reports deployments: it is silent when behind for 7 days.
+	Silent      bool `json:"silent"`
+	SilentAfter int  `json:"silentAfter"`
+	Heartbeats  bool `json:"heartbeats"` // it sends them
+	// SharedToken: its last report used the shared fleet token, not its own.
+	SharedToken bool `json:"sharedToken,omitempty"`
+	// System is what it last said it runs, boots and boots next.
+	System *SystemState `json:"system,omitempty"`
 	// Branch is the main branch its comin follows (services.comin.remotes), or
 	// its testing branch when that is on top of the main one.
 	Branch string `json:"branch"`
@@ -221,7 +331,7 @@ type MachineDeployment struct {
 	Commit      string         `json:"commit,omitempty"`
 	Subject     string         `json:"subject,omitempty"`
 	DeployedAt  time.Time      `json:"deployedAt,omitzero"`
-	LastSeen    time.Time      `json:"lastSeen,omitzero"`
+	LastSeen    time.Time      `json:"lastSeen,omitzero"` // its last report of any kind
 	Behind      int            `json:"behind"`
 	BehindSince time.Time      `json:"behindSince,omitzero"` // when the oldest commit it lacks was made
 	Failure     *DeployReport  `json:"failure,omitempty"`
@@ -261,6 +371,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	for h, rs := range d.reports {
 		reports[h] = slices.Clone(rs)
 	}
+	live := maps.Clone(d.live)
 	d.mu.Unlock()
 
 	tips, err := d.branchTips(ctx)
@@ -276,6 +387,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 			}
 			for _, h := range gone {
 				delete(reports, h)
+				delete(live, h)
 			}
 		}
 	}
@@ -283,9 +395,12 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	for h := range reports {
 		hosts = append(hosts, h)
 	}
+	for h := range live {
+		hosts = append(hosts, h)
+	}
 	slices.Sort(hosts)
 	hosts = slices.Compact(hosts)
-	ov.Reporting = len(reports) > 0
+	ov.Reporting = len(reports) > 0 || len(live) > 0
 
 	if tip := tips[ov.Branch]; tip != "" {
 		if ov.Commits, err = d.repo.Log(ctx, "", tip, rolloutCommits); err != nil {
@@ -318,6 +433,11 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 				m.Failure = &m.Reports[0]
 			}
 		}
+		l := live[h]
+		if l.Seen.After(m.LastSeen) { // reports from before heartbeats have no live state
+			m.LastSeen = l.Seen
+		}
+		m.Heartbeats, m.SharedToken, m.System = !l.Beat.IsZero(), l.SharedToken, l.System
 		// What it runs: the last deployment, or a build that left its system unchanged ("already built").
 		// "built" is not running yet: comin switches (or waits for confirmation) after it, then reports.
 		if i := slices.IndexFunc(m.Reports, func(r DeployReport) bool { return !r.failed() && r.Status != "built" }); i >= 0 {
@@ -353,11 +473,15 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 			m.State = "unknown"
 		case m.Commit == m.Target:
 			m.State = "current"
-		case now.Sub(m.LastSeen) > silentAfter:
-			m.State = "silent"
 		default:
 			m.State = "behind"
 		}
+		m.SilentAfter = legacySilence
+		if m.Heartbeats {
+			m.SilentAfter = l.SilentAfter
+		}
+		m.Silent = m.SilentAfter > 0 && !m.LastSeen.IsZero() && (m.Heartbeats || m.State == "behind") &&
+			now.Sub(m.LastSeen) > time.Duration(m.SilentAfter)*time.Hour && now.Sub(d.started) > silenceWarmup
 		ov.Machines = append(ov.Machines, m)
 	}
 	return ov, nil
@@ -403,18 +527,28 @@ func (d *Deployments) Forget(hosts ...string) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	old := map[string][]DeployReport{}
+	old, oldLive := map[string][]DeployReport{}, map[string]liveState{}
 	for _, h := range hosts {
 		if rs, ok := d.reports[h]; ok {
 			old[h] = rs
 			delete(d.reports, h)
 		}
+		if l, ok := d.live[h]; ok {
+			oldLive[h] = l
+			delete(d.live, h)
+		}
 	}
-	if len(old) == 0 {
+	if len(old) == 0 && len(oldLive) == 0 {
 		return errorf(ErrNotFound, "no reports from %s", strings.Join(hosts, ", "))
 	}
-	if err := d.save(); err != nil {
+	err := d.save()
+	if err == nil {
+		err = d.saveLive()
+	}
+	if err != nil {
 		maps.Copy(d.reports, old)
+		maps.Copy(d.live, oldLive)
+		d.save() // best effort: back to what the files said before
 		return err
 	}
 	return nil

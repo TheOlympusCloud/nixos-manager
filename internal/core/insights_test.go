@@ -149,17 +149,21 @@ func TestReleaseInsights(t *testing.T) {
 
 func TestDeployInsights(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
-	m := &Model{Hosts: []Host{{Name: "web"}, {Name: "pi"}, {Name: "nas"}, {Name: "new"}, {Name: "off"}, {Name: "fresh"}}}
+	m := &Model{Hosts: []Host{{Name: "web"}, {Name: "pi"}, {Name: "nas"}, {Name: "new"}, {Name: "off"}, {Name: "fresh"}, {Name: "quiet"}, {Name: "old"}, {Name: "box"}}}
 	rep := []DeployReport{{At: now}}
 	deploys := []MachineDeployment{
-		{Host: "web", State: "current", Reports: rep},
-		{Host: "pi", State: "failed", Commit: strings.Repeat("a", 40), Reports: rep,
+		{Host: "web", State: "current", Reports: rep, Heartbeats: true},
+		{Host: "pi", State: "failed", Commit: strings.Repeat("a", 40), Reports: rep, Heartbeats: true,
 			Failure: &DeployReport{Commit: strings.Repeat("b", 40), Phase: "build", Status: "failed", Error: "error: attribute 'foo' missing"}},
-		{Host: "nas", State: "behind", Behind: 2, BehindSince: now.Add(-2 * time.Hour), Reports: rep},
-		{Host: "fresh", State: "behind", Behind: 1, BehindSince: now.Add(-10 * time.Minute), Reports: rep},
+		{Host: "nas", State: "behind", Behind: 2, BehindSince: now.Add(-2 * time.Hour), Reports: rep, Heartbeats: true},
+		{Host: "fresh", State: "behind", Behind: 1, BehindSince: now.Add(-10 * time.Minute), Reports: rep, Heartbeats: true},
 		{Host: "new", State: "never", Reports: []DeployReport{}},
-		{Host: "off", State: "silent", Reports: rep},
-		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep}, // not in the fleet
+		// Behind because it is off: silent says it, behind would only repeat it.
+		{Host: "off", State: "behind", Behind: 3, BehindSince: now.Add(-9 * time.Hour), Silent: true, Reports: rep, Heartbeats: true},
+		{Host: "quiet", State: "current", Silent: true, Reports: rep, Heartbeats: true},           // up to date, but gone quiet
+		{Host: "old", State: "current", Reports: rep},                                             // an older report module: no heartbeats
+		{Host: "box", State: "never", Reports: []DeployReport{}, LastSeen: now, Heartbeats: true}, // set up, nothing deployed since
+		{Host: "gone", State: "failed", Failure: &DeployReport{Status: "failed"}, Reports: rep},   // not in the fleet
 	}
 	got := Insights(m, deploys, "", now)
 	f := insightByID(got, "deploy-failed:pi")
@@ -170,8 +174,11 @@ func TestDeployInsights(t *testing.T) {
 	if b := insightByID(got, "deploy-behind"); b.Severity != "warning" || strings.Join(b.Hosts, ",") != "nas" {
 		t.Errorf("deploy-behind: %+v", b)
 	}
-	if s := insightByID(got, "deploy-silent"); s.Severity != "info" || strings.Join(s.Hosts, ",") != "off" {
+	if s := insightByID(got, "deploy-silent"); s.Severity != "warning" || strings.Join(s.Hosts, ",") != "off,quiet" || s.Title != "off and quiet have stopped reporting" {
 		t.Errorf("deploy-silent: %+v", s)
+	}
+	if h := insightByID(got, "deploy-no-heartbeat"); h.Severity != "info" || strings.Join(h.Hosts, ",") != "old" || h.Title != "old sends no heartbeats" {
+		t.Errorf("deploy-no-heartbeat: %+v", h)
 	}
 	if n := insightByID(got, "deploy-never"); n.Severity != "info" || strings.Join(n.Hosts, ",") != "new" || n.Title != "new has never reported a deployment" {
 		t.Errorf("deploy-never: %+v", n)

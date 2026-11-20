@@ -290,15 +290,22 @@ func list(xs []string) string {
 }
 
 // deployInsights flags fleet machines whose last deployment failed, that lag
-// behind their branch, or that stopped reporting while others report.
+// behind their branch, that stopped reporting, or that report without
+// heartbeats.
 func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insight {
 	var out []Insight
-	var behind, silent, never []string
+	var behind, silent, never, legacy []string
 	reporting := false
 	for _, d := range deploys {
 		reporting = reporting || len(d.Reports) > 0
 		if !slices.ContainsFunc(m.Hosts, func(h Host) bool { return h.Name == d.Host }) {
 			continue // reported by a machine that is not in this fleet (any more)
+		}
+		if d.Silent {
+			silent = append(silent, d.Host)
+		}
+		if len(d.Reports) > 0 && !d.Heartbeats {
+			legacy = append(legacy, d.Host)
 		}
 		switch {
 		case d.State == "failed" && d.Failure != nil:
@@ -324,12 +331,10 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 			out = append(out, Insight{ID: "deploy-failed:" + d.Host, Severity: "error", Hosts: []string{d.Host}, Link: "#/deployments",
 				Title:  fmt.Sprintf("%s failed to %s %.7s", d.Host, what, f.Commit),
 				Detail: fmt.Sprintf("%s %s Deployments shows the error; journalctl -u comin on the machine has the whole log.", msg, runs)})
-		case d.State == "behind" && now.Sub(d.BehindSince) > behindAfter:
+		case d.State == "behind" && !d.Silent && now.Sub(d.BehindSince) > behindAfter: // silent says why it is behind
 			behind = append(behind, d.Host)
-		case d.State == "never":
+		case d.State == "never" && d.LastSeen.IsZero():
 			never = append(never, d.Host)
-		case d.State == "silent":
-			silent = append(silent, d.Host)
 		}
 	}
 	are := func(hs []string) string { return map[bool]string{true: "has", false: "have"}[len(hs) == 1] }
@@ -342,10 +347,15 @@ func deployInsights(m *Model, deploys []MachineDeployment, now time.Time) []Insi
 			Title:  fmt.Sprintf("%s %s not caught up for over an hour", list(behind), are(behind)),
 			Detail: fmt.Sprintf("%s still %s an older commit of the branch comin follows. comin may fail to evaluate or build the new one (older comin versions do not report that), or cannot reach Forgejo: run journalctl -u comin on %s.", it, runs, them)})
 	}
-	if reporting && len(silent) > 0 {
-		out = append(out, Insight{ID: "deploy-silent", Severity: "info", Hosts: silent, Link: "#/deployments",
-			Title:  fmt.Sprintf("%s %s not reported a deployment in 7 days", list(silent), are(silent)),
-			Detail: "They reported before. Check that they are on, that comin runs, and that they still reach this console."})
+	if len(silent) > 0 {
+		out = append(out, Insight{ID: "deploy-silent", Severity: "warning", Hosts: silent, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s stopped reporting", list(silent), are(silent)),
+			Detail: "No report or heartbeat for longer than fleet.deployReport.silentAfter allows (7 days and a commit behind for a machine without heartbeats). Check that it is on, that comin and its report timer run, and that it still reaches this console. A machine that is often off can set silentAfter = null."})
+	}
+	if len(legacy) > 0 {
+		out = append(out, Insight{ID: "deploy-no-heartbeat", Severity: "info", Hosts: legacy, Link: "#/deployments",
+			Title:  fmt.Sprintf("%s %s no heartbeats", list(legacy), map[bool]string{true: "sends", false: "send"}[len(legacy) == 1]),
+			Detail: "Its report module only reports deployments, so a machine that stops while up to date shows only once a commit is 7 days late, and what it runs is not compared with its commit. Copy report-deployment.sh and report-deployments.nix from the starter fleet's modules into the repository's modules (README, Deployments)."})
 	}
 	if reporting && len(never) > 0 {
 		out = append(out, Insight{ID: "deploy-never", Severity: "info", Hosts: never, Link: "#/deployments",

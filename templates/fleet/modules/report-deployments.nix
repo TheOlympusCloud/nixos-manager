@@ -1,8 +1,11 @@
 # Tells nixos-manager what comin did on this machine, so its Deployments view
-# shows which commit every machine runs and why a deployment failed.
+# shows which commit every machine runs and why a deployment failed. A timer
+# also reports every 15 minutes that the machine is up and which system it
+# runs, so nixos-manager notices a machine that stops, or that runs something
+# else than its commit builds.
 #
 # On when fleet.deployReport.url is set (common.nix). Each machine also needs
-# the fleet report token from the Deployments view in a file, never in this
+# its own report token from the Deployments view in a file, never in this
 # repository: without the file it reports nothing. It never fails a deployment.
 {
   config,
@@ -19,14 +22,20 @@ let
       pkgs.coreutils
       pkgs.curl
       pkgs.jq
+      pkgs.util-linux # flock
     ];
     text = ''
       url=${lib.escapeShellArg cfg.url}
       token_file=${lib.escapeShellArg cfg.tokenFile}
       host=${lib.escapeShellArg config.services.comin.hostname}
+      state_dir=${stateDir}
+      silent_after=${toString (if cfg.silentAfter == null then 0 else cfg.silentAfter)}
+      root=
     ''
     + builtins.readFile ./report-deployment.sh;
   };
+  # Holds the default token file and a report that could not be delivered yet.
+  stateDir = "/var/lib/nixos-manager-report";
 in
 {
   options.fleet.deployReport = {
@@ -41,7 +50,13 @@ in
       type = lib.types.str;
       default = "/var/lib/nixos-manager-report/token";
       example = lib.literalExpression "config.sops.secrets.nixos-manager-report.path";
-      description = "File holding the fleet report token. Put it there over SSH, or point this at a sops-nix or agenix secret.";
+      description = "File holding this machine's report token. Put it there over SSH, or point this at a sops-nix or agenix secret.";
+    };
+    silentAfter = lib.mkOption {
+      type = lib.types.nullOr (lib.types.ints.between 1 8784);
+      default = 2;
+      example = null;
+      description = "Hours without a report after which nixos-manager flags this machine as silent. null for a machine that is often off, like a laptop: it is never flagged.";
     };
   };
 
@@ -53,6 +68,27 @@ in
     # commits that leave this machine unchanged (so nothing is deployed), get reported too.
     // lib.optionalAttrs (options.services.comin ? postBuildCommand) {
       postBuildCommand = lib.getExe report;
+    };
+
+    systemd.services.nixos-manager-heartbeat = {
+      description = "Tell nixos-manager this machine is up and what it runs";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${lib.getExe report} heartbeat";
+        StateDirectory = "nixos-manager-report";
+        StateDirectoryMode = "0700";
+        ProtectSystem = "strict";
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+      };
+    };
+    systemd.timers.nixos-manager-heartbeat = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "2min";
+        OnUnitActiveSec = "15min";
+        RandomizedDelaySec = "1min";
+      };
     };
   };
 }

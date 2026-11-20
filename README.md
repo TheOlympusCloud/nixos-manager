@@ -434,8 +434,16 @@ one): its `branches.main.name`, or its `branches.testing.name`
 (`testing-<hostname>` by default) when that branch is on top of the main one. Per machine it shows the
 commit, when it was deployed, and comin's error when a build or switch failed;
 the machine page has the same in its **Deployment** card, and the fleet graph
-marks each machine deployed, behind or failed. **Health** flags a failed
+marks each machine deployed, behind, failed or silent. **Health** flags a failed
 deployment, a machine behind for over an hour, and one that stopped reporting.
+
+Every 15 minutes each machine also sends a heartbeat with the system it runs,
+the one it booted and the one it boots next. A machine that has not reported for
+`fleet.deployReport.silentAfter` hours (2 by default) is flagged as silent,
+whatever its deployment state: an up-to-date machine that dies no longer stays
+green. Set `silentAfter = null;` on a machine that is often off, such as a
+laptop, so it is never flagged. No machine is called silent in the first 20
+minutes after nixos-manager starts, while the machines report in again.
 
 To turn it on (the **Deployments** view walks you through it):
 
@@ -466,17 +474,24 @@ To turn it on (the **Deployments** view walks you through it):
 comin versions that have it, `postBuildCommand`, which also reports failed
 builds and commits that leave a machine unchanged. Without it, a machine whose
 configuration a commit does not change looks behind until a commit does change
-it. The hook posts with `curl` to `/api/deployments/report`, does nothing
-without the token file, and never fails a deployment. nixos-manager keeps the
-last 20 reports per machine in `$NIXMGR_DATA/deployments.json`; the token is in
-`$NIXMGR_DATA/deploy-token`. The reports of a machine that is no longer in the
+it. A systemd timer, `nixos-manager-heartbeat.timer`, sends the heartbeat. The
+hook posts with `curl` to `/api/deployments/report`, does nothing without the
+token file, and never fails a deployment. A comin report that cannot be
+delivered (nixos-manager is down, say) waits in
+`/var/lib/nixos-manager-report/pending.json` and goes with the next heartbeat.
+nixos-manager keeps the last 20 reports per machine in
+`$NIXMGR_DATA/deployments.json`, and what each machine's latest report or
+heartbeat said in `$NIXMGR_DATA/heartbeats.json`. The reports of a machine that is no longer in the
 flake are deleted once the working copy is exactly the tip of the branch comin
 deploys, if the machine last reported a commit of that branch, deployed from
 it. A machine deleted but not pushed, or one that comin deploys from another
 branch, keeps them. **Forget** on a machine's row deletes its reports by hand; it comes
 back if it reports again. A repository made from an older starter fleet has
-no hook yet: copy both `report-deployment*` files from `templates/fleet/modules/`
-into its `modules/` and import `report-deployments.nix` from `common.nix`.
+no hook, or one without heartbeats (Health lists the machines that send none):
+copy both `report-deployment*` files from `templates/fleet/modules/` into its
+`modules/` and import `report-deployments.nix` from `common.nix`. Until then such
+a machine is only flagged as silent when it is behind and has not reported for
+7 days.
 
 ## Binary cache
 

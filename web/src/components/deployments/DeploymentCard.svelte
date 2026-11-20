@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { excerpt, short, stateDetail } from '../../lib/deployments'
+  import { excerpt, short, silenceDetail, stateDetail } from '../../lib/deployments'
   import { deployOf, deploys, watchDeployments } from '../../lib/deployments.svelte'
   import { link } from '../../lib/router.svelte'
   import { ago } from '../../lib/util'
@@ -22,7 +22,7 @@
   </div>
   {#if !deploys.overview}
     <span class="skel" style:width="60%"></span>
-  {:else if !m || m.state === 'never'}
+  {:else if !m || (m.state === 'never' && !m.lastSeen)}
     <p class="muted">{host} has not reported a deployment yet, so what it runs is unknown here. <a href={link('deployments')}>Turn on reporting</a> to see the commit comin deployed and why a deployment failed.</p>
   {:else}
     <dl class="kv">
@@ -38,6 +38,7 @@
       <dd><span class="mono">{m.branch}</span>{#if m.behind && m.state !== 'failed'}<span class="muted"> · {m.behind} behind</span>{/if}</dd>
     </dl>
     {#if !m.failure}<p class="muted small state">{stateDetail(m)}</p>{/if}
+    {#if m.silent}<p class="small state warn-line" role="status">{silenceDetail(m)}</p>{/if}
     {#if m.failure}
       <div class="fail" role="alert">
         <div class="fail-head">
@@ -102,6 +103,9 @@
   }
   .state {
     margin: var(--s2) 0 0;
+  }
+  .warn-line {
+    color: var(--yellow);
   }
   .fail {
     margin-top: var(--s3);

@@ -301,11 +301,21 @@ export const api = {
 
 /** One report: comin deployed (phase deploy: done, failed) or built (phase build: built, already built, failed) a commit. */
 export type DeployReport = { at: string; commit: string; ref?: string; phase: 'deploy' | 'build'; status: string; error?: string; generation?: string }
-/** never: no report; unknown: its commit is not in the working copy or not on the branch; silent: behind with no report for 7 days. */
-export type DeployState = 'current' | 'behind' | 'failed' | 'silent' | 'unknown' | 'never'
+/** never: no deployment reported; unknown: its commit is not in the working copy or not on the branch. */
+export type DeployState = 'current' | 'behind' | 'failed' | 'unknown' | 'never'
+/** What a machine last said it runs (/run/current-system), booted, and boots next (the system profile). */
+export type SystemState = { at: string; current: string; booted?: string; profile?: string; reboot: boolean }
 export type MachineDeployment = {
   host: string
   state: DeployState
+  /** No report for more than silentAfter hours (0: never flagged), whatever the state. */
+  silent: boolean
+  silentAfter: number
+  /** It sends heartbeats (a report module from before them does not). */
+  heartbeats: boolean
+  /** Its last report used the shared fleet token, not its own. */
+  sharedToken?: boolean
+  system?: SystemState
   /** The main branch its comin follows, or its testing branch when that is on top of it. */
   branch: string
   target?: string

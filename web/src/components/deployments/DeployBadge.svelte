@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { MachineDeployment } from '../../lib/api'
-  import { stateDetail, stateLabel, stateTone } from '../../lib/deployments'
+  import { silenceDetail, stateDetail, stateLabel, stateTone } from '../../lib/deployments'
 
-  /** A machine's deployment state as a small badge. */
+  /** A machine's deployment state as a small badge, and a second one when it went silent. */
   let { m }: { m: MachineDeployment } = $props()
 </script>
 
 <span class="badge dep t-{stateTone[m.state]}" title={stateDetail(m)}><span class="dot" aria-hidden="true"></span>{stateLabel(m)}</span>
+{#if m.silent}<span class="badge dep t-warn" title={silenceDetail(m)}><span class="dot" aria-hidden="true"></span>Silent</span>{/if}
 
 <style>
   .dep .dot {
