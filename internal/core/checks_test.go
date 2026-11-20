@@ -414,3 +414,14 @@ func TestCheckBuildsTheChangedMachineWithRealNix(t *testing.T) {
 	_, err = s.Push(ctx, false)
 	isErr(t, err, ErrNotChecked)
 }
+
+// A check that fails before it compared the machines has no summary to show,
+// so nothing claims that no machine changes.
+func TestCheckThatFailsBeforeComparingHasNoSummary(t *testing.T) {
+	s := buildService(t, true)
+	s.Jobs.Nix = script(t, "nix", strings.Replace(buildNix, "echo \"nix $*\"\n", "echo \"nix $*\"\ncase \"$*\" in *\"flake check\"*) exit 1 ;; esac\n", 1))
+	write(t, s.Repo, "hosts/web", "web kernel=2\n")
+	if info := runCheck(t, s); info.State != "failed" || info.Summary != nil {
+		t.Fatalf("check %s, summary %+v:\n%s", info.State, info.Summary, info.Output)
+	}
+}

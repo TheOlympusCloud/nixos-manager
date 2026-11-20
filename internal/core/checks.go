@@ -42,7 +42,7 @@ type CheckSummary struct {
 // Changes shows), then a dry build of each extra target.
 func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 	tree, base := job.tree, job.Req.Base
-	sum := &CheckSummary{Base: base, Changed: []string{}, Built: []string{}}
+	var sum *CheckSummary // once the machines are compared
 	defer func() {
 		job.mu.Lock()
 		job.summary = sum
@@ -87,6 +87,7 @@ func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 	if before.Error != "" {
 		fmt.Fprintln(job, "What is pushed does not evaluate, so every machine is built.")
 	}
+	sum = &CheckSummary{Base: base, Changed: []string{}, Built: []string{}}
 	hosts := map[string]Host{}
 	for _, h := range after.Hosts {
 		hosts[h.Name] = h
@@ -147,6 +148,7 @@ func (js *Jobs) buildSystems(ctx context.Context, job *Job, src string, build []
 	out := capped{max: maxOutput}
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
+		sum.Failed = names
 		job.Write([]byte(tail(out.buf.String(), 40) + "\n"))
 		if ctx.Err() != nil {
 			return fmt.Errorf("stopped: the job ran out of time")
