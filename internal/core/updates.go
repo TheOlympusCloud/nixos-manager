@@ -449,6 +449,8 @@ func (r *Repo) commitLock(ctx context.Context, base, message string, lock []byte
 // there, so a branch of that name someone else made is never lost. made is
 // the last update made before sha whose push did not fail: pushed by a server
 // that stopped before it recorded the push. Needs r.mu.
+// shortcut: a push the remote took while the client saw it fail (the link
+// dropped after) is not known as ours; keep every update made if that happens.
 func (u *Updates) pushUpdate(ctx context.Context, sha, remote, made string) error {
 	u.mu.Lock()
 	pushed := u.f.Pushed
