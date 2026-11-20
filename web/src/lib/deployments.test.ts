@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Commit, DeployOverview, MachineDeployment } from './api'
-import { driftDetail, excerpt, forgetQuestion, installCommand, onSharedToken, localOnly, pollInterval, progress, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, urlLine } from './deployments'
+import { driftDetail, excerpt, forgetQuestion, installCommand, onSharedToken, localOnly, pollInterval, progress, rollbackOf, rollingOut, rollout, silenceDetail, sortRank, stateDetail, stateLabel, tileOf, trialOf, tryTargets, urlLine } from './deployments'
 
 const commit = (sha: string, subject = sha): Commit => ({ sha, short: sha.slice(0, 7), author: 'Pablo', email: 'p@x', date: '2026-11-19T10:00:00Z', subject })
-const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', behind: 0, reports: [], silent: false, silentAfter: 2, heartbeats: true, ...extra })
+const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', main: 'main', testing: `testing-${host}`, behind: 0, reports: [], silent: false, silentAfter: 2, heartbeats: true, ...extra })
 const now = Date.parse('2026-11-19T12:00:00Z')
 const ov: DeployOverview = {
   reporting: true,
@@ -106,5 +106,41 @@ describe('deployments', () => {
     expect(installCommand('nxh_ABC', 'pi')).toBe("echo 'nxh_ABC' | ssh root@pi 'install -D -m 600 /dev/stdin /var/lib/nixos-manager-report/token'")
     expect(localOnly('localhost')).toBe(true)
     expect(localOnly('nixmgr.home.lan')).toBe(false)
+  })
+
+  it('finds the machine a branch tries changes on', () => {
+    expect(trialOf(ov, 'testing-pi')?.host).toBe('pi')
+    expect(trialOf(ov, 'main')).toBeUndefined()
+    expect(trialOf(null, 'testing-pi')).toBeUndefined()
+  })
+
+  it('offers a trial on the machines the check built, from the branch their comin follows', () => {
+    const fleet = { ...ov, machines: [m('web'), m('nas', { main: 'stable' }), m('pi', { testing: undefined }), m('db')] }
+    expect(tryTargets(fleet, 'main', ['web', 'nas', 'pi']).map((x) => x.host)).toEqual(['web'])
+    expect(tryTargets(fleet, 'stable', ['web', 'nas']).map((x) => x.host)).toEqual(['nas'])
+    expect(tryTargets(fleet, 'main', [])).toEqual([])
+    expect(tryTargets(null, 'main', ['web'])).toEqual([])
+  })
+
+  it('rolls a failed machine back with the commits since its last deployment', () => {
+    const failure = { at: '', commit: 'c3c3c3c3', phase: 'build' as const, status: 'failed' as const }
+    const one = m('laptop', { state: 'failed', commit: 'c2c2c2c2', failure, culprits: [commit('c3c3c3c3', 'enable foo')] })
+    expect(rollbackOf(one)).toEqual({
+      label: 'Revert the commit that broke laptop',
+      question: 'laptop failed to build c3c3c3c “enable foo”, the only commit since c2c2c2c, which it runs. This stages the opposite of that commit, runs the checks, and then you commit and push it: every machine it changed gets the revert.',
+      list: '',
+      message: 'Revert "enable foo"\n\nThis reverts commit c3c3c3c3.',
+      rev: 'c3c3c3c3',
+      since: 'c2c2c2c2',
+    })
+    const three = m('laptop', { ...one, failure: { ...failure, phase: 'deploy' }, culprits: [commit('c5c5c5c5', 'e'), commit('c4c4c4c4', 'd'), commit('c3c3c3c3', 'c')] })
+    const r = rollbackOf(three)!
+    expect(r.label).toBe('Revert the 3 commits since laptop last deployed')
+    expect(r.question).toBe('laptop failed to switch to c5c5c5c after 3 commits since c2c2c2c, which it runs. Any of them may have broken it, so this stages the opposite of all 3 as one change, runs the checks, and then you commit and push it. To keep some, revert only the one at fault from History instead.')
+    expect(r.list).toBe('c5c5c5c e\nc4c4c4c d\nc3c3c3c c')
+    expect(r.message).toBe('Revert the 3 commits that broke laptop\n\nThis reverts commits c5c5c5c5, c4c4c4c4, c3c3c3c3.')
+    expect([r.rev, r.since]).toEqual(['c5c5c5c5', 'c2c2c2c2'])
+    expect(rollbackOf(m('web', { commit: 'c3' }))).toBeNull()
+    expect(rollbackOf(m('laptop', { state: 'failed', failure, culprits: [] }))).toBeNull()
   })
 })

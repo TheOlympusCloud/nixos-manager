@@ -2,6 +2,7 @@
   import { onMount, tick, untrack } from 'svelte'
   import ChangesPanel from '../components/ChangesPanel.svelte'
   import ChecksPanel from '../components/ChecksPanel.svelte'
+  import DeployBadge from '../components/deployments/DeployBadge.svelte'
   import DiffView, { fileAnchor } from '../components/DiffView.svelte'
   import Icon from '../components/Icon.svelte'
   import JobLog from '../components/JobLog.svelte'
@@ -12,7 +13,10 @@
   import { fetchModelDiff, managedFiles, managedSettings, type ModelDiff } from '../lib/modeldiff'
   import { parsePatch, type PatchFile } from '../lib/patch'
   import { checkOf } from '../lib/checks'
-  import { link, replace, route } from '../lib/router.svelte'
+  import { excerpt, stateDetail, trialOf } from '../lib/deployments'
+  import { deploys, watchDeployments } from '../lib/deployments.svelte'
+  import { endTrial, promoteTrial, repo } from '../lib/repo.svelte'
+  import { link, machineLink, replace, route } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { ago } from '../lib/util'
 
@@ -128,6 +132,11 @@
     })
   })
 
+  // On a machine's testing branch: what that machine does with the trial, and the way out.
+  $effect(() => watchDeployments())
+  const trial = $derived(trialOf(deploys.overview, app.status?.branch ?? ''))
+  const unpushed = $derived(app.status?.upstream ? app.status.ahead : 0)
+
   const count = $derived(app.status?.files.length ?? 0)
   const staged = $derived(app.status?.files.filter((f) => f.staged).length ?? 0)
   const adds = $derived((files ?? []).reduce((n, f) => n + f.adds, 0))
@@ -162,6 +171,32 @@
             {/if}
           </p>
         </header>
+
+        {#if trial}
+          {@const promoteWhy = count ? 'Commit or discard the changes first.' : unpushed ? `Push first: ${trial.host} has not tried ${plural(unpushed, 'commit')} yet.` : ''}
+          <section class="block" aria-labelledby="ch-trial">
+            <h2 id="ch-trial">Trying on {trial.host}</h2>
+            <div class="trial">
+              <p class="muted small">
+                What is pushed to <span class="mono">{trial.testing}</span> deploys on {trial.host} only, with switch-to-configuration test: a reboot brings back what
+                <span class="mono">{trial.main}</span> gave it.
+              </p>
+              <p class="trial-state">
+                <DeployBadge m={trial} />
+                <span>{trial.branch === trial.testing ? stateDetail(trial) : `comin ignores ${trial.testing} now: it is not on top of ${trial.main} on the remote, so ${trial.host} follows ${trial.main}. Promote it, or try again from ${trial.main}.`}</span>
+                <a href={machineLink(trial.host)}>{trial.host}</a>
+              </p>
+              {#if trial.failure?.error}<pre>{excerpt(trial.failure.error)}</pre>{/if}
+              <div class="row">
+                <button class="primary" disabled={!!promoteWhy || !!repo.busy} title={promoteWhy || `Switch to ${trial.main} and stage ${trial.testing} as one change, to check, commit and push`} onclick={() => promoteTrial(trial)}>
+                  Promote to {trial.main}
+                </button>
+                <button disabled={!!repo.busy} title="Point {trial.testing} back at {trial.main}, so comin switches {trial.host} back to it" onclick={() => endTrial(trial)}>End the trial</button>
+              </div>
+              {#if promoteWhy}<p class="muted small">{promoteWhy}</p>{/if}
+            </div>
+          </section>
+        {/if}
 
         <section class="block" aria-labelledby="ch-machines">
           <h2 id="ch-machines">On the machines</h2>
@@ -316,6 +351,34 @@
     background: var(--bg-deep);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
+  }
+  .trial {
+    display: grid;
+    gap: 10px;
+    padding: 14px 16px;
+    background: color-mix(in srgb, var(--purple) 5%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--purple) 30%, var(--border));
+    border-radius: var(--r-lg);
+  }
+  .trial p {
+    margin: 0;
+  }
+  .trial-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+  }
+  .trial .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .trial pre {
+    margin: 0;
+    font: 12px/1.5 var(--mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .calm {
     display: flex;

@@ -4,6 +4,7 @@
   import { link } from '../../lib/router.svelte'
   import { ago } from '../../lib/util'
   import DeployBadge from './DeployBadge.svelte'
+  import FailureActions from './FailureActions.svelte'
 
   /** What comin last did on one machine, for its Overview tab. */
   let { host }: { host: string } = $props()
@@ -48,6 +49,7 @@
         </div>
         {#if m.failure.error}<pre>{excerpt(m.failure.error, 8, 900)}</pre>{/if}
         <p class="muted small">The whole log is on the machine: <span class="mono">journalctl -u comin</span></p>
+        <FailureActions {m} />
       </div>
     {/if}
     {#if history.length > 1}
