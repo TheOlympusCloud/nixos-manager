@@ -40,7 +40,7 @@ case "$*" in
 esac
 case "$*" in
   *"nixmgr:host"*) drv=$(sha256sum < "${NIXMGR_FLAKE#path:}/hosts/example/default.nix" | cut -c1-32)
-    echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
+    echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","systemPath":"/nix/store/'"$drv"'-nixos-system-example-26.05","units":{"example.service":{"hash":"'"$drv"'","reload":{},"flags":{}}},"etc":{"example.conf":"'"$drv"'"},"managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
   *"--dry-run"*) printf 'these 3 derivations will be built:\nthese 9 paths will be fetched (1.50 MiB download, 6.00 MiB unpacked):\n' >&2 ;;
@@ -86,6 +86,14 @@ run_job() {
   api GET "/api/jobs/$id" | json '["state"]'
 }
 built() { api GET "/api/jobs/$(cat "$work/last-job")" | json '["summary"]["built"]'; }
+# ready <path> polls an endpoint that answers 202 while Nix works and prints the 200 body.
+ready() {
+  for _ in $(seq 600); do
+    if [ "$(code GET "$1")" = 200 ]; then api GET "$1"; return; fi
+    sleep 0.5
+  done
+  fail "$1 never became ready"
+}
 
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$base/api/tree")" = 401 ] || fail "API reachable without login"
 [ "$(code POST /api/login -d '{"password":"wrong"}')" = 401 ] || fail "wrong password accepted"
@@ -153,9 +161,18 @@ api POST /api/stage -d "{\"paths\":[\"$file\"]}" > /dev/null
 [ "$(run_job "{\"kind\":\"check\",\"targets\":[\"$attr\"]}")" = passed ] || fail "second check"
 [ "$(built)" = "['example']" ] || fail "the time zone changes the example machine, but the check built $(built)"
 sha2=$(api POST /api/commit -d '{"message":"feat(example): set the time zone"}' | json '["sha"]')
+# What the push dialog shows: the commit to push against what is pushed.
+pushdiff=$(ready '/api/model/diff?against=pushed')
+[ "$(echo "$pushdiff" | json '["hosts"][0]["status"]')" = changed ] || fail "the push changes the example machine: $pushdiff"
+if [ "${E2E_STUB_NIX:-}" = 1 ]; then
+  [ "$(echo "$pushdiff" | json '["hosts"][0]["units"]')" = "[{'name': 'example.service', 'action': 'restart'}]" ] || fail "units in the push diff: $pushdiff"
+else # both systems were built by the two checks
+  echo "$pushdiff" | json '["hosts"][0]["etc"]' | grep -q /etc/localtime || fail "the time zone's /etc/localtime is not in the push diff: $pushdiff"
+  [ "$(echo "$pushdiff" | json '["hosts"][0]["closure"]["sizeTo"] > 0')" = True ] || fail "no closure in the push diff: $pushdiff"
+fi
 api POST /api/push -d '{}' > /dev/null
 [ "$(git -C "$work/remote.git" rev-parse main)" = "$sha2" ] || fail "second push"
-echo "ok   edit, diff, check, commit, push"
+echo "ok   edit, diff, check, commit, what the push changes, push"
 
 [ "$(api GET "/api/log?path=$file" | json '["commits"].__len__()')" = 2 ] || fail "file history"
 [ "$(code POST /api/restore -d "{\"path\":\"$file\",\"rev\":\"$sha\",\"base_hash\":\"stale\"}")" = 409 ] || fail "restore over an unseen version not refused"
@@ -171,14 +188,6 @@ api POST /api/commit -d '{"message":"chore: unchecked change","force":true}' > /
 [ "$(code POST /api/push -d '{"force":true}')" = 200 ] || fail "forced push"
 echo "ok   push needs a checked commit unless forced"
 
-# ready <path> polls an endpoint that answers 202 while Nix works and prints the 200 body.
-ready() {
-  for _ in $(seq 600); do
-    if [ "$(code GET "$1")" = 200 ]; then api GET "$1"; return; fi
-    sleep 0.5
-  done
-  fail "$1 never became ready"
-}
 model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
 [ "$(echo "$model" | json '["model"].get("error", "")')" = "" ] || fail "the starter flake does not evaluate: $model"

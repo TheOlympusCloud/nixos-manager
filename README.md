@@ -43,13 +43,25 @@ An MCP server gives automation the same features.
   machine.
 - **Changes in NixOS terms**: before committing, see per machine which
   packages, versions, services, users, ports and settings the working copy
-  changes, and which inputs moved. History shows the same for every commit.
-  A machine counts as changed whenever its system derivation
-  (`system.build.toplevel`) does, so an edit outside those lists (a systemd
-  unit, an `/etc` file, a sysctl) shows as "Other configuration", and a new
-  kernel, kernel module, initrd or kernel parameter as "Reboot needed". A
-  machine whose system does not evaluate, a failed assertion for instance,
-  shows its error.
+  changes, and which inputs moved. History shows the same for every commit,
+  and **Push** first shows it for what the push deploys, compared with what is
+  pushed. A machine counts as changed whenever its system derivation
+  (`system.build.toplevel`) does; a new kernel, kernel module, initrd or
+  kernel parameter shows as "Reboot needed". A machine whose system does not
+  evaluate, a failed assertion for instance, shows its error. Each changed
+  machine also lists:
+  - the systemd units a switch restarts, reloads, starts, stops, or leaves
+    running the old version ("Not restarted", e.g. `restartIfChanged = false`),
+    decided as `switch-to-configuration` decides for a unit that runs. Units
+    are compared by their NixOS settings, so a change to a unit file that
+    only a package ships is not listed;
+  - the `/etc` files added, removed or changed;
+  - when this server has built both systems (a check builds the machines it
+    changes), every dependency whose version or size changes and the system's
+    closure size before and after, from `nix store diff-closures`.
+
+  An edit that touches none of these (a sysctl, say) shows as "Other
+  configuration".
 - **Checks**: on exactly the staged changes, with live output, `nix flake check`
   and then a real build of every machine whose system they change compared with
   what is pushed (by system derivation, as Changes compares), so a package or
@@ -407,7 +419,8 @@ container, or `"127.0.0.1:8080:8080"` as the published port with Docker.
 2. In **Changes**, stage what you want to commit.
 3. In **Checks**, run the check: it builds every machine the staged changes
    touch. Tick other configurations to dry-build them too.
-4. Commit with a message, then **Push**. comin deploys on each machine.
+4. Commit with a message, then **Push**. The push dialog shows what each
+   machine gets compared with what is pushed; comin deploys it on each machine.
 
 When **Pull** rebases your local commits onto new remote commits, the result
 was never checked as a whole, so **Push** refuses it: run the checks again with
