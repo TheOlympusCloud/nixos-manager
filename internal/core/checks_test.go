@@ -181,7 +181,7 @@ func TestCheckFailsWhenAChangedMachineDoesNotBuild(t *testing.T) {
 		t.Fatalf("check %s %+v:\n%s", info.State, info.Summary, info.Output)
 	}
 	for _, want := range []string{"error: builder for", "db does not build.", "1 machine does not build: db",
-		`db is riscv64-linux and this server ` + localSystem(), `"Machines of another architecture"`} {
+		`db is riscv64-linux and this server ` + LocalSystem(), `"Machines of another architecture"`} {
 		if !strings.Contains(info.Output, want) {
 			t.Fatalf("output lacks %q:\n%s", want, info.Output)
 		}
