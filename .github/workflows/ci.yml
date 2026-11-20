@@ -32,9 +32,14 @@ jobs:
         with:
           go-version: "1.26"
       - run: go vet ./...
-      - run: go test -race ./...
+      - name: go test -race ./...
+        run: |
+          go test -race ./... 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
+            { scripts/ci-annotate.sh "Go tests" "$RUNNER_TEMP/tests.log"; exit 1; }
       - name: End-to-end, Nix stubbed
-        run: E2E_STUB_NIX=1 scripts/e2e.sh
+        run: |
+          E2E_STUB_NIX=1 scripts/e2e.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log" ||
+            { scripts/ci-annotate.sh "End-to-end, Nix stubbed" "$RUNNER_TEMP/e2e.log"; exit 1; }
 
   web:
     name: Web
