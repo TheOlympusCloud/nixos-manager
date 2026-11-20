@@ -194,6 +194,7 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 		m.Error = err.Error()
 		return err
 	}
+	m.Darwin = names["darwin"]
 	for _, n := range names["nixos"] {
 		fmt.Fprintf(job, "Evaluating %s…\n", n)
 		h := Host{Name: n}

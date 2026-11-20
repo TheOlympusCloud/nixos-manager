@@ -89,6 +89,12 @@ export function pollInterval(ov: DeployOverview | null, now = Date.now()): numbe
   return ov?.machines.some((m) => m.state === 'behind') ? 15_000 : 60_000
 }
 
+/** The question before forgetting a machine's reports. */
+export function forgetQuestion(m: MachineDeployment): string {
+  const n = m.reports.length
+  return `Delete ${n === 1 ? 'the deployment report' : `the ${n} deployment reports`} of ${m.host}? If it still runs comin and reports again, it comes back.`
+}
+
 /** The first lines of an error, for cards and table cells. */
 export function excerpt(error: string | undefined, lines = 4, chars = 360): string {
   const text = (error ?? '').trim().split('\n').slice(0, lines).join('\n')

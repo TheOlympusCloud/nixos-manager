@@ -25,6 +25,10 @@ describe('request', () => {
     expect(fetch.mock.calls[1][0]).toBe('/api/tokens/t%2F1')
     expect(fetch.mock.calls[1][1]!.method).toBe('DELETE')
     expect(fetch.mock.calls[1][1]!.body).toBe('{}')
+
+    await api.forgetMachine('old pi')
+    expect(fetch.mock.calls[2][0]).toBe('/api/deployments/machines/old%20pi')
+    expect(fetch.mock.calls[2][1]!.method).toBe('DELETE')
   })
 
   it('creates a token with its scope and expiry', async () => {

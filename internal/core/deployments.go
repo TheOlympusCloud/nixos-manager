@@ -8,6 +8,8 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -254,22 +256,35 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	}
 	follows := d.follows(ctx, model)
 	ov.Branch = fleetBranch(follows)
-	hosts := hostNames(model) // sorted and extended below
 	d.mu.Lock()
 	reports := make(map[string][]DeployReport, len(d.reports))
 	for h, rs := range d.reports {
 		reports[h] = slices.Clone(rs)
-		hosts = append(hosts, h)
 	}
 	d.mu.Unlock()
-	slices.Sort(hosts)
-	hosts = slices.Compact(hosts)
-	ov.Reporting = len(reports) > 0
 
 	tips, err := d.branchTips(ctx)
 	if err != nil {
 		return ov, err
 	}
+	if gone := d.removed(ctx, model, reports, tips[ov.Branch]); len(gone) > 0 {
+		if err := d.Forget(gone...); err != nil {
+			slog.Warn("cannot drop the reports of machines no longer in the flake", "hosts", gone, "err", err)
+		} else {
+			slog.Info("dropped the reports of machines no longer in the flake", "hosts", gone)
+			for _, h := range gone {
+				delete(reports, h)
+			}
+		}
+	}
+	hosts := hostNames(model)
+	for h := range reports {
+		hosts = append(hosts, h)
+	}
+	slices.Sort(hosts)
+	hosts = slices.Compact(hosts)
+	ov.Reporting = len(reports) > 0
+
 	if tip := tips[ov.Branch]; tip != "" {
 		if ov.Commits, err = d.repo.Log(ctx, "", tip, rolloutCommits); err != nil {
 			return ov, err
@@ -344,6 +359,56 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 		ov.Machines = append(ov.Machines, m)
 	}
 	return ov, nil
+}
+
+// removed lists the machines that reported but are no longer in the flake,
+// when that is certain: the flake evaluated, and the working copy is exactly
+// the tip of the branch comin deploys. On another branch, or with a machine
+// deleted but not pushed, the machine may still be in service.
+func (d *Deployments) removed(ctx context.Context, model *Model, reports map[string][]DeployReport, tip string) []string {
+	if model == nil || model.Error != "" || model.Tree == "" || tip == "" {
+		return nil
+	}
+	in := append(hostNames(model), model.Darwin...)
+	var gone []string
+	for h := range reports {
+		if !slices.Contains(in, h) {
+			gone = append(gone, h)
+		}
+	}
+	if len(gone) == 0 {
+		return nil
+	}
+	if tree, err := d.repo.git(ctx, "rev-parse", "--verify", "-q", "--end-of-options", tip+"^{tree}"); err != nil || strings.TrimSpace(tree) != model.Tree {
+		return nil
+	}
+	slices.Sort(gone)
+	return gone
+}
+
+// Forget deletes the reports of these machines. One that is still in the flake
+// shows as never reported until it reports again.
+func (d *Deployments) Forget(hosts ...string) error {
+	if d == nil {
+		return errorf(ErrNotFound, "deployment reports are not set up")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	old := map[string][]DeployReport{}
+	for _, h := range hosts {
+		if rs, ok := d.reports[h]; ok {
+			old[h] = rs
+			delete(d.reports, h)
+		}
+	}
+	if len(old) == 0 {
+		return errorf(ErrNotFound, "no reports from %s", strings.Join(hosts, ", "))
+	}
+	if err := d.save(); err != nil {
+		maps.Copy(d.reports, old)
+		return err
+	}
+	return nil
 }
 
 // follows maps the fleet's machines to the branches their comin follows: those

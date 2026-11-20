@@ -83,6 +83,31 @@ func TestDeploymentReportsOverHTTP(t *testing.T) {
 	}
 }
 
+// Forgetting a machine is a web UI action; API tokens cannot do it.
+func TestForgetAMachineOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	d := withDeploys(t, e)
+	body := `{"host":"oldpi","commit":"` + strings.Repeat("a", 40) + `","status":"done"}`
+	if code := report(t, e, d.Token(), "application/json", body); code != 204 {
+		t.Fatalf("report: %d", code)
+	}
+	e.login(t)
+	tok := e.createToken(t, "full", "full", nil)
+	if code := e.bearer(t, tok.Token, "DELETE", "/api/deployments/machines/oldpi", struct{}{}, nil); code != 403 {
+		t.Fatalf("a token forgot a machine: %d", code)
+	}
+	if code := e.do(t, "DELETE", "/api/deployments/machines/oldpi", struct{}{}, nil); code != 204 {
+		t.Fatalf("forget: %d", code)
+	}
+	if code := e.do(t, "DELETE", "/api/deployments/machines/oldpi", struct{}{}, nil); code != 404 {
+		t.Fatalf("forget again: %d", code)
+	}
+	var ov core.DeployOverview
+	if code := e.do(t, "GET", "/api/deployments", nil, &ov); code != 200 || ov.Reporting || len(ov.Machines) != 0 {
+		t.Fatalf("after forgetting: %d %+v", code, ov)
+	}
+}
+
 func TestDeploymentFailureIsAnInsight(t *testing.T) {
 	e := fleetEnv(t)
 	d := withDeploys(t, e)

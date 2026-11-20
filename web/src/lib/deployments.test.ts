@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Commit, DeployOverview, MachineDeployment } from './api'
-import { excerpt, installCommand, localOnly, pollInterval, progress, rollingOut, rollout, stateDetail, stateLabel, urlLine } from './deployments'
+import { excerpt, forgetQuestion, installCommand, localOnly, pollInterval, progress, rollingOut, rollout, stateDetail, stateLabel, urlLine } from './deployments'
 
 const commit = (sha: string, subject = sha): Commit => ({ sha, short: sha.slice(0, 7), author: 'Pablo', email: 'p@x', date: '2026-11-19T10:00:00Z', subject })
 const m = (host: string, extra: Partial<MachineDeployment> = {}): MachineDeployment => ({ host, state: 'current', branch: 'main', behind: 0, reports: [], ...extra })
@@ -52,6 +52,12 @@ describe('deployments', () => {
     expect(stateDetail(ov.machines[1])).toBe('1 commit behind main; comin should pick it up within minutes.')
     expect(stateDetail(ov.machines[2])).toBe('Runs the last commit of testing-pi.')
     expect(stateDetail(ov.machines[4])).toBe('comin could not build c3.')
+  })
+
+  it('asks before forgetting a machine', () => {
+    const r = { at: '', commit: 'c1', phase: 'deploy' as const, status: 'done' }
+    expect(forgetQuestion(m('oldpi', { reports: [r] }))).toBe('Delete the deployment report of oldpi? If it still runs comin and reports again, it comes back.')
+    expect(forgetQuestion(m('oldpi', { reports: [r, r] }))).toMatch(/^Delete the 2 deployment reports of oldpi\?/)
   })
 
   it('cuts long errors', () => {

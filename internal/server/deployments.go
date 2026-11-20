@@ -12,7 +12,7 @@ import (
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
 )
 
-// deploymentRoutes are the session routes of the Deployments view.
+// deploymentRoutes are the routes of the Deployments view.
 func (s *Server) deploymentRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/deployments", get(func(r *http.Request) (any, error) {
 		m, _, _ := s.Svc.Jobs.Model(r.Context(), "working") // nil while it is evaluated
@@ -24,6 +24,9 @@ func (s *Server) deploymentRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/deployments/token", post(func(r *http.Request, _ struct{}) (any, error) {
 		t, err := s.Svc.Deploys.RegenerateToken()
 		return map[string]string{"token": t}, err
+	}))
+	api.HandleFunc("DELETE /api/deployments/machines/{host}", post(func(r *http.Request, _ struct{}) (any, error) {
+		return nil, s.Svc.Deploys.Forget(r.PathValue("host"))
 	}))
 }
 

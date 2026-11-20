@@ -11,11 +11,12 @@ import (
 // Model is what the flake configures, machine by machine, as Nix evaluates it.
 // The JSON shape is shared with the web UI and the MCP tools.
 type Model struct {
-	Tree   string  `json:"tree"`
-	Hosts  []Host  `json:"hosts"`
-	Homes  []Home  `json:"homes"`
-	Inputs []Input `json:"inputs"`
-	Error  string  `json:"error,omitempty"` // the flake itself does not evaluate
+	Tree   string   `json:"tree"`
+	Hosts  []Host   `json:"hosts"`
+	Homes  []Home   `json:"homes"`
+	Inputs []Input  `json:"inputs"`
+	Darwin []string `json:"darwin,omitempty"` // nix-darwin machines, not evaluated; comin can deploy them too
+	Error  string   `json:"error,omitempty"`  // the flake itself does not evaluate
 }
 
 type Host struct {

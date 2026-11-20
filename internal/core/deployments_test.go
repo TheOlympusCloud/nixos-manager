@@ -228,6 +228,77 @@ func TestDeploymentOverviewFollowsCominBranches(t *testing.T) {
 	}
 }
 
+// Reports of machines that left the flake are dropped, but only when the
+// working copy is exactly what comin deploys: on another branch, or with an
+// uncommitted deletion, the machine may still be in service.
+func TestReportsOfRemovedMachinesArePruned(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	write(t, r, "flake.nix", "1\n")
+	c1 := commitAll(t, r, "first")
+	dir := t.TempDir()
+	d := must[*Deployments](t)(OpenDeployments(dir, r))
+	now := time.Now()
+	for _, h := range []string{"kept", "gone"} {
+		ok(t, d.Record(ReportIn{Host: h, Commit: c1, Status: "done"}, now))
+	}
+	hosts := func(ov DeployOverview) (out []string) {
+		for _, m := range ov.Machines {
+			out = append(out, m.Host)
+		}
+		return out
+	}
+	tip := must[string](t)(r.WorkingTree(ctx))
+	m := fleet("kept")
+	for name, model := range map[string]*Model{
+		"no model":       nil,
+		"broken flake":   {Tree: tip, Error: "error: syntax error"},
+		"another tree":   {Tree: strings.Repeat("0", 40), Hosts: m.Hosts},
+		"unknown tree":   {Hosts: m.Hosts},
+		"no main branch": {Tree: tip, Hosts: m.Hosts},
+	} {
+		if name == "no main branch" {
+			gitOut(t, r.Dir, "switch", "-q", "-c", "other")
+			write(t, r, "flake.nix", "2\n")
+			commitAll(t, r, "elsewhere")
+			gitOut(t, r.Dir, "branch", "-q", "-D", "main") // main is gone: no tip to compare with
+		}
+		if got := hosts(must[DeployOverview](t)(d.Overview(ctx, model, now))); !slices.Equal(got, []string{"gone", "kept"}) {
+			t.Fatalf("%s: machines %v", name, got)
+		}
+	}
+	gitOut(t, r.Dir, "switch", "-q", "-c", "main", c1)
+
+	ok(t, d.Record(ReportIn{Host: "mac", Commit: c1, Status: "done"}, now)) // nix-darwin: in the flake, not in the model's hosts
+	if got := hosts(must[DeployOverview](t)(d.Overview(ctx, &Model{Tree: tip, Hosts: m.Hosts, Darwin: []string{"mac"}}, now))); !slices.Equal(got, []string{"kept", "mac"}) {
+		t.Fatalf("at the tip: machines %v", got)
+	}
+	if again := must[*Deployments](t)(OpenDeployments(dir, r)); again.reports["gone"] != nil || again.reports["kept"] == nil {
+		t.Fatalf("after reopening: %v", again.reports)
+	}
+}
+
+// Forget drops a machine's reports on request; one still in the fleet then
+// shows as never reported.
+func TestForgetAMachine(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	d := must[*Deployments](t)(OpenDeployments(dir, newRepo(t)))
+	ok(t, d.Record(ReportIn{Host: "pi", Commit: sha('a'), Status: "done"}, time.Now()))
+	ok(t, d.Record(ReportIn{Host: "nas", Commit: sha('a'), Status: "done"}, time.Now()))
+	ok(t, d.Forget("pi"))
+	isErr(t, d.Forget("pi"), ErrNotFound)
+	ov := must[DeployOverview](t)(d.Overview(ctx, fleet("pi"), time.Now()))
+	if len(ov.Machines) != 2 || ov.Machines[1].Host != "pi" || ov.Machines[1].State != "never" {
+		t.Fatalf("after forgetting pi: %+v", ov.Machines)
+	}
+	if again := must[*Deployments](t)(OpenDeployments(dir, d.repo)); again.reports["pi"] != nil || again.reports["nas"] == nil {
+		t.Fatalf("after reopening: %v", again.reports)
+	}
+	var nilD *Deployments
+	isErr(t, nilD.Forget("pi"), ErrNotFound)
+}
+
 func TestCommitsBetween(t *testing.T) {
 	ctx := context.Background()
 	r := newRepo(t)

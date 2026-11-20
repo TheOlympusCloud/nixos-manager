@@ -274,6 +274,8 @@ export const api = {
   deployments: () => get<DeployOverview>('/api/deployments'),
   deployToken: () => get<{ token: string }>('/api/deployments/token').then((r) => r.token),
   regenerateDeployToken: () => post<{ token: string }>('/api/deployments/token').then((r) => r.token),
+  /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
+  forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
 }
 
 // ---- deployments (what comin reports from each machine) ----
