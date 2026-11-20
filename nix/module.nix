@@ -8,6 +8,30 @@
 let
   cfg = config.services.nixos-manager;
   inherit (lib) mkOption types;
+  cache = cfg.binaryCache;
+  cacheDir = "/var/lib/nixos-manager-cache";
+  # The cache's signing key, made once: never in the Nix store or a repository.
+  cacheKey = pkgs.writeShellApplication {
+    name = "nixos-manager-cache-key";
+    runtimeInputs = [
+      config.nix.package
+      pkgs.coreutils
+    ];
+    text = ''
+      umask 077
+      cd "$STATE_DIRECTORY"
+      if [ ! -s secret-key ]; then
+        nix --extra-experimental-features nix-command key generate-secret --key-name nixos-manager-1 > secret-key.new
+        mv secret-key.new secret-key
+        rm -f public-key
+      fi
+      if [ ! -s public-key ]; then
+        nix --extra-experimental-features nix-command key convert-secret-to-public < secret-key > public-key.new
+        chmod 644 public-key.new
+        mv public-key.new public-key
+      fi
+    '';
+  };
 in
 {
   options.services.nixos-manager = {
@@ -81,6 +105,19 @@ in
       description = "Extra `KEY=value` environment for secrets that must not be in the Nix store.";
     };
 
+    binaryCache = {
+      enable = lib.mkEnableOption ''
+        a binary cache of this server's Nix store, served by harmonia, so the machines download the
+        systems the checks built instead of building them. It signs with a key made on the first start in
+        `${cacheDir}`: `secret-key` stays there, readable by root only, and `public-key` is what the
+        machines trust'';
+      openFirewall = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Open the cache's port (harmonia's `bind`, 5000 by default) in the firewall.";
+      };
+    };
+
     extraEnvironment = mkOption {
       type = types.attrsOf types.str;
       default = { };
@@ -107,9 +144,31 @@ in
     };
     users.groups.nixos-manager = { };
 
-    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [
-      (lib.toInt (lib.last (lib.splitString ":" cfg.listen)))
-    ];
+    networking.firewall.allowedTCPPorts =
+      lib.optional cfg.openFirewall (lib.toInt (lib.last (lib.splitString ":" cfg.listen)))
+      ++ lib.optional (cache.enable && cache.openFirewall) (
+        lib.toInt (lib.last (lib.splitString ":" config.services.harmonia.cache.settings.bind))
+      );
+
+    services.harmonia.cache = lib.mkIf cache.enable {
+      enable = true;
+      signKeyPaths = [ "${cacheDir}/secret-key" ];
+    };
+    systemd.services.harmonia = lib.mkIf cache.enable {
+      requires = [ "nixos-manager-cache-key.service" ];
+      after = [ "nixos-manager-cache-key.service" ];
+    };
+    systemd.services.nixos-manager-cache-key = lib.mkIf cache.enable {
+      description = "nixos-manager binary cache signing key";
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = lib.getExe cacheKey;
+        StateDirectory = lib.removePrefix "/var/lib/" cacheDir;
+        StateDirectoryMode = "0755"; # for the public key; the script keeps the secret one 0600
+      };
+    };
 
     systemd.services.nixos-manager = {
       description = "nixos-manager";
@@ -131,7 +190,7 @@ in
         NIXMGR_PASSWORD_HASH_FILE = "%d/password-hash";
         NIXMGR_DATA = cfg.dataDir;
         NIXMGR_LISTEN = cfg.listen;
-        # Builds and store writes go through the daemon; the service user only evaluates and fetches.
+        # Builds (a check builds the machines a change touches) and store writes go through the daemon.
         NIX_REMOTE = "daemon";
       }
       // lib.optionalAttrs (cfg.remote != null) { NIXMGR_REMOTE = cfg.remote; }

@@ -50,13 +50,22 @@ An MCP server gives automation the same features.
   kernel, kernel module, initrd or kernel parameter as "Reboot needed". A
   machine whose system does not evaluate, a failed assertion for instance,
   shows its error.
-- **Checks**: `nix flake check` plus a dry build of the chosen configurations,
-  run on exactly the staged changes, with live output. A commit needs a passing
-  check of the staged changes, and a push needs a passing check of the commit
-  being pushed. In the web UI you can override both explicitly; MCP clients
-  cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so a restart
-  does not ask for them again. Checks run one at a time in their own queue, so
-  a long check never holds up the fleet views, search, Lock or Update.
+- **Checks**: on exactly the staged changes, with live output, `nix flake check`
+  and then a real build of every machine whose system they change compared
+  with what is pushed (the comparison Changes shows), so a package or system
+  that evaluates but does not build fails the check. With nothing pushed yet,
+  every machine is built. The result says which machines were built, which
+  failed, which need a reboot, and what Nix built and downloaded (from a dry
+  run first). Configurations you tick are dry-built on top, which only
+  evaluates them. A commit needs a passing check of the staged changes, and a
+  push needs a passing check of the commit being pushed that compared it with
+  what the push lands on now. In the web UI you can override both explicitly;
+  MCP clients cannot. Passed checks are kept in `$NIXMGR_DATA/checks.json`, so
+  a restart does not ask for them again; checks passed before checks built the
+  machines only evaluated, and must run again. Checks run one at a time in
+  their own queue, so a long check never holds up the fleet views, search,
+  Lock or Update. The systems they build can be served to the machines as a
+  [binary cache](#binary-cache).
 - **Git**: stage, commit, branches, push and pull, revert a commit, merge a
   `testing-<host>` branch, repository and per-file history with diffs and
   restore. Every commit uses the configured person's name and email.
@@ -117,8 +126,8 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
      sandboxing and Nix's build sandbox need it.
    - Size: every machine is a full NixOS evaluation, so memory goes first.
      4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
-     holds a few nixpkgs revisions and their builds. More cores make checks
-     faster. The fleet views evaluate two machines at once (about 1 GB
+     holds a few nixpkgs revisions and the machines' systems the checks build.
+     More cores make checks faster. The fleet views evaluate two machines at once (about 1 GB
      each), and a check can run next to them. On a tight container set
      `services.nixos-manager.extraEnvironment.NIXMGR_EVAL_JOBS = "1";`, or
      raise it when memory is to spare.
@@ -217,7 +226,8 @@ The service runs as the `nixos-manager` user, with its working copy, deploy
 key, tokens and Nix caches in `/var/lib/nixos-manager`; `journalctl -u
 nixos-manager` has its log. Other options: `listen` (default `0.0.0.0:8080`),
 `remote` (sets `NIXMGR_REMOTE`; leave it out to connect Forgejo in Settings),
-`environmentFile` (extra secrets as `KEY=value`) and `extraEnvironment`.
+`environmentFile` (extra secrets as `KEY=value`), `extraEnvironment`, and
+`binaryCache` (see [Binary cache](#binary-cache)).
 
 ### Make the container one of the fleet's machines
 
@@ -394,7 +404,8 @@ container, or `"127.0.0.1:8080:8080"` as the published port with Docker.
 
 1. Edit files; **Ctrl+S** saves, **Shift+Alt+F** formats.
 2. In **Changes**, stage what you want to commit.
-3. In **Checks**, pick the configurations to dry-build and run the check.
+3. In **Checks**, run the check: it builds every machine the staged changes
+   touch. Tick other configurations to dry-build them too.
 4. Commit with a message, then **Push**. comin deploys on each machine.
 
 When **Pull** rebases your local commits onto new remote commits, the result
@@ -467,6 +478,90 @@ back if it reports again. A repository made from an older starter fleet has
 no hook yet: copy both `report-deployment*` files from `templates/fleet/modules/`
 into its `modules/` and import `report-deployments.nix` from `common.nix`.
 
+## Binary cache
+
+A check builds the systems of the machines a change touches. With the binary
+cache on, the server serves its Nix store to the machines, signed, so comin
+downloads those systems instead of building them: a Raspberry Pi no longer
+compiles anything the server already built. It needs the NixOS module (the
+LXC setup above); with Docker, checks build as well, but nothing serves the
+results.
+
+1. On the server, add to its configuration and switch:
+
+   ```nix
+   services.nixos-manager.binaryCache = {
+     enable = true;
+     openFirewall = true; # port 5000
+   };
+   ```
+
+   [harmonia](https://github.com/nix-community/harmonia) serves the store on
+   port 5000 (`services.harmonia.cache.settings.bind` changes it). On the first
+   start, `nixos-manager-cache-key.service` makes the signing key in
+   `/var/lib/nixos-manager-cache`: `secret-key`, readable by root only, and
+   `public-key`. It is never in the Nix store or the repository; delete both
+   files and restart the service to make a new one, then give the machines
+   the new public key.
+
+2. In the fleet's `modules/common.nix`, set the address the machines reach the
+   cache at and the public key (`cat /var/lib/nixos-manager-cache/public-key`
+   on the server), then check, commit and push:
+
+   ```nix
+   fleet.binaryCache = {
+     url = "http://nixos-manager.home.lan:5000";
+     publicKey = "nixos-manager-1:…";
+   };
+   ```
+
+   `modules/binary-cache.nix` adds the cache next to cache.nixos.org, with a
+   5 s connection timeout (a laptop away from home does not stall) and
+   fallback to building when a download fails. A repository made from an older
+   starter fleet has no such module: copy `modules/binary-cache.nix` from
+   `templates/fleet/` and import it from `common.nix`.
+
+Anyone who can reach port 5000 can download any path of the server's store
+whose name they know, so keep it on the LAN or the tailnet. Nix trusts only
+what the key signed. Each machine's last system a check built has a GC root in
+`$NIXMGR_DATA/gcroots`, so `nix.gc` keeps it until a later check replaces it;
+the roots of machines removed from the flake go with the next check.
+
+### Machines of another architecture
+
+A check builds every changed machine on the server, so an `aarch64-linux`
+machine (a Raspberry Pi) on an `x86_64-linux` server needs one of these, or
+its builds fail and so does the check:
+
+- **Emulation, server in a VM or on bare metal.** Add
+  `boot.binfmt.emulatedSystems = [ "aarch64-linux" ];` and switch. Builds that
+  are not in cache.nixos.org run emulated, which is slow.
+- **Emulation, server in a Proxmox LXC.** A container cannot register
+  emulators: install `qemu-user-static` and `binfmt-support` on the Proxmox
+  host, check that `/proc/sys/fs/binfmt_misc/qemu-aarch64` lists the `F`
+  flag (the container then uses the host's emulator), and add
+  `nix.settings.extra-platforms = [ "aarch64-linux" ];` to the container.
+- **A remote builder.** Any aarch64 machine with Nix (a Pi 4 or 5 will do)
+  builds for the server over SSH: give root on the server an SSH key the
+  builder accepts for a user listed in its `nix.settings.trusted-users`, then
+  on the server:
+
+  ```nix
+  nix.distributedBuilds = true;
+  nix.buildMachines = [
+    {
+      hostName = "pi5.home.lan";
+      sshUser = "nixbuild";
+      sshKey = "/root/.ssh/nixbuild";
+      system = "aarch64-linux";
+      maxJobs = 2;
+    }
+  ];
+  ```
+
+Either way, the built paths land in the server's store and the binary cache
+serves them to the machines.
+
 ## MCP
 
 Create a token on the **Tokens** page and point the client at `/mcp`:
@@ -530,7 +625,7 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks and deployment reports (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, GC roots of the systems checks built, and deployment reports (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
@@ -589,10 +684,14 @@ restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking
 win without dropping the hand-written users and SSH settings around them, the
-deployment reporter wires into comin, new LXC and VM machines evaluate, a
+deployment reporter wires into comin, the binary cache module adds the
+fleet's cache next to cache.nixos.org, new LXC and VM machines evaluate, a
 sysctl shows as a change and kernel parameters as a reboot while a container
-never needs one, a standalone home-manager configuration shows its packages
-and programs, and the flake builds the package and passes `nix flake check`.
+never needs one, a check builds the one machine an edit changes and fails on a
+system that does not build, a standalone home-manager configuration shows its
+packages and programs, and the flake builds the package and passes
+`nix flake check`, which also makes and keeps a binary cache key with the
+module's script.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines

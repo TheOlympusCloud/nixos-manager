@@ -6,7 +6,8 @@
 - `hosts/<name>/`: one folder per machine, with its `hardware-configuration.nix`
   and `managed.json` (packages and options changed by clicking in nixos-manager;
   edit the other files by hand).
-- `modules/`: settings shared by several machines; `common.nix` enables comin everywhere.
+- `modules/`: settings shared by several machines; `common.nix` enables comin everywhere,
+  and connects the machines to nixos-manager: deployment reports and its binary cache.
 - `home/`: home-manager configurations for users.
 
 Every machine runs comin: it pulls `main` from Forgejo and switches to

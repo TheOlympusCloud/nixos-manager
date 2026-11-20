@@ -161,3 +161,31 @@ func TestReportModuleWiresComin(t *testing.T) {
 		t.Fatalf("building the script: %v\n%s", err, out)
 	}
 }
+
+// The binary cache module adds the fleet's cache next to cache.nixos.org,
+// refuses a cache without its key, and writes a nix.conf Nix accepts.
+func TestBinaryCacheModule(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	nix := []string{"--extra-experimental-features", "nix-command flakes"}
+	out, err := exec.Command("nix", append(nix, "eval", "--impure", "--json", "--file", "testdata/binary-cache-module.nix", "--apply", "x: removeAttrs x [\"conf\"]")...).Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("nix eval: %v\n%s", err, ee.Stderr)
+		}
+		t.Fatal(err)
+	}
+	var got map[string]bool
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"substituters", "key", "timeout", "off", "noKey"} {
+		if !got[k] {
+			t.Errorf("%s: %v", k, got)
+		}
+	}
+	if out, err := exec.Command("nix", append(nix, "build", "--impure", "--no-link", "--file", "testdata/binary-cache-module.nix", "conf")...).CombinedOutput(); err != nil {
+		t.Fatalf("building nix.conf: %v\n%s", err, out)
+	}
+}
