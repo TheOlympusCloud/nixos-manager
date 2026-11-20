@@ -24,10 +24,12 @@ import (
 
 	"github.com/TheOlympusCloud/nixos-manager/internal/auth"
 	"github.com/TheOlympusCloud/nixos-manager/internal/core"
+	"github.com/TheOlympusCloud/nixos-manager/internal/fakesops"
 	"github.com/TheOlympusCloud/nixos-manager/internal/mcpserver"
 )
 
 func TestMain(m *testing.M) {
+	fakesops.Main() // when a test runs this binary as sops, age-keygen or ssh-to-age
 	if os.Getenv("FAKE_NIXD") == "1" {
 		fakeNixd()
 		return
@@ -86,6 +88,9 @@ func newEnv(t *testing.T) *env {
 	// Evaluations answer a flake without machines, so a check builds nothing; the rest echoes.
 	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\necho \"nix $*\"\n"), 0o755)
 	svc.Jobs.Nix = nix
+	tools := fakesops.Tools(t)
+	svc.Secrets = core.OpenSecrets(t.TempDir(), repo)
+	svc.Secrets.Sops, svc.Secrets.AgeKeygen, svc.Secrets.SSHToAge = tools.Sops, tools.AgeKeygen, tools.SSHToAge
 	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost) // tests log in often; -race slows bcrypt a lot
 	a, err := auth.New(string(hash), filepath.Join(t.TempDir(), "tokens.json"))
 	if err != nil {
