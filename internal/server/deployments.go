@@ -23,7 +23,8 @@ func (s *Server) deploymentRoutes(api *http.ServeMux) {
 		return map[string]string{"token": t}, err
 	}))
 	api.HandleFunc("POST /api/deployments/token", post(func(r *http.Request, _ struct{}) (any, error) {
-		return nil, s.Svc.Deploys.RotateKey()
+		hosts, err := s.Svc.RotateReportTokens(r.Context())
+		return map[string][]string{"stored": hosts}, err
 	}))
 	api.HandleFunc("DELETE /api/deployments/shared-token", post(func(r *http.Request, _ struct{}) (any, error) {
 		return nil, s.Svc.Deploys.DropSharedToken()

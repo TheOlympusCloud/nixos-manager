@@ -334,7 +334,8 @@ export const api = {
   /** One machine's own report token. */
   deployToken: (host: string) => get<{ token: string }>('/api/deployments/token', { host }).then((r) => r.token),
   /** New tokens for every machine: those with an old one stop reporting until they get the new one. */
-  regenerateDeployTokens: () => post<void>('/api/deployments/token'),
+  /** New report tokens for every machine; resolves with the machines whose secrets got theirs again (to commit and push). */
+  regenerateDeployTokens: () => post<{ stored: string[] }>('/api/deployments/token').then((r) => r.stored),
   /** Stops accepting the shared fleet token of an install from before machine tokens. */
   dropSharedDeployToken: () => request<void>('DELETE', '/api/deployments/shared-token', {}),
   updates: () => get<UpdateStatus>('/api/updates'),

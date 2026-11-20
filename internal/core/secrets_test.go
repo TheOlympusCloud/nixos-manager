@@ -123,10 +123,16 @@ func TestSecretsMachineKeys(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 	conf, _, _ := s.Repo.Read(".sops.yaml")
-	for _, want := range []string{st.Recipient, st.Machines[0].Recipient, st.Machines[1].Recipient, `'^secrets/hosts/web\.json$'`, `'^secrets/common\.json$'`} {
+	// "- <age key> # <machine>": the starter's modules/secrets.nix finds a machine's key by it.
+	for _, want := range []string{"- " + st.Machines[0].Recipient + " # pi\n", "- " + st.Machines[1].Recipient + " # web\n", `'^secrets/hosts/web\.json$'`, `'^secrets/common\.json$'`} {
 		if !strings.Contains(conf, want) {
 			t.Fatalf(".sops.yaml lacks %s:\n%s", want, conf)
 		}
+	}
+	// A clone with web's key is named in its own rule, so it finds its key too.
+	must[SecretMachine](t)(s.SetMachineKey(ctx, "web2", pub))
+	if conf, _, _ := s.Repo.Read(".sops.yaml"); !strings.Contains(conf, "- "+st.Machines[1].Recipient+" # web2\n") {
+		t.Fatalf(".sops.yaml does not name web2:\n%s", conf)
 	}
 	isErr(t, must2(s.SetMachineKey(ctx, "web", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7 root@web")), ErrInvalid)
 	isErr(t, must2(s.SetMachineKey(ctx, "Web!", pub)), ErrInvalid)
@@ -395,6 +401,21 @@ func TestStoreReportTokens(t *testing.T) {
 	}
 	if v := must[string](t)(sec.Reveal(ctx, "web", "other")); v != "kept" {
 		t.Fatal("another secret was lost")
+	}
+
+	// New tokens are stored again for the machines that read theirs from the
+	// secrets, or they would stop reporting with nothing said; pi no longer does.
+	ok(t, sec.Delete(ctx, "pi", ReportSecret))
+	old := must[string](t)(svc.Deploys.HostToken("web"))
+	if hosts := must[[]string](t)(svc.RotateReportTokens(ctx)); !slices.Equal(hosts, []string{"web"}) {
+		t.Fatalf("stored again for %v", hosts)
+	}
+	want := must[string](t)(svc.Deploys.HostToken("web"))
+	if got := must[string](t)(sec.Reveal(ctx, "web", ReportSecret)); want == old || got != want {
+		t.Fatalf("web keeps %q; its token is %q (was %q)", got, want, old)
+	}
+	if _, err := sec.Reveal(ctx, "pi", ReportSecret); err == nil {
+		t.Fatal("pi got a report token it did not keep in its secrets")
 	}
 }
 

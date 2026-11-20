@@ -277,7 +277,9 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
 
 The service runs as the `nixos-manager` user, with its working copy, deploy
 key, tokens and Nix caches in `/var/lib/nixos-manager`; `journalctl -u
-nixos-manager` has its log. Other options: `listen` (default `0.0.0.0:8080`),
+nixos-manager` has its log. Other options: `dataDir` (that folder, default
+`/var/lib/nixos-manager`; it must be under `/var/lib`, as it is the service's
+state directory), `listen` (default `0.0.0.0:8080`),
 `remote` (sets `NIXMGR_REMOTE`; leave it out to connect Forgejo in Settings),
 `environmentFile` (extra secrets as `KEY=value`), `extraEnvironment`, and
 `binaryCache` (see [Binary cache](#binary-cache)).
@@ -344,9 +346,17 @@ like every other machine:
 
 The alternative, on any host with Docker. The image carries its own Nix.
 
-> **Upgrading from an image that ran as root?** With Compose, nothing to do.
-> With plain `docker run`, give the volume to the new user once first; the
-> command is below.
+> **Upgrading from an image that ran as root?** The image now runs as the
+> `nixos-manager` user (uid 10001). The earlier image left the data volume
+> owned by root with mode 0700, so the new server cannot open it and restarts
+> in a loop until the volume is given to that user:
+>
+> - With Compose, take the new `compose.yaml`, or copy its `data-owner` service
+>   (and the `depends_on` that waits for it) into yours: it gives the volume to
+>   the user before each start. With your old `compose.yaml` unchanged, or with
+>   plain `docker run`, run the `chown` command below once.
+> - A key mounted at `/root/.ssh` is no longer read: mount it at
+>   `/home/nixos-manager/.ssh` instead, readable by uid 10001.
 
 1. Pick a login password and store its hash:
 
@@ -372,6 +382,16 @@ Files you mount must be readable by uid 10001: the password hash, and a key in
 refuses it. The user owns the container's Nix store, so it can replace any program
 in it: never run commands in the server's container as root
 (`docker compose exec` runs them as the user).
+
+**Builds here can read the server's data.** Nix cannot sandbox builds in an
+unprivileged container, and the image's single-user Nix builds as the server's
+own user. Anything the fleet builds (a check, or an import from a derivation
+while the machines are evaluated) can read the data volume: the age key of the
+secrets, the tokens and the Forgejo key. Use the Docker image only when everyone
+who can push to the fleet repository or holds an edit token may see those.
+Otherwise run the [Proxmox LXC](#run-it-in-a-proxmox-lxc-recommended): the
+NixOS module builds through the Nix daemon, as the `nixbld` users, which cannot
+read the data folder.
 
 Either way, without a remote the app starts a new repository with a starter
 flake (an example host, a home-manager user and comin). Run **Lock** once to
@@ -505,6 +525,21 @@ working copy) plus `flake.nix` and `flake.lock`, never `.git` or untracked or
 ignored files, and then copy the new `flake.lock` back. If `flake.nix` or
 `flake.lock` is saved while they run, they write nothing: run them again.
 
+The machine views, settings and option search evaluate the flake in pure mode,
+like `nix build` and comin: a plain read or import of a server path fails
+(`builtins.readFile "/var/lib/nixos-manager/sops-age-key"` gives "forbidden in
+pure evaluation mode"), fleet code sees no environment, and only the inputs
+`flake.lock` pins are fetched. After adding an input to `flake.nix`, run
+**Lock**; until then the machines show "flake.lock does not pin every input".
+
+**This does not keep the server's data from fleet code.** Nix still fetches a
+local folder pinned by its hash (`builtins.fetchTree { type = "path"; … }` or a
+`path:` input), and a wrong hash makes it print the right one. Checks also run
+`nix build` and `nix flake check` as the server's user. So anyone who can push
+to the fleet repository or holds an edit token can copy the data folder, age
+key included, into the Nix store in two tries. Give push access and edit tokens
+only to people who may see the secrets, as in Docker.
+
 ### Try a change on one machine first
 
 comin also follows a testing branch on each machine, `testing-<hostname>`
@@ -533,7 +568,9 @@ risky change on a remote machine.
    branch on the remote back at `main`'s last commit, so comin switches the
    machine back to `main` (deleting the branch would not do: comin keeps the
    branches it fetched); a console on the testing branch goes back to `main`,
-   and the trial's commits stay on its local testing branch.
+   and the trial's commits stay on its local testing branch (with uncommitted
+   changes that conflict with `main`, it stays and says so: switch before you
+   push, or the push sends the trial back).
 
 When `main` moves on without the trial, comin leaves it and deploys `main`;
 Changes says so. MCP has the same: `try_on_machine` and `end_trial`.
@@ -724,6 +761,8 @@ To turn it on (the **Deployments** view walks you through it):
    With sops-nix or agenix, point `fleet.deployReport.tokenFile` at the secret
    instead. Never commit a token. **New tokens for every machine** replaces the
    key; machines with an old token stop reporting until they get the new one.
+   Those that keep theirs in the secrets get it there at once: commit and push
+   it.
 
 3. The first report arrives with the next deployment after both are in place,
    and the first heartbeat a few minutes after the deployment that installs
@@ -843,9 +882,15 @@ secrets/hosts/<name>.json  what that machine alone gets
   repository: a key that arrives in `secrets/hosts/` another way (a pull, an
   edit in Code, a token that can only edit) is listed under **Keys waiting for
   approval**, and nothing is encrypted for it until a person approves it there.
-  Re-encrypt writes back the approved key of a machine whose `.pub` was changed. A machine without a key gets no secrets at all, so adding a
-  secret for every machine never fails a deployment on one that cannot
-  decrypt it. The starter fleet makes an SSH host key on every machine, even
+  Re-encrypt writes back the approved key of a machine whose `.pub` was changed.
+  The starter's `modules/secrets.nix` finds a machine's approved age key in
+  `.sops.yaml` (its `- age1… # <name>` line) and gives the machine only the
+  files encrypted for it. So adding a secret for every machine never fails a
+  deployment on one that cannot decrypt it, and neither does a key that only
+  waits for approval or a file not encrypted again yet. A fleet started before
+  this keeps its own copy of the module, which gives a machine its secrets as
+  soon as its `.pub` exists: copy `templates/fleet/modules/secrets.nix` over it.
+  The starter fleet makes an SSH host key on every machine, even
   without an SSH server (`services.openssh.generateHostKeys`). **Remove**
   deletes the machine's own secrets and encrypts the others again without it,
   with a new data key, so it cannot open what is added later; change the values
@@ -898,7 +943,8 @@ Two setup steps under **Settings → Secrets**:
 - **Report tokens.** **Store every machine's token** saves each machine's own
   [report token](#deployments) as its secret `nixos-manager-report`, which
   `modules/secrets.nix` points the report hook at, instead of copying it over
-  SSH. Store them again after **New tokens for every machine**.
+  SSH. **New tokens for every machine** stores the new ones again for the
+  machines that have theirs there; commit and push them.
 
 **A fleet made before secrets** has neither `modules/secrets.nix` nor the
 sops-nix input. Add the input to `flake.nix` and run **Lock**:
@@ -1069,7 +1115,8 @@ tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
 `list_branches`, `create_branch`, `switch_branch`, `revert_commit`,
 `merge_branch`, `push`, `pull`,
-`list_targets`, `run_check`, `flake_lock`, `flake_update`. Secrets:
+`list_targets`, `run_check`, `flake_lock`, `flake_update`. Deployments:
+`deployments`, `try_on_machine`, `end_trial`. Secrets:
 `list_secrets` (names and keys), `set_secret`, `delete_secret`; no tool reads a
 value back. They call the same
 code as the web UI, including the check rules for commit and push, which MCP
@@ -1105,6 +1152,31 @@ arrived: `Via: web session 3fa2c1d9` (the same label as the `login` line in the
 service log) or `Via: token ci (K3J9QW2M4X1A)`, the token's name and id. A
 commit message may not bring its own `Via` trailer.
 
+## Upgrading
+
+From a version before token scopes, machine tokens and the other changes of
+this release:
+
+- **Data.** The data folder and the fleet repository need no migration. Old
+  tokens keep working, as full tokens, and so do the shared report token and
+  old reports. Sessions are not kept: everyone logs in again.
+- **The shared fleet token.** The old version always made
+  `$NIXMGR_DATA/deploy-token`, so every upgraded install logs "machines may
+  still report with the shared fleet token" at each start until you stop
+  accepting it ([Upgrading from one fleet token](#deployments)).
+- **Scripts that create tokens.** `POST /api/tokens` now needs a `scope`
+  (`read`, `edit` or `full`) and answers 400 without one. Add
+  `"scope": "full"` to get what the old version made.
+- **Fleet modules.** A fleet keeps its own copies of the starter's modules:
+  copy the new `modules/secrets.nix` over yours ([Secrets](#secrets)).
+- **Pure evaluation.** The machine views evaluate the flake as `nix build`
+  does: run **Lock** if `flake.lock` misses an input ([Using it](#using-it)).
+- **Docker.** The image runs as uid 10001: see the upgrade note in
+  [Run it with Docker Compose](#run-it-with-docker-compose).
+- **Rolling back** to the old version gives every read and edit token full
+  access, as it knows no scopes, and accepts expired tokens again. Revoke them
+  on the Tokens page before you roll back, and make new ones after.
+
 ## Configuration
 
 | Variable | Meaning |
@@ -1123,19 +1195,6 @@ commit message may not bring its own `Via` trailer.
 Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
 a keyed hash of each one, never the session itself. Changing the password ends
 every session.
-
-Logins are limited before the password is checked: 10 attempts per 10
-minutes from one address, and 50 per 10 minutes from all addresses together.
-More get `429 Too Many Requests` with `Retry-After`; successful logins do not
-count. A browser that has logged in before keeps a cookie that gives it its own
-limit of 10, outside the shared one, so someone guessing from elsewhere cannot
-lock you out of a browser you already use. Behind a proxy on the same machine
-(`tailscale serve`, Caddy, nginx) the address is the last one the proxy added
-to `X-Forwarded-For`. With Docker, a proxy on the host reaches the container
-from the Docker gateway rather than loopback: set `NIXMGR_TRUSTED_PROXIES` to
-that address (the `remote=` of the `login` lines in the log), or every proxied
-login shares one address's limit. List only proxies there, since anything in
-that list can claim any client address. The counts are kept in memory.
 
 Logins are limited before the password is checked: 10 attempts per 10
 minutes from one address, and 50 per 10 minutes from all addresses together.

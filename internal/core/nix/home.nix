@@ -1,7 +1,8 @@
-# nixmgr:home - packages and programs of one standalone home-manager configuration (NIXMGR_HOST).
+# nixmgr:home - packages and programs of one standalone home-manager configuration (host).
+{ flakeRef, host }:
 let
-  flake = builtins.getFlake (builtins.getEnv "NIXMGR_FLAKE");
-  name = builtins.getEnv "NIXMGR_HOST";
+  flake = builtins.getFlake flakeRef;
+  name = host;
   home = flake.homeConfigurations.${name};
   lib = if flake.inputs ? nixpkgs then flake.inputs.nixpkgs.lib else home.pkgs.lib;
   try = v: default: let r = builtins.tryEval v; in if r.success then r.value else default;

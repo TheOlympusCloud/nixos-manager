@@ -194,8 +194,31 @@ func cleanPath(p string) (string, error) {
 		return "", errorf(ErrInvalid, "invalid path %q: must be relative and stay inside the repository", p)
 	}
 	p = filepath.ToSlash(filepath.Clean(p))
-	if p == "." || p == ".git" || strings.HasPrefix(p, ".git/") {
+	if p == "." {
 		return "", errorf(ErrInvalid, "invalid path %q", p)
+	}
+	// Any .git, at any depth and in any case (git treats .GIT as .git): a config
+	// written into one runs a command on the next git status (core.fsmonitor).
+	for _, seg := range strings.Split(p, "/") {
+		if strings.EqualFold(seg, ".git") {
+			return "", errorf(ErrInvalid, "invalid path %q: .git folders cannot be edited", p)
+		}
+	}
+	return p, nil
+}
+
+// localPath is cleanPath for a path opened in the working copy: no folder on
+// the way may be a symlink, as os.Root follows links that stay inside the repo
+// and one pointing at .git would get past cleanPath.
+func (r *Repo) localPath(p string) (string, error) {
+	p, err := cleanPath(p)
+	if err != nil {
+		return "", err
+	}
+	for dir := path.Dir(p); dir != "."; dir = path.Dir(dir) {
+		if fi, err := r.root.Lstat(dir); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+			return "", errorf(ErrInvalid, "invalid path %q: %s is a symbolic link", p, dir)
+		}
 	}
 	return p, nil
 }
@@ -254,7 +277,7 @@ func textOrError(p string, b []byte) (string, error) {
 
 // Read returns a text file and the hash a later Write must present.
 func (r *Repo) Read(p string) (string, string, error) {
-	p, err := cleanPath(p)
+	p, err := r.localPath(p)
 	if err != nil {
 		return "", "", err
 	}
@@ -275,7 +298,7 @@ func (r *Repo) Read(p string) (string, string, error) {
 // Write saves a file. baseHash is the hash from Read; "" creates a new file.
 // A mismatch means someone else changed the file, so nothing is overwritten.
 func (r *Repo) Write(p, content, baseHash string) (string, error) {
-	p, err := cleanPath(p)
+	p, err := r.localPath(p)
 	if err != nil {
 		return "", err
 	}
@@ -342,7 +365,7 @@ func (r *Repo) writeFile(p string, data []byte) error {
 
 // Mkdir creates a folder (and its parents).
 func (r *Repo) Mkdir(p string) error {
-	p, err := cleanPath(p)
+	p, err := r.localPath(p)
 	if err != nil {
 		return err
 	}
@@ -356,11 +379,11 @@ func (r *Repo) Mkdir(p string) error {
 
 // Move renames a file or folder.
 func (r *Repo) Move(from, to string) error {
-	from, err := cleanPath(from)
+	from, err := r.localPath(from)
 	if err != nil {
 		return err
 	}
-	if to, err = cleanPath(to); err != nil {
+	if to, err = r.localPath(to); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -384,7 +407,7 @@ func (r *Repo) Move(from, to string) error {
 
 // Delete removes a file or a folder with everything in it.
 func (r *Repo) Delete(p string) error {
-	p, err := cleanPath(p)
+	p, err := r.localPath(p)
 	if err != nil {
 		return err
 	}
@@ -822,7 +845,9 @@ func (r *Repo) Restore(ctx context.Context, p, rev, baseHash string) error {
 	if err != nil {
 		return err
 	}
-	p, _ = cleanPath(p)
+	if p, err = r.localPath(p); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.checkBase(p, baseHash); err != nil {
@@ -1154,23 +1179,41 @@ func (r *Repo) Seed(fsys fs.FS) (bool, error) {
 }
 
 // CommitsBetween counts the commits that to has and from lacks (from..to) and
-// says when the oldest of them was committed. from and to are SHAs or full refs
-// chosen by the caller, never user input.
-func (r *Repo) CommitsBetween(ctx context.Context, from, to string) (int, time.Time, error) {
-	out, err := r.git(ctx, "log", "--format=%ct", "--end-of-options", to, "^"+from, "--")
+// says since when ref, whose tip is to, has held one of them. Its reflog has
+// when each tip arrived (a fetch, a push, a commit here), so a commit made
+// hours before it was pushed or merged counts from then; without a reflog,
+// from when the oldest of them was committed. from, to and ref are SHAs or full
+// refs chosen by the caller, never user input.
+func (r *Repo) CommitsBetween(ctx context.Context, from, to, ref string) (int, time.Time, error) {
+	out, err := r.git(ctx, "log", "--format=%H %ct", "--end-of-options", to, "^"+from, "--")
 	if err != nil {
 		return 0, time.Time{}, err
 	}
-	lines := strings.Fields(out)
-	var oldest int64
-	for _, l := range lines {
+	missing := map[string]bool{}
+	var since int64
+	for _, l := range strings.Split(out, "\n") {
+		var sha string
 		var sec int64
-		if _, err := fmt.Sscan(l, &sec); err == nil && (oldest == 0 || sec < oldest) {
-			oldest = sec
+		if _, err := fmt.Sscan(l, &sha, &sec); err == nil {
+			missing[sha] = true
+			if since == 0 || sec < since {
+				since = sec
+			}
 		}
 	}
-	if len(lines) == 0 {
+	if len(missing) == 0 {
 		return 0, time.Time{}, nil
 	}
-	return len(lines), time.Unix(oldest, 0).UTC(), nil
+	// Newest first, back to the last tip that held nothing from lacks.
+	out, _ = r.git(ctx, "log", "-g", "--date=unix", "--format=%H %gd", "--end-of-options", ref, "--")
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		sha, sel, _ := strings.Cut(l, " ")
+		_, at, _ := strings.Cut(sel, "@{") // <ref>@{<unix time>}
+		var sec int64
+		if _, err := fmt.Sscanf(at, "%d}", &sec); err != nil || !missing[sha] {
+			break
+		}
+		since = sec
+	}
+	return len(missing), time.Unix(since, 0).UTC(), nil
 }

@@ -297,7 +297,7 @@ func (js *Jobs) runIndex(ctx context.Context, job *Job) (err error) {
 	case "packages":
 		ref := nixpkgsRef(js.lockFile())
 		fmt.Fprintf(job, "Indexing the packages of %s; the first time this takes a few minutes.\n", ref)
-		cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("search", "--json", ref, "^")...)
+		cmd := js.nixCmd(ctx, js.nixArgs("search", "--json", ref, "^")...)
 		var stdout bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, job
 		if err := cmd.Run(); err != nil {
@@ -333,7 +333,7 @@ func (js *Jobs) runIndex(ctx context.Context, job *Job) (err error) {
 		}
 		defer cleanup()
 		var idx []OptionDoc
-		if err := js.evalJSON(ctx, src, job.Req.Host, nixExpr("options.nix"), &idx); err != nil {
+		if err := js.evalJSON(ctx, src, map[string]string{"host": job.Req.Host}, nixExpr("options.nix"), &idx); err != nil {
 			return err
 		}
 		fmt.Fprintf(job, "Indexed %d options.\n", len(idx))

@@ -435,7 +435,7 @@ type MachineDeployment struct {
 	DeployedAt  time.Time      `json:"deployedAt,omitzero"`
 	LastSeen    time.Time      `json:"lastSeen,omitzero"` // its last report of any kind
 	Behind      int            `json:"behind"`
-	BehindSince time.Time      `json:"behindSince,omitzero"` // when the oldest commit it lacks was made
+	BehindSince time.Time      `json:"behindSince,omitzero"` // since when its branch has held a commit it lacks
 	Failure     *DeployReport  `json:"failure,omitempty"`
 	Reports     []DeployReport `json:"reports"`
 }
@@ -479,7 +479,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 	live := maps.Clone(d.live)
 	d.mu.Unlock()
 
-	tips, err := d.branchTips(ctx)
+	tips, refs, err := d.branchTips(ctx)
 	if err != nil {
 		return ov, err
 	}
@@ -521,7 +521,7 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 		since time.Time
 		err   error
 	}
-	gaps := map[[2]string]gap{}
+	gaps := map[[3]string]gap{}
 	for _, h := range hosts {
 		b := follows[h]
 		m := MachineDeployment{Host: h, Testing: b.Testing, Reports: reports[h]}
@@ -562,10 +562,10 @@ func (d *Deployments) Overview(ctx context.Context, model *Model, now time.Time)
 			m.inRepo = ok
 		}
 		if known && m.Target != "" && m.Commit != m.Target {
-			k := [2]string{m.Commit, m.Target}
+			k := [3]string{m.Commit, m.Target, m.Branch}
 			g, ok := gaps[k]
 			if !ok {
-				g.n, g.since, g.err = d.repo.CommitsBetween(ctx, m.Commit, m.Target)
+				g.n, g.since, g.err = d.repo.CommitsBetween(ctx, m.Commit, m.Target, refs+m.Branch)
 				gaps[k] = g
 			}
 			m.Behind, m.BehindSince = g.n, g.since
@@ -781,15 +781,16 @@ func fleetBranch(follows map[string]CominBranches) string {
 }
 
 // branchTips maps branch names to their last commit as comin sees them: on
-// origin when there is one, else (no remote yet) the local branches.
-func (d *Deployments) branchTips(ctx context.Context) (map[string]string, error) {
+// origin when there is one, else (no remote yet) the local branches. It also
+// returns the prefix that makes a branch name their ref.
+func (d *Deployments) branchTips(ctx context.Context) (map[string]string, string, error) {
 	prefix := "refs/heads/"
 	if _, err := d.repo.git(ctx, "remote", "get-url", "origin"); err == nil {
 		prefix = "refs/remotes/origin/"
 	}
 	out, err := d.repo.git(ctx, "for-each-ref", "--format=%(refname) %(objectname)", prefix)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tips := map[string]string{}
 	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -797,5 +798,5 @@ func (d *Deployments) branchTips(ctx context.Context) (map[string]string, error)
 			tips[strings.TrimPrefix(ref, prefix)] = sha
 		}
 	}
-	return tips, nil
+	return tips, prefix, nil
 }

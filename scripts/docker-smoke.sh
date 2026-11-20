@@ -5,7 +5,9 @@
 #   Compose's data-owner and keeps working;
 # - real Nix locks and evaluates the starter flake as the user;
 # - a program the user swaps into its Nix profile never runs as root, even after a restart;
-# - a new volume works with plain docker run.
+# - a build can read the data volume, as the README warns (no sandbox in a container);
+# - a new volume works with plain docker run, and so does an earlier image's volume after
+#   the README's chown.
 #
 # Needs: docker with Compose, curl, python3, and network (the image build and the flake
 # inputs). With GITHUB_TOKEN set, Nix in the container uses it for the starter flake's
@@ -18,13 +20,13 @@ port=${SMOKE_PORT:-18089}
 base="http://127.0.0.1:$port"
 proj=nixmgr-smoke-$$
 image=$proj-nixos-manager # Compose's name for the service's image
-vol=${proj}_nixmgr-data new=$proj-new plain=$proj-plain
+vol=${proj}_nixmgr-data new=$proj-new old=$proj-old plain=$proj-plain
 work=$(mktemp -d)
 compose() { docker compose -p "$proj" -f "$repo/compose.yaml" -f "$work/override.yaml" "$@"; }
 cleanup() {
   compose down -v --rmi local > /dev/null 2>&1 || true
   docker rm -f "$plain" > /dev/null 2>&1 || true
-  docker volume rm -f "$vol" "$new" > /dev/null 2>&1 || true
+  docker volume rm -f "$vol" "$new" "$old" > /dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -78,18 +80,24 @@ ready() {
   fail "$1 never became ready"
 }
 
-# The earlier image: the same server run as root, on the volume Compose will use. nocopy:
-# the volume does not take this image's folder, which the user owns; the earlier one was root's.
-docker volume create "$vol" > /dev/null
-cid=$(docker run -d -p "127.0.0.1:$port:8080" -v "$vol:/var/lib/nixos-manager:nocopy" --user 0 \
-  -e NIXMGR_AUTHOR_NAME=Old -e NIXMGR_AUTHOR_EMAIL=old@example.invalid -e NIXMGR_PASSWORD_HASH="$hash" "$image")
-up
-[ "$(uids)" = "0 0 0 0" ] || fail "the old-image stand-in does not run as root"
-login
-has_starter || fail "the old-image stand-in did not write the starter flake"
-docker rm -f "$cid" > /dev/null
-[ -n "$(docker run --rm --user 0 --entrypoint find -v "$vol:/data" "$image" /data -user root)" ] ||
-  fail "the old-image volume has no root-owned files"
+# old_volume <volume> leaves a volume as the earlier image did: the same server run as root.
+# nocopy: the volume does not take this image's folder, which the user owns; the earlier
+# one was root's.
+old_volume() {
+  docker volume create "$1" > /dev/null
+  cid=$(docker run -d -p "127.0.0.1:$port:8080" -v "$1:/var/lib/nixos-manager:nocopy" --user 0 \
+    -e NIXMGR_AUTHOR_NAME=Old -e NIXMGR_AUTHOR_EMAIL=old@example.invalid -e NIXMGR_PASSWORD_HASH="$hash" "$image")
+  up
+  [ "$(uids)" = "0 0 0 0" ] || fail "the old-image stand-in does not run as root"
+  login
+  has_starter || fail "the old-image stand-in did not write the starter flake"
+  docker rm -f "$cid" > /dev/null
+  [ -n "$(docker run --rm --user 0 --entrypoint find -v "$1:/data" "$image" /data -user root)" ] ||
+    fail "the old-image volume has no root-owned files"
+}
+
+# The earlier image's volume, the one Compose will use.
+old_volume "$vol"
 echo "ok   a volume as the earlier image left it: root-owned"
 
 # The README's steps: the hash through Compose, then up.
@@ -122,6 +130,15 @@ secrets=$(api GET /api/secrets)
 case "$(echo "$secrets" | json '["recipient"]')" in age1*) ;; *) fail "no age key for the secrets: $secrets" ;; esac
 [ -z "$(not_owned)" ] || fail "the age key is not nixos-manager's: $(not_owned)"
 echo "ok   sops, age and ssh-to-age are in the image, and the server made its age key"
+
+# The README warns that builds here run unsandboxed as the server's user. If this ever
+# says "unreadable", builds got isolated: update the README's Docker section.
+built=$(docker exec "$cid" nix build --no-link --print-out-paths --impure --expr \
+  'derivation { name = "smoke-read"; system = builtins.currentSystem; builder = "/bin/sh"; args = [ "-c" "if [ -r /var/lib/nixos-manager/sops-age-key ]; then echo readable; else echo unreadable; fi > $out" ]; }') ||
+  fail "nix build in the container"
+[ "$(docker exec "$cid" cat "$built")" = readable ] ||
+  fail "a build cannot read the data volume any more: the README's Docker warning is out of date"
+echo "ok   as the README warns, a build in the container can read the data volume"
 
 # The user swaps both Nix profiles for wrappers that log who runs them, then the stack
 # restarts with the container's files kept: nothing may run them as root. One log per uid
@@ -159,5 +176,18 @@ up
 login
 has_starter || fail "the new volume did not get the starter flake"
 echo "ok   a new volume works with plain docker run"
+docker rm -f "$plain" > /dev/null
+
+# An earlier image's volume with plain docker run: the README's chown once, then it works.
+old_volume "$old"
+docker run --rm --user root --entrypoint chown -v "$old:/var/lib/nixos-manager" "$image" \
+  -R -h nixos-manager:nixos-manager /var/lib/nixos-manager || fail "the README's chown"
+cid=$(docker run -d --name "$plain" -p "127.0.0.1:$port:8080" -v "$old:/var/lib/nixos-manager" \
+  -e NIXMGR_AUTHOR_NAME=New -e NIXMGR_AUTHOR_EMAIL=new@example.invalid -e NIXMGR_PASSWORD_HASH="$hash" "$image")
+up
+[ "$(uids)" = "10001 10001 10001 10001" ] || fail "docker run runs the server as uids $(uids)"
+login
+has_starter || fail "the earlier image's starter flake is gone after the chown"
+echo "ok   an earlier image's volume works with plain docker run after the README's chown"
 
 echo "PASS"

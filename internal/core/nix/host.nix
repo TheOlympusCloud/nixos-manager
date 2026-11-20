@@ -1,8 +1,9 @@
-# nixmgr:host - what one NixOS machine (NIXMGR_HOST) configures, for the fleet views.
+# nixmgr:host - what one NixOS machine (host) configures, for the fleet views.
 # Repo files are reported relative to the flake root; anything else is "nixos".
+{ flakeRef, host }:
 let
-  flake = builtins.getFlake (builtins.getEnv "NIXMGR_FLAKE");
-  name = builtins.getEnv "NIXMGR_HOST";
+  flake = builtins.getFlake flakeRef;
+  name = host;
   machine = flake.nixosConfigurations.${name};
   inherit (machine) config options;
   lib = machine.pkgs.lib;

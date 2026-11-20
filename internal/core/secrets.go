@@ -316,7 +316,8 @@ func (st secretsState) recipients(host string) []string {
 }
 
 // sopsYAML is .sops.yaml for the machines: the sops command line then
-// encrypts each file for the keys the console does.
+// encrypts each file for the keys the console does. The starter's
+// modules/secrets.nix finds a machine's age key by its "- <key> # <name>" line.
 func (st secretsState) sopsYAML() string {
 	var b strings.Builder
 	b.WriteString("# Written by nixos-manager (Settings → Secrets) when a machine's key is added or\n" +
@@ -326,7 +327,9 @@ func (st secretsState) sopsYAML() string {
 		fmt.Fprintf(&b, "  - path_regex: '^%s$'\n    key_groups:\n      - age:\n", regexp.QuoteMeta(path))
 		for _, r := range st.recipients(host) {
 			who := "this nixos-manager server"
-			if i := slices.IndexFunc(st.machines, func(m SecretMachine) bool { return m.Recipient == r }); i >= 0 && r != st.admin {
+			if r != st.admin && host != "" { // the machine's own rule names it, even with a key another has too
+				who = host
+			} else if i := slices.IndexFunc(st.machines, func(m SecretMachine) bool { return m.Recipient == r }); i >= 0 && r != st.admin {
 				who = st.machines[i].Name
 			}
 			fmt.Fprintf(&b, "          - %s # %s\n", r, who)
@@ -788,9 +791,46 @@ func (s *Service) StoreReportTokens(ctx context.Context) ([]string, error) {
 	if len(hosts) == 0 {
 		return nil, errorf(ErrInvalid, "no machine has a key yet: add their SSH host keys first")
 	}
-	return hosts, s.Secrets.update(ctx, hosts, func(h string, v map[string]string) error {
-		t, err := s.Deploys.HostToken(h)
-		v[ReportSecret] = t
-		return err
-	})
+	return hosts, s.Secrets.update(ctx, hosts, s.reportToken)
+}
+
+func (s *Service) reportToken(host string, v map[string]string) error {
+	t, err := s.Deploys.HostToken(host)
+	v[ReportSecret] = t
+	return err
+}
+
+// RotateReportTokens makes a new report token for every machine and stores the
+// new ones again in the secrets of the machines that read theirs there (their
+// own file has it): those would stop reporting with nothing said. It returns
+// them; their secrets then wait to be committed and pushed.
+func (s *Service) RotateReportTokens(ctx context.Context) ([]string, error) {
+	if s.Deploys == nil {
+		return nil, errorf(ErrInvalid, "deployment reports are off on this server")
+	}
+	if err := s.Deploys.RotateKey(); err != nil {
+		return nil, err
+	}
+	hosts := []string{}
+	if s.Secrets == nil || len(s.Secrets.missing()) > 0 {
+		return hosts, nil
+	}
+	s.Secrets.Repo.mu.Lock()
+	ms, err := s.Secrets.machines(ctx)
+	for _, m := range ms {
+		p := secretsFile(m.Name)
+		if b, err := s.Secrets.Repo.root.ReadFile(p); err == nil {
+			if d, err := parseSops(p, b); err == nil && slices.Contains(d.names, ReportSecret) {
+				hosts = append(hosts, m.Name)
+			}
+		}
+	}
+	s.Secrets.Repo.mu.Unlock()
+	if err == nil && len(hosts) > 0 {
+		err = s.Secrets.update(ctx, hosts, s.reportToken)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the new report tokens were made, but storing them again in the secrets failed (store them under Settings → Secrets → Report tokens): %w", err)
+	}
+	return hosts, nil
 }

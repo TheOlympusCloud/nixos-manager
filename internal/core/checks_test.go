@@ -24,22 +24,24 @@ import (
 // 1 path to fetch, and a build with --out-link links to a store path named after
 // the machine.
 const buildNix = `#!/bin/sh
-flake=${NIXMGR_FLAKE#path:}
+flake=$(printf '%s\n' "$*" | sed -n 's/.* flakeRef = "path:\([^"?]*\)?.*/\1/p')
+host=$(printf '%s\n' "$*" | sed -n 's/.* host = "\([^"]*\)";.*/\1/p')
 case "$*" in
+  *" hash path "*) echo sha256-fake; exit 0 ;;
   *"nixmgr:discover"*)
     printf '{"nixos":['; sep=
     for f in "$flake"/hosts/*; do [ -e "$f" ] || continue; printf '%s"%s"' "$sep" "$(basename "$f")"; sep=,; done
     printf '],"home":[],"darwin":[]}\n'; exit 0 ;;
   *"nixmgr:host"*)
     [ -n "$FAILEVAL" ] && [ -f "$FAILEVAL" ] && { echo "error: unable to download 'https://cache.nixos.org'" >&2; exit 1; }
-    f="$flake/hosts/$NIXMGR_HOST"
+    f="$flake/hosts/$host"
     h=$(sha256sum < "$f" | cut -c1-12)
     sys=$(grep -o 'system=[a-z0-9_-]*' "$f" | cut -d= -f2); sys=${sys:-x86_64-linux}
     boot=$(grep -o 'kernel=[a-z0-9]*' "$f")
-    testing=testing-$NIXMGR_HOST; grep -q 'testing=' "$f" && testing=$(grep -o 'testing=[a-z0-9-]*' "$f" | cut -d= -f2)
+    testing=testing-$host; grep -q 'testing=' "$f" && testing=$(grep -o 'testing=[a-z0-9-]*' "$f" | cut -d= -f2)
     comin='"checks":{"comin":true,"cominBranches":[{"url":"remote","main":"main","testing":"'$testing'"}]}'
     grep -q nocomin "$f" && comin='"checks":{"comin":false,"cominBranches":[]}'
-    printf '{"system":"%s","toplevel":"/nix/store/%s-nixos-system-%s.drv","boot":"%s",%s}\n' "$sys" "$h" "$NIXMGR_HOST" "$boot" "$comin"; exit 0 ;;
+    printf '{"system":"%s","toplevel":"/nix/store/%s-nixos-system-%s.drv","boot":"%s",%s}\n' "$sys" "$h" "$host" "$boot" "$comin"; exit 0 ;;
   *"eval --json"*) echo '{}'; exit 0 ;;
 esac
 echo "nix $*"

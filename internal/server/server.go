@@ -34,6 +34,7 @@ const (
 	cookieName    = "nixmgr_session"
 	browserCookie = "nixmgr_browser" // marks a browser that logged in before, for the login limits
 	maxBodySize   = 32 << 20
+	maxLoginBody  = 4 << 10 // read before the login limits are checked
 )
 
 type Server struct {
@@ -49,6 +50,10 @@ type Server struct {
 	// TrustedProxies are reverse proxies, besides loopback, whose X-Forwarded-For
 	// names the client for the login limits (e.g. the Docker gateway).
 	TrustedProxies []netip.Prefix
+
+	// Stopping closes when the server shuts down: job streams end then, so that
+	// only the requests under way hold up the shutdown. nil: never.
+	Stopping <-chan struct{}
 
 	lspSlots chan struct{}
 	gz       sync.Map // static path -> gzipped bytes
@@ -450,6 +455,7 @@ func secure(r *http.Request) bool {
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Password string }
+	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBody)
 	if err := decode(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -642,8 +648,8 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	off := 0
 	for {
 		chunk, done, wait := j.Read(off)
-		for !done && len(chunk) > 0 && !utf8.Valid(chunk) {
-			chunk = chunk[:len(chunk)-1] // never split a UTF-8 character; the rest comes next round
+		if !done {
+			chunk = completeRunes(chunk)
 		}
 		if len(chunk) > 0 {
 			b, _ := json.Marshal(string(chunk))
@@ -663,8 +669,25 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 		case <-wait:
 		case <-r.Context().Done():
 			return
+		case <-s.Stopping: // the browser reconnects; a stream must not hold up the shutdown
+			return
 		}
 	}
+}
+
+// completeRunes is chunk without a UTF-8 character its end cuts short (at most
+// 3 bytes), which the next read completes. Invalid bytes elsewhere stay: they
+// go out as U+FFFD.
+func completeRunes(chunk []byte) []byte {
+	for i := 1; i < utf8.UTFMax && i <= len(chunk); i++ {
+		if tail := chunk[len(chunk)-i:]; utf8.RuneStart(tail[0]) {
+			if !utf8.FullRune(tail) {
+				return chunk[:len(chunk)-i]
+			}
+			break
+		}
+	}
+	return chunk
 }
 
 // static serves the built UI, falling back to index.html for client routes.

@@ -410,6 +410,15 @@ func (js *Jobs) nixArgs(args ...string) []string {
 	return append([]string{"--extra-experimental-features", "nix-command flakes"}, args...)
 }
 
+// nixCmd runs nix with args (nixArgs included). When ctx ends, nix and what it
+// started are killed, and Wait returns even if a child keeps the output open.
+func (js *Jobs) nixCmd(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, js.Nix, args...)
+	ownGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	return cmd
+}
+
 func (js *Jobs) run(job *Job) error {
 	timeout := jobTimeout
 	if job.Req.Kind == "check" {
@@ -486,7 +495,7 @@ func (js *Jobs) run(job *Job) error {
 // step runs one nix command in dir, its output going to the job's.
 func (js *Jobs) step(ctx context.Context, job *Job, dir string, args []string) error {
 	fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
-	cmd := exec.CommandContext(ctx, js.Nix, args...)
+	cmd := js.nixCmd(ctx, args...)
 	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = job, job
 	if err := cmd.Run(); err != nil {

@@ -98,7 +98,7 @@ func systemKey(commit, host string) string { return commit + "/" + host }
 func (js *Jobs) evalSystem(ctx context.Context, installable string) (path, failure string) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, js.Nix, js.nixArgs("eval", "--raw", installable)...)
+	cmd := js.nixCmd(ctx, js.nixArgs("eval", "--raw", installable)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

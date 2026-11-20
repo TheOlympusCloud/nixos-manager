@@ -34,7 +34,7 @@ func TestUpdatesOverHTTP(t *testing.T) {
 	}
 	// nix flake update moves the lock; the flake has no machines, so the check builds nothing.
 	nix := filepath.Join(t.TempDir(), "nix")
-	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in\n  *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;;\n  *\"flake update\"*) d=${*##*path:}; echo '{\"version\":7,\"new\":true}' > \"$d/flake.lock\" ;;\nesac\necho \"nix $*\"\n"), 0o755)
+	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in\n  *\" hash path \"*) echo sha256-fake; exit ;;\n  *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;;\n  *\"flake update\"*) d=${*##*path:}; echo '{\"version\":7,\"new\":true}' > \"$d/flake.lock\" ;;\nesac\necho \"nix $*\"\n"), 0o755)
 	e.svc.Jobs.Nix = nix
 	bare := filepath.Join(t.TempDir(), "remote.git")
 	git("init", "-q", "--bare", "-b", "main", bare)
