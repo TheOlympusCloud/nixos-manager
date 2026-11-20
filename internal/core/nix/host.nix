@@ -151,7 +151,8 @@ let
   unitInfo =
     u:
     let
-      entries = unitEntries (if u.text or null == null then "" else u.text);
+      # Only hashed: without the store paths' context, its keys can name attributes.
+      entries = unitEntries (builtins.unsafeDiscardStringContext (if u.text or null == null then "" else u.text));
       with' = keys: lib.filter (e: builtins.elem e.key keys) entries;
     in
     {
@@ -166,7 +167,8 @@ let
   # as the etc builder does, so editing another file does not change it.
   # /etc/systemd/system is listed as units.
   etc = lib.mapAttrs' (
-    _: e: lib.nameValuePair e.target (hash "${e.source}\n${e.mode}\n${e.user}\n${e.group}")
+    _: e:
+    lib.nameValuePair (builtins.unsafeDiscardStringContext e.target) (hash "${e.source}\n${e.mode}\n${e.user}\n${e.group}")
   ) (lib.filterAttrs (_: e: e.enable && e.target != "systemd/system") config.environment.etc);
 
   files = lib.filter (f: f != "nixos") (
