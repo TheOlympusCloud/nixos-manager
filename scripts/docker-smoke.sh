@@ -5,7 +5,9 @@
 # that user, and a new volume works without root at all (docker run --user).
 #
 # Needs: docker, curl, python3, and network (the image build and the flake inputs).
-# SMOKE_IMAGE=<tag> with SMOKE_NO_BUILD=1 tests an image built beforehand.
+# SMOKE_IMAGE=<tag> with SMOKE_NO_BUILD=1 tests an image built beforehand. With
+# GITHUB_TOKEN set, Nix in the container uses it for the starter flake's github: inputs
+# (anonymous calls to GitHub's API are rate limited, and CI runners share addresses).
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,6 +30,10 @@ json() { python3 -c "import sys, json; print(json.load(sys.stdin)$1)"; }
 if [ "${SMOKE_NO_BUILD:-}" != 1 ]; then
   docker build -t "$image" "$repo"
 fi
+token=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  token=(-e "NIX_CONFIG=access-tokens = github.com=$GITHUB_TOKEN")
+fi
 hash=$(printf 'pw\n' | docker run --rm -i "$image" hash-password) || fail "hash-password"
 [[ $hash == \$2* ]] || fail "hash-password printed $hash"
 echo "ok   hash-password runs through the entrypoint"
@@ -40,7 +46,7 @@ start() {
   docker rm -f "$name" > /dev/null 2>&1 || true
   docker run -d --name "$name" -p "127.0.0.1:$port:8080" -v "$vol:/var/lib/nixos-manager$opts" \
     -e NIXMGR_AUTHOR_NAME="Smoke Test" -e NIXMGR_AUTHOR_EMAIL=smoke@example.invalid \
-    -e NIXMGR_PASSWORD_HASH="$hash" "$@" "$image" > /dev/null
+    -e NIXMGR_PASSWORD_HASH="$hash" "${token[@]}" "$@" "$image" > /dev/null
   rm -f "$work/cookies"
   for _ in $(seq 150); do
     curl -s -o /dev/null "$base/" && return
