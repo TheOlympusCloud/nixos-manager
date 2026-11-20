@@ -15,6 +15,8 @@
 
 Every machine runs comin: it pulls `main` from Forgejo and switches to
 `nixosConfigurations.<its hostname>`. A branch named `testing-<hostname>` is
-deployed to that machine only, with `switch-to-configuration test`.
+deployed to that machine only, with `switch-to-configuration test`, while it is
+on top of `main`: nixos-manager's **Try on** in Changes pushes one, to try a
+change on one machine before `main`.
 
 Never put secrets in this repository; use sops-nix or agenix.

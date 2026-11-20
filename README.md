@@ -21,7 +21,11 @@ An MCP server gives automation the same features.
   commit status, and commits and files link to their Forgejo pages.
 - **Deployments**: every machine's comin reports what it deployed, so after a
   push you watch the rollout reach each machine, and see failures with
-  comin's error.
+  comin's error. A failed deployment offers to revert the commits that broke
+  the machine, through the usual check, commit and push.
+- **Try on one machine**: from Changes, push a checked change to one machine's
+  `testing-<host>` branch, which its comin deploys there alone (a reboot undoes
+  it), watch it there, then promote it to `main` or end the trial.
 - **Machine pages**: packages (with the file that adds each one), services and
   programs, users and SSH keys, ports and file systems, and **Essentials**:
   time zone, locale, keyboard, garbage collection, store optimisation, zram,
@@ -477,8 +481,38 @@ When **Pull** rebases your local commits onto new remote commits, the result
 was never checked as a whole, so **Push** refuses it: run the checks again with
 nothing staged or changed, then push.
 
-A branch named `testing-<hostname>` is deployed by comin to that one machine
-only, for trying a change before merging it into `main`.
+### Try a change on one machine first
+
+comin also follows a testing branch on each machine, `testing-<hostname>`
+unless `services.comin.remotes.*.branches.testing.name` names another (`""`
+turns it off). While that branch is on top of `main` (it has every commit of
+`main` on the remote, and more), comin deploys it on that machine only, with
+`switch-to-configuration test`: the boot entry is left alone, so a reboot
+brings back what `main` gave the machine. That makes it the safe way to try a
+risky change on a remote machine.
+
+1. On `main`, stage the change, write the commit message and run the checks.
+2. **Try on <machine>** (next to Commit; a list when the check built several
+   machines) commits the staged changes on the machine's testing branch, on
+   top of `main`, and pushes that branch. With nothing staged it pushes the
+   commits not pushed yet. It needs `main` up to date with the remote (Pull
+   first), and a check that built that machine. If the testing branch holds an
+   earlier trial whose changes `main` does not have, it asks before replacing
+   it.
+3. The console is now on the testing branch, and Changes shows how the machine
+   takes it (the same state as Deployments). Commit and push there to try more:
+   only that machine gets it.
+4. **Promote to main** switches to `main` and stages the testing branch as one
+   change, the same merge as the branch menu's: check, commit and push it, and
+   every machine gets it. After a single trial, with `main` unchanged, the
+   merge is the tree that passed, so it needs no new check. **End the trial** points the testing
+   branch on the remote back at `main`'s last commit, so comin switches the
+   machine back to `main` (deleting the branch would not do: comin keeps the
+   branches it fetched); a console on the testing branch goes back to `main`,
+   and the trial's commits stay on its local testing branch.
+
+When `main` moves on without the trial, comin leaves it and deploys `main`;
+Changes says so. MCP has the same: `try_on_machine` and `end_trial`.
 
 Never store secrets in the repository; use sops-nix or agenix. Nix copies
 what it evaluates into the store, which every user of the server can read.
@@ -591,6 +625,48 @@ copy both `report-deployment*` files from `templates/fleet/modules/` into its
 `modules/` and import `report-deployments.nix` from `common.nix`. Until then such
 a machine is only flagged as silent when it is behind and has not reported for
 7 days.
+
+### Rolling back
+
+When a machine's deployment fails on its main branch, Deployments and its
+machine page offer **Revert the commit that broke <machine>**: the commits
+after the last one it deployed, up to the one that failed (all of them, as one
+change, when several were pushed at once, since any of them may be at fault;
+the dialog lists them). It stages the revert with its commit message, starts
+the checks, and once they pass **Commit** goes on to the push dialog. The
+revert is a new commit, so every machine those commits changed gets it. It is
+offered for up to 10 commits without a merge; otherwise revert from History.
+A failed trial offers **End the trial** instead. MCP: `deployments` names the
+commits as `culprits`, and `revert_commit` takes `since`.
+
+**No "pin a machine to a commit".** comin cannot do it cleanly:
+
+- it only moves forward: it refuses a main branch that does not descend from
+  the last main commit it deployed, and has no setting to allow it, so
+  pointing a branch at an older commit does nothing;
+- a testing branch must stay on top of the main branch, so it cannot hold an
+  older configuration either, and it is dropped as soon as `main` moves on;
+- it has no command to deploy a chosen commit: `comin deployment
+  submit-latest` redeploys the latest one, and `comin suspend` stops all
+  deployments on the machine (it needs a shell there);
+- a branch of its own per machine would need a configuration change deployed
+  first, and still could not go back.
+
+So a rollback is a revert: a new commit with the old configuration, which the
+history keeps, as above.
+
+**A change that cuts a machine off the network.** comin pulls from the
+machine, so a machine that lost its network cannot pull the fix. This is why
+risky changes (network, firewall, VPN, SSH) are best tried first.
+
+- During a trial: **End the trial** first, then reboot the machine (power
+  cycle, or its console). The trial was applied with `test`, so it boots what
+  `main` gave it; comin then finds the testing branch back on `main` and stays
+  there. Reboot before ending the trial and comin deploys the trial again.
+- On `main`: push the fix first (the revert above, or one from History), then
+  get the machine back on the network from its console or the boot menu: pick
+  the previous generation in the boot menu, or run `nixos-rebuild switch
+  --rollback`. Once it is online, comin pulls the fix and deploys it.
 
 ## Notifications
 

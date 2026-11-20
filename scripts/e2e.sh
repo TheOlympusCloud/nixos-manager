@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end run of the real server against a fresh flake repository and a bare
 # git remote standing in for Forgejo: login, starter flake, lock, check, the
-# commit gate, commit, push, edit, history, and a push from elsewhere checked
-# through the webhook.
+# commit gate, commit, push, edit, history, a push from elsewhere checked
+# through the webhook, a trial on one machine, and the rollback of a failed
+# deployment.
 #
 # Uses the real nix and nixfmt from PATH (network needed for the flake inputs).
 # E2E_STUB_NIX=1 replaces them with stubs, for machines without Nix.
@@ -41,7 +42,7 @@ case "$*" in
 esac
 case "$*" in
   *"nixmgr:host"*) drv=$(sha256sum < "${NIXMGR_FLAKE#path:}/hosts/example/default.nix" | cut -c1-32)
-    echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","systemPath":"/nix/store/'"$drv"'-nixos-system-example-26.05","units":{"example.service":{"hash":"'"$drv"'","reload":{},"flags":{}}},"etc":{"example.conf":"'"$drv"'"},"managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
+    echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","systemPath":"/nix/store/'"$drv"'-nixos-system-example-26.05","units":{"example.service":{"hash":"'"$drv"'","reload":{},"flags":{}}},"etc":{"example.conf":"'"$drv"'"},"managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"],"checks":{"comin":true,"cominBranches":[{"url":"https://forgejo.example.lan/pablo/nixos-config.git","main":"main","testing":"testing-example"}]}}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
   *"--dry-run"*) printf 'these 3 derivations will be built:\nthese 9 paths will be fetched (1.50 MiB download, 6.00 MiB unpacked):\n' >&2 ;;
@@ -217,6 +218,50 @@ done
 [ "$(git -C "$repo_dir" rev-parse HEAD)" = "$outside" ] || fail "the console did not fast-forward to the pushed commit"
 [ -z "$(finding unchecked-commit)" ] || fail "Health still names a commit: $(finding unchecked-commit)"
 echo "ok   a commit pushed elsewhere is checked through the webhook"
+
+# Try a change on the example machine alone: a commit on its testing branch, on
+# top of main, pushed; the console then works on that branch.
+hash=$(api GET "/api/file?path=$file" | json '["hash"]')
+new=$(api GET "/api/file?path=$file" | python3 -c 'import sys, json; print(json.dumps(json.load(sys.stdin)["content"].replace("system.stateVersion", "time.timeZone = \"Europe/Paris\";\n  system.stateVersion")))')
+api PUT /api/file -d "{\"path\":\"$file\",\"content\":$new,\"base_hash\":\"$hash\"}" > /dev/null
+api POST /api/stage -d '{"paths":[]}' > /dev/null
+[ "$(run_job '{"kind":"check"}')" = passed ] || fail "check before the trial: $(cat "$work"/events-*)"
+ready '/api/model?at=working' > /dev/null
+main=$(git -C "$work/remote.git" rev-parse main)
+trial=$(api POST /api/try -d '{"host":"example","message":"try: Paris time"}')
+tsha=$(echo "$trial" | json '["commit"]') || fail "try on example: $trial"
+[ "$(git -C "$work/remote.git" rev-parse testing-example)" = "$tsha" ] || fail "testing-example is not the trial"
+[ "$(git -C "$work/remote.git" rev-parse "$tsha^")" = "$main" ] || fail "the trial is not on top of main"
+[ "$(git -C "$work/remote.git" rev-parse main)" = "$main" ] || fail "the trial moved main"
+[ "$(api GET /api/status | json '["branch"]')" = testing-example ] || fail "the console is not on the testing branch"
+dep=$(api GET /api/deployments | python3 -c "import sys, json; m = next(m for m in json.load(sys.stdin)['machines'] if m['host'] == 'example'); print(m['main'], m['testing'], m['branch'])")
+[ "$dep" = "main testing-example testing-example" ] || fail "deployments: example follows $dep"
+echo "ok   tried on example: testing-example on top of main, deployed there alone"
+
+ended=$(api POST /api/try/end -d '{"host":"example"}' | json '["message"]')
+[ "$(git -C "$work/remote.git" rev-parse testing-example)" = "$main" ] || fail "end trial: $ended"
+[ "$(code POST /api/switch -d '{"name":"main"}')" = 204 ] || fail "back to main"
+api POST /api/merge -d '{"branch":"testing-example"}' > /dev/null
+[ "$(api GET /api/status | json '["staged_checked"]')" = True ] || fail "the promoted trial is not the tree that passed"
+api POST /api/commit -d '{"message":"feat(example): Paris time"}' > /dev/null
+[ "$(code POST /api/push -d '{}')" = 200 ] || fail "push the promoted trial without a new check"
+promoted=$(git -C "$work/remote.git" rev-parse main)
+echo "ok   trial ended, then promoted to main by the merge and pushed"
+
+# example reports that it deployed main, then failed to build the promoted commit:
+# the overview names that commit, and its revert goes through check, commit and push.
+token=$(api GET '/api/deployments/token?host=example' | json '["token"]')
+report() { curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$1" "$base/api/deployments/report"; }
+[ "$(report "{\"host\":\"example\",\"commit\":\"$main\",\"status\":\"done\"}")" = 204 ] || fail "deployment report"
+[ "$(report "{\"host\":\"example\",\"commit\":\"$promoted\",\"phase\":\"build\",\"status\":\"failed\",\"error\":\"boom\"}")" = 204 ] || fail "failure report"
+culprits=$(api GET /api/deployments | python3 -c "import sys, json; print([c['sha'] for m in json.load(sys.stdin)['machines'] if m['host'] == 'example' for c in m.get('culprits', [])])")
+[ "$culprits" = "['$promoted']" ] || fail "culprits: $culprits"
+[ "$(code POST /api/revert -d "{\"rev\":\"$promoted\",\"since\":\"$main\"}")" = 204 ] || fail "revert since the last deployment"
+[ "$(run_job '{"kind":"check"}')" = passed ] || fail "check of the revert"
+api POST /api/commit -d '{"message":"Revert the commit that broke example"}' > /dev/null
+[ "$(code POST /api/push -d '{}')" = 200 ] || fail "push the revert"
+[ "$(git -C "$work/remote.git" rev-parse 'main^{tree}')" = "$(git -C "$work/remote.git" rev-parse "$main^{tree}")" ] || fail "the revert does not bring back what example ran"
+echo "ok   a failed deployment rolled back: revert, check, commit, push"
 
 model=$(ready '/api/model?at=working')
 [ "$(echo "$model" | json '["model"]["hosts"][0]["name"]')" = example ] || fail "fleet model: $model"
