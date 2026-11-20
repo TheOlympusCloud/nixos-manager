@@ -12,6 +12,7 @@ name: check
 
 on:
   push:
+    branches: ["**"] # not tags
 
 jobs:
   check:
@@ -24,14 +25,15 @@ jobs:
       run:
         shell: bash
     steps:
-      # The image has git but not Node, which actions/checkout needs.
+      # The image has git but not Node, which actions/checkout needs. The whole
+      # history: Nix refuses a shallow git repository as a flake.
       - name: Check out
         env:
           TOKEN: ${{ github.token }}
         run: |
           git init -q .
           auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
-          git -c http.extraHeader="Authorization: Basic $auth" fetch -q --depth=1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git -c http.extraHeader="Authorization: Basic $auth" fetch -q "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
       - name: Check
         run: |

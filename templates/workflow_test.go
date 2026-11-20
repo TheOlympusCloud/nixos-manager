@@ -91,8 +91,8 @@ func starterRepo(t *testing.T) string {
 	return dir
 }
 
-// The checkout step fetches exactly the pushed commit, even when the branch
-// has moved on since, and the scripts pass ShellCheck.
+// The checkout step fetches exactly the pushed commit, with its whole history
+// (Nix refuses a shallow repository), and the scripts pass ShellCheck.
 func TestCheckWorkflowChecksOutThePushedCommit(t *testing.T) {
 	for _, tool := range []string{"bash", "git", "base64"} {
 		if _, err := exec.LookPath(tool); err != nil {
@@ -105,14 +105,12 @@ func TestCheckWorkflowChecksOutThePushedCommit(t *testing.T) {
 	git(t, src, "add", "-A")
 	git(t, src, "commit", "-q", "-m", "later")
 
-	work := t.TempDir()
-	out, err := runStep(t, work, stepScript(t, "Check out"), "GITHUB_SERVER_URL=file://"+filepath.Dir(src), "GITHUB_REPOSITORY="+filepath.Base(src),
-		"GITHUB_SHA="+pushed, "TOKEN=not-used-by-file-urls", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
-	if err != nil {
-		t.Fatalf("checkout: %v\n%s", err, out)
-	}
+	work := checkout(t, src, pushed) // the commit the push left; the branch has moved on since
 	if got := git(t, work, "rev-parse", "HEAD"); got != pushed {
 		t.Fatalf("checked out %s, want %s", got, pushed)
+	}
+	if git(t, work, "rev-parse", "--is-shallow-repository") != "false" {
+		t.Fatal("the checkout is shallow")
 	}
 	if _, err := os.Stat(filepath.Join(work, "flake.nix")); err != nil {
 		t.Fatal("no flake.nix in the checkout")
@@ -130,8 +128,20 @@ func TestCheckWorkflowChecksOutThePushedCommit(t *testing.T) {
 	}
 }
 
-// The check step passes on the locked starter fleet, building its machine, and
-// fails when a machine's system does not build.
+// checkout runs the workflow's checkout step for a commit of src in a new folder.
+func checkout(t *testing.T, src, sha string) string {
+	t.Helper()
+	work := t.TempDir()
+	out, err := runStep(t, work, stepScript(t, "Check out"), "GITHUB_SERVER_URL=file://"+filepath.Dir(src), "GITHUB_REPOSITORY="+filepath.Base(src),
+		"GITHUB_SHA="+sha, "TOKEN=not-used-by-file-urls", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	if err != nil {
+		t.Fatalf("checkout: %v\n%s", err, out)
+	}
+	return work
+}
+
+// The workflow's steps, checkout then check, pass on the locked starter fleet,
+// building its machine, and fail when a machine's system does not build.
 func TestCheckWorkflowWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
@@ -144,7 +154,7 @@ func TestCheckWorkflowWithRealNix(t *testing.T) {
 	git(t, dir, "add", "flake.lock")
 	git(t, dir, "commit", "-q", "-m", "lock")
 	check := stepScript(t, "Check")
-	out, err := runStep(t, dir, check, nixConf)
+	out, err := runStep(t, checkout(t, dir, git(t, dir, "rev-parse", "HEAD")), check, nixConf)
 	if err != nil {
 		t.Fatalf("check of the starter fleet: %v\n%s", err, tail(out))
 	}
@@ -158,7 +168,7 @@ func TestCheckWorkflowWithRealNix(t *testing.T) {
 	}
 	os.WriteFile(def, []byte(broken), 0o644)
 	git(t, dir, "commit", "-q", "-am", "example: broken")
-	if out, err := runStep(t, dir, check, nixConf); err == nil || !strings.Contains(out, "nixmgr-broken") {
+	if out, err := runStep(t, checkout(t, dir, git(t, dir, "rev-parse", "HEAD")), check, nixConf); err == nil || !strings.Contains(out, "nixmgr-broken") {
 		t.Fatalf("a machine that does not build passed: %v\n%s", err, tail(out))
 	}
 }

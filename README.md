@@ -417,9 +417,10 @@ another host, port or http under **Web address** if Forgejo's web UI is elsewher
 Commit statuses go to Forgejo's API at the same address.
 
 **Forgejo Actions.** The starter fleet has `.forgejo/workflows/check.yml`: on
-every push, a runner runs `nix flake check` and builds every machine, in the
-`nixos/nix` image (it fetches the commit with git, as the image has no Node for
-`actions/checkout`). It needs Actions turned on for the repository and a runner
+every push to a branch, a runner runs `nix flake check` and builds every
+machine, in the `nixos/nix` image (it fetches the commit and its history with
+git, as the image has no Node for `actions/checkout`, and Nix refuses a shallow
+clone). It needs Actions turned on for the repository and a runner
 with Docker and the label `docker`; change `runs-on` for another label. Each
 run starts with an empty Nix store and downloads every machine's system; a
 runner that runs jobs on a host with Nix keeps its store. With the push
