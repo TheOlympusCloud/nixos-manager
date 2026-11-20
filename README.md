@@ -11,12 +11,14 @@ An MCP server gives automation the same features.
 - **Health**: evaluation errors, a disabled firewall, SSH with passwords or
   root logins, no fail2ban or garbage collection, outdated flake inputs,
   unsupported NixOS releases, packages on every machine but one, failed or
-  lagging deployments, and machines a push does not reach (comin off, or
-  pulling another repository). Most findings have a **Fix** button that
-  applies the setting to every affected machine.
+  lagging deployments, machines a push does not reach (comin off, or
+  pulling another repository), and a last commit on the branch comin deploys
+  that has not passed a check. Most findings have a **Fix** button that
+  applies the setting to every affected machine, or checks the commit.
 - **Forgejo**: connect the fleet repository from Settings with a deploy key
   the app creates; a push webhook keeps the console in step with pushes made
-  elsewhere, and commits and files link to their Forgejo pages.
+  elsewhere and checks every pushed commit, Forgejo shows each result as a
+  commit status, and commits and files link to their Forgejo pages.
 - **Deployments**: every machine's comin reports what it deployed, so after a
   push you watch the rollout reach each machine, and see failures with
   comin's error.
@@ -78,6 +80,21 @@ An MCP server gives automation the same features.
   queue, so a long check never holds up the fleet views, search, Lock or Update.
   The systems they build can be served to the machines as a [binary
   cache](#binary-cache).
+- **Checks of pushed commits**: a commit pushed without the console's check
+  (from a laptop, Forgejo's web editor, or with Push without checks) is checked
+  when the push webhook announces it, on any branch: `nix flake check`, then a
+  build of every machine whose system differs from the newest commit before it
+  (on its first-parent line) whose tree passed a check, or of every machine
+  when none of the last 100 did. A commit whose tree already passed (a push
+  from the console) is not checked again. The result shows in Changes →
+  Checks, as a commit status in Forgejo (Settings → Forgejo → Commit
+  statuses), and in
+  Health while the last commit of the branch comin deploys has not passed:
+  Health's **Check** button runs the same check, and MCP's `run_check` takes a
+  `commit`. Commits waiting for a check are kept in
+  `$NIXMGR_DATA/pushed-checks.json`, so a restart checks them after all. Only
+  the commit a push leaves at the tip of its branch is checked: comin deploys
+  that one, never the commits before it in the same push.
 - **Git**: stage, commit, branches, push and pull, revert a commit, merge a
   `testing-<host>` branch, repository and per-file history with diffs and
   restore. Every commit uses the configured person's name and email.
@@ -364,11 +381,28 @@ Connect the repository in **Settings → Forgejo**; the steps are numbered there
 4. **Push webhook** (optional, recommended). Forgejo repository → **Settings →
    Webhooks → Add webhook → Forgejo**: the target URL and the secret shown in
    Settings, method POST, content type `application/json`, trigger on push
-   events. On a push to the branch the console is on, nixos-manager fetches;
-   when the working copy is clean and has no commits of its own it fast-forwards,
-   otherwise the top bar shows "N new on Forgejo" and **Pull** brings them in.
+   events. On a push nixos-manager fetches; when the push is to the branch the
+   console is on, and the working copy is clean and has no commits of its own,
+   it fast-forwards, otherwise the top bar shows "N new on Forgejo" and **Pull**
+   brings them in. Then it checks the pushed commit, whatever the branch (see
+   Checks of pushed commits above); tags and deleted branches are not checked.
    Calls are checked against the secret (HMAC-SHA256), and bodies over 1 MB are
-   refused. The secret lives in `$NIXMGR_DATA/webhook-secret`.
+   refused. The secret lives in `$NIXMGR_DATA/webhook-secret`. Without the
+   webhook, the console sees a push from elsewhere only at the next Pull or
+   connection test, and checks it only when asked (Health).
+5. **Commit statuses** (optional). With a Forgejo access token, each check of
+   a pushed commit shows next to the commit in Forgejo, on its branch and on
+   pull requests, as the status `nixos-manager/check`: pending while it runs,
+   then success or failure, with a link to its log in the console. Create the
+   token in Forgejo → **Settings → Applications → Generate new token**, as a user
+   who can write to the repository, with the **repository** permission **Read and
+   write**, and paste it in Settings. It is tried on the repository through
+   Forgejo's API (at the web address below, `/api/v1`) before it is kept, in
+   `$NIXMGR_DATA/forgejo-status.json` (mode 0600), and never shown again. The
+   links open the address you saved the token from. A status Forgejo fails to
+   take is sent again twice; the last one sent, and any error, shows in
+   Settings. A repository that runs Forgejo Actions can instead, or as well,
+   use the starter fleet's `.forgejo/workflows/check.yml` (below).
 
 If a clone at start fails (the key is not on Forgejo yet), the server still
 starts with the starter flake and `origin` set, so you can finish the steps above.
@@ -376,6 +410,18 @@ starts with the starter flake and `origin` set, so you can finish the steps abov
 Commits in History and files in Code link to Forgejo. The web address is derived
 from the remote (`ssh://git@host:2222/o/r.git` → `https://host/o/r`); set
 another host, port or http under **Web address** if Forgejo's web UI is elsewhere.
+Commit statuses go to Forgejo's API at the same address.
+
+**Forgejo Actions.** The starter fleet has `.forgejo/workflows/check.yml`: on
+every push, a runner runs `nix flake check` and builds every machine, in the
+`nixos/nix` image (it fetches the commit with git, as the image has no Node for
+`actions/checkout`). It needs Actions turned on for the repository and a runner
+with Docker and the label `docker`; change `runs-on` for another label. Each
+run starts with an empty Nix store and downloads every machine's system; a
+runner that runs jobs on a host with Nix keeps its store. With the push
+webhook, the console already checks every push on its own server, so the
+workflow is optional: delete it, or keep both. A fleet started before it
+existed can copy the file from `templates/fleet/.forgejo/workflows/` here.
 
 Other setups keep working:
 
@@ -725,7 +771,7 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, GC roots of the systems checks built, and deployment reports (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, and deployment reports (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
@@ -779,19 +825,23 @@ the end of its output is repeated as an annotation on the run's page.
 
 `scripts/e2e.sh` runs the real server against a fresh flake and a bare git
 remote: login, lock, check, commit gate, commit, push, edit, history and
-restore. It uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
+restore, Health naming an unchecked commit, and a commit pushed from another
+clone checked through the signed webhook. It uses `nix` from `PATH`;
+`E2E_STUB_NIX=1` stubs Nix out.
 
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
-runs the checks that need real Nix (network needed): values set by clicking
-win without dropping the hand-written users and SSH settings around them, the
-deployment reporter wires into comin, the binary cache module adds the
-fleet's cache next to cache.nixos.org, new LXC and VM machines evaluate, a
-sysctl shows as a change and kernel parameters as a reboot while a container
-never needs one, a check builds the one machine an edit changes and fails on a
-system that does not build, a standalone home-manager configuration shows its
-packages and programs, and the flake builds the package and passes
-`nix flake check`, which also makes and keeps a binary cache key with the
-module's script.
+runs the checks that need real Nix (network needed): values set by clicking win
+without dropping the hand-written users and SSH settings around them, the
+deployment reporter wires into comin, the binary cache module adds the fleet's
+cache next to cache.nixos.org, new LXC and VM machines evaluate, a sysctl shows
+as a change and kernel parameters as a reboot while a container never needs
+one, a check builds the one machine an edit changes and fails on a system that
+does not build, a commit pushed from elsewhere is built against the last
+checked commit before it, the starter fleet's Forgejo Actions check passes on
+the starter fleet and fails on a machine that does not build, a standalone
+home-manager configuration shows its packages and programs, and the flake
+builds the package and passes `nix flake check`, which also makes and keeps a
+binary cache key with the module's script.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines

@@ -405,6 +405,21 @@ func TestCheckBuildsTheChangedMachineWithRealNix(t *testing.T) {
 	}
 	must[string](t)(s.Commit(ctx, "example: swappiness", false))
 	must[string](t)(s.Push(ctx, false))
+	checked := gitOut(t, s.Repo.Dir, "rev-parse", "HEAD^{tree}")
+
+	// A commit pushed from elsewhere is built against the last checked one.
+	clone := filepath.Join(t.TempDir(), "laptop")
+	gitOut(t, s.Repo.Dir, "clone", "-q", bare, clone)
+	cdef := filepath.Join(clone, "hosts/example/default.nix")
+	ok(t, os.WriteFile(cdef, []byte(strings.Replace(fileText(t, s.Repo, "hosts/example/default.nix"), `"vm.swappiness" = 10;`, `"vm.swappiness" = 20;`, 1)), 0o644))
+	gitOut(t, clone, "-c", "user.name=Laptop", "-c", "user.email=laptop@example.invalid", "commit", "-q", "-am", "example: swappiness 20")
+	gitOut(t, clone, "push", "-q")
+	gitOut(t, s.Repo.Dir, "fetch", "-q", "origin")
+	job, _, err := s.Jobs.CheckCommit(ctx, gitOut(t, clone, "rev-parse", "HEAD"), "main")
+	ok(t, err)
+	if info := finish(job); info.State != "passed" || info.Summary.Base != checked || !slices.Equal(info.Summary.Built, []string{"example"}) {
+		t.Fatalf("check of the pushed commit %s %+v:\n%s", info.State, info.Summary, tail(info.Output, 60))
+	}
 
 	// Both systems are now built here: the diff adds every dependency and the size.
 	write(t, s.Repo, "hosts/example/default.nix",

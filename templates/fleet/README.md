@@ -9,6 +9,9 @@
 - `modules/`: settings shared by several machines; `common.nix` enables comin everywhere,
   and connects the machines to nixos-manager: deployment reports and its binary cache.
 - `home/`: home-manager configurations for users.
+- `.forgejo/workflows/check.yml`: with Forgejo Actions, a runner checks every
+  push (`nix flake check` and a build of every machine). nixos-manager's push
+  webhook checks pushes on its own server too, so this file is optional.
 
 Every machine runs comin: it pulls `main` from Forgejo and switches to
 `nixosConfigurations.<its hostname>`. A branch named `testing-<hostname>` is
