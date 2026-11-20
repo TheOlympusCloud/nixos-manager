@@ -65,16 +65,16 @@ func (js *Jobs) evaluating(commit, host string) bool {
 	})
 }
 
-// runSystems evaluates the system of each host of the job at its commit.
+// runSystems evaluates the system of each host of the job at its commit. As
+// in the fleet model, a machine that does not evaluate is a result, not a
+// failed job.
 func (js *Jobs) runSystems(ctx context.Context, job *Job) error {
 	ref := (&url.URL{Scheme: "git+file", Path: js.Repo.Dir, RawQuery: "rev=" + job.tree}).String()
-	failed := 0
 	for _, h := range job.Req.Hosts {
 		fmt.Fprintf(job, "Evaluating the system of %s at %.7s…\n", h, job.tree)
 		e := SystemEval{At: time.Now()}
 		e.Path, e.Error = js.evalSystem(ctx, ref+"#nixosConfigurations."+attrName(h)+".config.system.build.toplevel.outPath")
 		if e.Error != "" {
-			failed++
 			fmt.Fprintf(job, "%s: %s\n", h, e.Error)
 		}
 		js.mu.Lock()
@@ -89,10 +89,7 @@ func (js *Jobs) runSystems(ctx context.Context, job *Job) error {
 		}
 		js.mu.Unlock()
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d of %d machines did not evaluate", failed, len(job.Req.Hosts))
-	}
-	return nil
+	return ctx.Err() // out of time: the machines not reached have the error
 }
 
 func systemKey(commit, host string) string { return commit + "/" + host }
