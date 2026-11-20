@@ -54,6 +54,12 @@ An MCP server gives automation the same features.
 - **Flake inputs**: each input's revision and age; update one or all and see
   what moved (with compare links) and which package versions change on which
   machine.
+- **Scheduled updates**: every week or every day, at the hour you pick, or
+  with **Update now**, every input is updated on the `flake-update` branch on
+  top of what the machines deploy, and checked. Inputs shows what moved and
+  which versions change on each machine, a notification says it is ready (or
+  failed), and **Merge** puts it on `main` with one click. Nothing reaches the
+  machines before that click.
 - **Changes in NixOS terms**: before committing, see per machine which
   packages, versions, services, users, ports and settings the working copy
   changes, and which inputs moved. History shows the same for every commit,
@@ -529,6 +535,42 @@ risky change on a remote machine.
 When `main` moves on without the trial, comin leaves it and deploys `main`;
 Changes says so. MCP has the same: `try_on_machine` and `end_trial`.
 
+### Update the inputs on a schedule
+
+**Inputs → Scheduled update** updates every flake input by itself: turn it on
+and pick a day (or every day) and an hour, on the server's clock (its time
+zone, shown next to it: set `TZ` in Docker, which is UTC otherwise). A slot
+missed while the server was off runs once when it is back. **Update now** does
+the same at once.
+
+1. On an export of the last commit of the fleet's branch on the remote (the
+   branch most machines' comin follows, `main` by default, as in Deployments),
+   never in the working copy, `nix flake update` moves every input.
+2. When nothing moved, that is all. Otherwise the new `flake.lock` is committed
+   on top of that commit, as the configured person with `Via: scheduled update`
+   (or the session or token that clicked **Update now**), and pushed to the
+   `flake-update` branch, which no machine follows. The branch belongs to the
+   console: a later update replaces it, but a `flake-update` branch someone
+   else pushed is never overwritten (the update fails and says so).
+3. The commit is checked like any pushed commit: `nix flake check`, then a
+   build of every machine whose system it changes.
+4. Inputs shows the result, its log, which inputs moved, and per machine the
+   versions that change, the kernel and whether it needs a reboot. A
+   notification says it is ready to merge, or that it failed its check (or
+   could not run), with the same summary.
+5. **Merge into main** pushes the update to `main` (a fast-forward), so comin
+   deploys it: only while `main` is still the commit the update was made on
+   (otherwise update again), and only once its check compared the machines
+   with the newest checked commit of `main`, as **Push** asks (otherwise the
+   console checks it again first). A working copy on `main` with nothing of
+   its own follows; otherwise **Pull** brings the update in. **Discard** sets it
+   aside.
+
+Running an update pushes a branch and merging deploys, so both need the web
+login or a full token; the schedule is a setting, for the web login only. The
+schedule and the latest update are kept in `$NIXMGR_DATA/updates.json`; an
+update a restart interrupts during its check is checked again.
+
 ## Deployments
 
 A push is a deploy: every machine's comin pulls the branch and switches to it.
@@ -801,7 +843,10 @@ Docker image bring them; Settings says which one is missing otherwise.
   a machine, so comin cannot deploy it (told only after a second evaluation
   fails too, so a network hiccup does not page you);
 - a NixOS release the machines run reaches, or is a month from, its end of
-  life, or a flake input follows a release branch whose support ended.
+  life, or a flake input follows a release branch whose support ended;
+- a [scheduled update](#update-the-inputs-on-a-schedule) of the inputs is
+  ready to merge, failed its check, or could not run (until it is merged or
+  discarded).
 
 Channels, any or all of them:
 
@@ -809,7 +854,8 @@ Channels, any or all of them:
   own) and, for a protected topic, an access token. On ntfy.sh anyone who
   knows the topic can read it, so pick a name nobody guesses.
 - **Webhook**: a JSON `POST` with `key`, `kind` (`deploy-failed`,
-  `deploy-stuck`, `host-silent`, `eval-failed`, `eol`, `test`), `severity`,
+  `deploy-stuck`, `host-silent`, `eval-failed`, `eol`, `update-ready`,
+  `update-failed`, `test`), `severity`,
   `title`, `message`, `hosts`, `url` (a link into the console) and `at`.
 - **Email** over SMTP, with STARTTLS (587), TLS (465) or, to a local relay
   only, none. A password is only ever sent encrypted.
@@ -948,9 +994,9 @@ Each token gets a scope when it is created, and optionally an expiry date:
 
 | Scope | What it can do |
 |---|---|
-| Read only | Read files, history, the fleet model, checks, jobs, deployments and the secrets' names; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
-| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, and write secrets |
-| Full | Also push, which deploys, read a secret's value (`POST /api/secrets/reveal`), and approve or remove machine keys, which decide who can decrypt |
+| Read only | Read files, history, the fleet model, checks, jobs, deployments, the secrets' names and the scheduled update; it may also start a re-evaluation or search-index refresh, which uses CPU but changes nothing |
+| Edit, no push | Also edit files, stage, run checks, commit, branch, revert, merge, pull, lock or update inputs, write secrets, and discard a scheduled update |
+| Full | Also push, which deploys, run a scheduled update now (it pushes `flake-update`) and merge one (it deploys), read a secret's value (`POST /api/secrets/reveal`), and approve or remove machine keys, which decide who can decrypt |
 
 The MCP endpoint offers only the tools of the token's scope. The same token
 works on the HTTP API, on the routes its scope covers:
@@ -959,8 +1005,9 @@ works on the HTTP API, on the routes its scope covers:
 curl -H "Authorization: Bearer <token>" http://<server>:8080/api/deployments
 ```
 
-Managing tokens, Settings, the deployment report token (and storing the report
-tokens as secrets) and the editor's language server need the web login. Only the person logged in to the web UI
+Managing tokens, Settings, the update schedule, the deployment report token
+(and storing the report tokens as secrets) and the editor's language server
+need the web login. Only the person logged in to the web UI
 can commit or push without a passing check. Tokens created before scopes
 existed are full tokens, as before; an expired token stays listed, refused,
 until you revoke it.
@@ -976,12 +1023,13 @@ commit message may not bring its own `Via` trailer.
 |---|---|
 | `NIXMGR_AUTHOR_NAME`, `NIXMGR_AUTHOR_EMAIL` | Commit identity (required) |
 | `NIXMGR_PASSWORD_HASH` or `NIXMGR_PASSWORD_HASH_FILE` | bcrypt hash of the login password (required) |
-| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, deployment reports, the age key of the secrets (`sops-age-key`: back it up) and the approved machine keys (`sops-machines.json`) (default `/var/lib/nixos-manager`) |
+| `NIXMGR_DATA` | State folder: working copy, tokens, sessions, passed checks, pushed commits waiting for a check, the commit status token, GC roots of the systems checks built, deployment reports, the age key of the secrets (`sops-age-key`: back it up), the approved machine keys (`sops-machines.json`), and the update schedule with the latest update (`updates.json`) (default `/var/lib/nixos-manager`) |
 | `NIXMGR_REPO` | Working copy (default `$NIXMGR_DATA/repo`) |
 | `NIXMGR_REMOTE` | Remote to clone from and push to |
 | `NIXMGR_LISTEN` | Listen address (default `127.0.0.1:8080`; `0.0.0.0:8080` in the image) |
 | `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
+| `TZ` | Time zone of the update schedule (default the system's; UTC in the Docker image) |
 | `NIXMGR_EVAL_JOBS` | Machines evaluated at once for the fleet views (default 2, or 1 on a single CPU). Each is a whole NixOS evaluation, about 1 GB of memory, and a check can run at the same time. **Evaluate again** after a failure re-evaluates only the machines that failed |
 
 Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
@@ -1030,9 +1078,10 @@ the end of its output is repeated as an annotation on the run's page.
 
 `scripts/e2e.sh` runs the real server against a fresh flake and a bare git
 remote: login, lock, check, commit gate, commit, push, edit, history and
-restore, Health naming an unchecked commit, and a commit pushed from another
-clone checked through the signed webhook. It uses `nix` from `PATH`;
-`E2E_STUB_NIX=1` stubs Nix out.
+restore, Health naming an unchecked commit, a commit pushed from another
+clone checked through the signed webhook, a trial, a rollback, and (with Nix
+stubbed) an update of the inputs on `flake-update` merged with one click. It
+uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
 
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking win
@@ -1046,7 +1095,8 @@ checked commit before it, the starter fleet's Forgejo Actions check passes on
 the starter fleet and fails on a machine that does not build, a standalone
 home-manager configuration shows its packages and programs, and the flake
 builds the package and passes `nix flake check`, which also makes and keeps a
-binary cache key with the module's script.
+binary cache key with the module's script, and an update of a local input is
+locked on `flake-update`, checked and merged.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines
