@@ -78,6 +78,21 @@ export async function applyFix(i: Insight) {
   })
 }
 
+/** Check the commit a fix names; its toast and the Checks log follow it, then Health asks again. */
+export async function checkCommitFix(i: Insight) {
+  const commit = i.fix?.check
+  const st = health.fixing[i.id]
+  if (!commit || (st?.job && !st.finished)) return
+  const job = await startJob({ kind: 'check', commit })
+  if (!job) return
+  health.fixing[i.id] = { done: 0, total: 0, host: '', error: '', job, finished: false }
+  const state = await waitJob(job)
+  if (health.fixing[i.id]?.job !== job) return
+  health.fixing[i.id].finished = true
+  if (state === 'failed') health.fixing[i.id].error = `${commit.slice(0, 7)} failed its check; the log says why.`
+  await loadInsights()
+}
+
 /** Start the flake update a fix asks for; its toast and the Inputs view follow it. */
 export async function updateInputFix(i: Insight) {
   const name = i.fix?.updateInput

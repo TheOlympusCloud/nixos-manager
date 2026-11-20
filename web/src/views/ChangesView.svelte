@@ -11,7 +11,8 @@
   import type { SettingChange } from '../lib/impact'
   import { fetchModelDiff, managedFiles, managedSettings, type ModelDiff } from '../lib/modeldiff'
   import { parsePatch, type PatchFile } from '../lib/patch'
-  import { link } from '../lib/router.svelte'
+  import { checkOf } from '../lib/checks'
+  import { link, replace, route } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { ago } from '../lib/util'
 
@@ -96,6 +97,19 @@
   })
   $effect(() => {
     if (job) untrack(() => (side = 'checks'))
+  })
+  // #/changes?check=<commit>, from Health and from Forgejo's commit statuses: that commit's newest check.
+  let linked = ''
+  $effect(() => {
+    const sha = route.view === 'changes' ? route.query.check : ''
+    if (!sha) return
+    const j = checkOf(app.jobs, sha)
+    untrack(() => {
+      if (linked !== sha) ((linked = sha), (side = 'checks'))
+      if (!j) return // jobs not loaded yet, or none since the server started: Checks lists the recent ones
+      app.inspect = { kind: 'job', id: j.id }
+      replace(link('changes'))
+    })
   })
 
   let doc = $state<HTMLElement>()

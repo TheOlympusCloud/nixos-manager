@@ -1,5 +1,5 @@
 // What a check verified, in words for the Checks and Changes panels and the job log.
-import type { CheckPass, CheckSummary } from './api'
+import type { CheckPass, CheckSummary, Job } from './api'
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
@@ -11,12 +11,13 @@ export function builtText(p: CheckPass): string {
   return `built the ${p.built.length} machines it changes: ${p.built.join(', ')}`
 }
 
-/** One line per fact of a check's summary. */
-export function summaryLines(s: CheckSummary): string[] {
+/** One line per fact of a check's summary; commit: it checked a commit, compared with the last checked one before it. */
+export function summaryLines(s: CheckSummary, commit = false): string[] {
   const lines: string[] = []
-  if (s.built.length) lines.push(`Built: ${s.built.join(', ')}${s.base === '' ? ' (every machine: nothing is pushed yet)' : ''}`)
+  const all = commit ? 'every machine: no commit before it passed a check' : 'every machine: nothing is pushed yet'
+  if (s.built.length) lines.push(`Built: ${s.built.join(', ')}${s.base === '' ? ` (${all})` : ''}`)
   if (s.failed?.length) lines.push(`Failed: ${s.failed.join(', ')}`)
-  if (!s.changed.length && !s.failed?.length) lines.push('No machine changes compared with what is pushed')
+  if (!s.changed.length && !s.failed?.length) lines.push(`No machine changes compared with ${commit ? 'the last checked commit before it' : 'what is pushed'}`)
   if (s.reboot?.length) lines.push(`Reboot needed: ${s.reboot.join(', ')}`)
   if (s.toBuild || s.toFetch) {
     const parts = []
@@ -28,3 +29,14 @@ export function summaryLines(s: CheckSummary): string[] {
   }
   return lines
 }
+
+const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs' }
+
+/** A job's name in lists; a check of a commit names the commit, and the branch it was pushed to. */
+export function jobTitle(j: Job): string {
+  if (j.commit) return `Commit ${j.commit.slice(0, 7)}${j.branch ? ` on ${j.branch}` : ''}`
+  return `${kinds[j.kind] ?? j.kind} ${j.id}`
+}
+
+/** The newest check of a commit; jobs come newest first. */
+export const checkOf = (jobs: Job[], sha: string) => (sha ? jobs.find((j) => j.kind === 'check' && j.commit === sha) : undefined)

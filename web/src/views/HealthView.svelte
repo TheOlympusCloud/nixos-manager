@@ -4,7 +4,7 @@
   import { openPackageSearch } from '../lib/dialogs.svelte'
   import { fleet, hostByName } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
-  import { applyFix, health, loadInsights, updateInputFix } from '../lib/health.svelte'
+  import { applyFix, checkCommitFix, health, loadInsights, updateInputFix } from '../lib/health.svelte'
   import { bySeverity, fixPlan, insightDetail, insightTitle, missingPackage, nixLines, severityLabel } from '../lib/insights'
   import { link, machineLink } from '../lib/router.svelte'
   import { app, showJob } from '../lib/state.svelte'
@@ -71,6 +71,22 @@
         <button class:primary={i.severity !== 'info'} onclick={() => updateInputFix(i)}><Icon name="refresh" size={14} />{i.fix.label}</button>
       {/if}
     </div>
+  {:else if i.fix?.check}
+    {@const short = i.fix.check.slice(0, 7)}
+    <div class="fix">
+      {#if st?.job && !st.finished}
+        <button disabled><span class="spinner" aria-hidden="true"></span>Checking {short}…</button>
+        <button class="link-small" onclick={() => showJob(st.job)}>Show the log</button>
+      {:else if st?.error}
+        <p class="fix-note bad" role="alert">{st.error}</p>
+        <button class="link-small" onclick={() => showJob(st.job)}>Show the log</button>
+      {:else}
+        <button class:primary={i.severity !== 'info'} onclick={() => checkCommitFix(i)}><Icon name="play" size={14} />{i.fix.label}</button>
+        {#if i.link}<a class="link-small" href={i.link}>Show the last check's log</a>{/if}
+      {/if}
+    </div>
+  {:else if i.link?.startsWith('#/changes')}
+    <div class="fix"><a class="btn" href={i.link}>Show the log</a></div>
   {:else if missingPackage(i)}
     {@const pkg = missingPackage(i)}
     {@const h = hostByName(i.hosts[0])}

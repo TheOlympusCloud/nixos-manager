@@ -3,6 +3,7 @@ import { request } from './api'
 
 export type DeployKey = { public: string; fingerprint: string }
 export type Delivery = { time: string; event: string; ok: boolean; result: string }
+export type StatusDelivery = { time: string; commit: string; state: string; ok: boolean; result: string }
 /** Only the public key is ever sent; ssh says which identity git uses. */
 export type ForgejoState = {
   remote: string
@@ -16,6 +17,11 @@ export type ForgejoState = {
   known_hosts: string
   hook_secret: string
   last_delivery: Delivery | null
+  /** Commit statuses: a token is set (it is never sent), the address their links open, where they go, the last one sent. */
+  status_token: boolean
+  status_console: string
+  status_api: string
+  last_status: StatusDelivery | null
 }
 export type CheckResult = 'connected' | 'empty' | 'readonly' | 'unreachable' | 'auth' | 'not_found' | 'host_key_changed' | 'no_remote' | 'error'
 /** next: what the working copy should do now (push to an empty remote, adopt its history, or nothing possible). */
@@ -30,6 +36,8 @@ export const forgejoApi = {
   createKey: () => post<ForgejoState>('/api/forgejo/key'),
   test: () => post<Check>('/api/forgejo/test'),
   adopt: () => post<{ output: string }>('/api/forgejo/adopt').then((r) => r.output),
+  /** An empty token removes it. */
+  setStatus: (token: string, console: string) => post<ForgejoState>('/api/forgejo/status', { token, console }),
 }
 
 const segments = (p: string) => p.split('/').map(encodeURIComponent).join('/')
