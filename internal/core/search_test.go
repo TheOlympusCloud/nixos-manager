@@ -116,7 +116,15 @@ func TestOptionsIndexFollowsCommits(t *testing.T) {
 	write(t, s.Repo, "modules/mine.nix", "{ lib, ... }: { options.my.thing = lib.mkEnableOption \"thing\"; }\n")
 	ok(t, s.Stage(ctx, nil))
 	must[string](t)(s.Commit(ctx, "feat: my module", true))
-	if _, rebuild, _ := s.Jobs.SearchOptions(ctx, "workstation", "openssh", 10); rebuild == nil {
+	_, rebuild, _ := s.Jobs.SearchOptions(ctx, "workstation", "openssh", 10)
+	if rebuild == nil {
 		t.Fatal("a commit did not refresh the option index")
+	}
+	wait(t, rebuild)
+	// Each commit builds a new index: only the newest one per machine is kept.
+	s.Jobs.mu.Lock()
+	defer s.Jobs.mu.Unlock()
+	if n := len(s.Jobs.indexes); n != 1 {
+		t.Fatalf("%d indexes kept for one machine, want 1", n)
 	}
 }

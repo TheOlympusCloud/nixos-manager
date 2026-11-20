@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os/exec"
 	"slices"
 	"strings"
@@ -278,6 +279,15 @@ func clampLimit(n int) int {
 func (js *Jobs) runIndex(ctx context.Context, job *Job) (err error) {
 	defer func() {
 		js.mu.Lock()
+		// Every lock change or commit asks for a new index: keep only the newest
+		// of this kind (and machine), as each can take tens of megabytes.
+		family := job.Req.Kind + " "
+		if job.Req.Kind == "options" {
+			family += job.Req.Host + " "
+		}
+		older := func(k string) bool { return k != job.key && strings.HasPrefix(k, family) }
+		maps.DeleteFunc(js.indexes, func(k string, _ any) bool { return older(k) })
+		maps.DeleteFunc(js.indexErrs, func(k string, _ error) bool { return older(k) })
 		if err != nil {
 			js.indexErrs[job.key] = fmt.Errorf("building the %s index failed: %w", job.Req.Kind, err)
 		}

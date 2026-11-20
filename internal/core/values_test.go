@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -80,5 +81,21 @@ func TestOptionValuesRetryAfterAFailure(t *testing.T) {
 	}
 	if _, again, err := s.Jobs.OptionValues(ctx, names, nil); err != nil || again == nil {
 		t.Fatalf("no retry after the failure was reported: %v %v", again, err)
+	}
+}
+
+// A failure nobody asks about again is still forgotten, like old results.
+func TestOptionValueFailuresAreBounded(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, t.TempDir()) // no fixtures: every evaluation fails
+	for i := range keepValues + 3 {
+		_, job, err := s.Jobs.OptionValues(ctx, []string{fmt.Sprintf("a.b%d", i)}, nil)
+		ok(t, err)
+		wait(t, job)
+	}
+	s.Jobs.mu.Lock()
+	defer s.Jobs.mu.Unlock()
+	if n := len(s.Jobs.indexErrs); n != keepValues {
+		t.Fatalf("%d failures kept, want the newest %d", n, keepValues)
 	}
 }
