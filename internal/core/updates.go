@@ -93,7 +93,7 @@ type Updates struct {
 
 // OpenUpdates loads dataDir/updates.json. An update a stop interrupted while
 // Nix updated the inputs becomes an error; one being checked is checked
-// again by Run.
+// again by Run. The jobs of before the stop are gone.
 func OpenUpdates(dataDir string, svc *Service) (*Updates, error) {
 	u := &Updates{Svc: svc, path: filepath.Join(dataDir, "updates.json"), now: time.Now, loc: time.Local}
 	b, err := os.ReadFile(u.path)
@@ -105,8 +105,11 @@ func OpenUpdates(dataDir string, svc *Service) (*Updates, error) {
 			return nil, errorf(ErrInvalid, "reading %s: %v", u.path, err)
 		}
 	}
-	if up := u.f.Update; up != nil && up.State == "updating" {
-		up.State, up.Error, up.Finished = "error", "The server stopped while it updated the inputs: update again.", u.now()
+	if up := u.f.Update; up != nil {
+		up.Job, up.Check = "", "" // jobs do not survive a restart, and their ids start again
+		if up.State == "updating" {
+			up.State, up.Error, up.Finished = "error", "The server stopped while it updated the inputs: update again.", u.now()
+		}
 		u.save()
 	}
 	return u, nil

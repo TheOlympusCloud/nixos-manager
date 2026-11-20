@@ -302,7 +302,7 @@ func TestUpdateResumesItsCheckAfterARestart(t *testing.T) {
 	}
 
 	again := must[*Updates](t)(OpenUpdates(filepath.Dir(u.path), s)) // the same file, as after a restart
-	if st := again.Status(ctx).Update; st.State != "checking" || st.Commit == "" {
+	if st := again.Status(ctx).Update; st.State != "checking" || st.Commit == "" || st.Check != "" || st.Job != "" {
 		t.Fatalf("reopened %+v", st)
 	}
 	rctx, cancel := context.WithCancel(ctx)
