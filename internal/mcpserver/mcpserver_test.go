@@ -29,7 +29,8 @@ func session(t *testing.T) (*mcp.ClientSession, *core.Service) {
 	}
 	svc := core.NewService(repo)
 	nix := filepath.Join(t.TempDir(), "nix")
-	os.WriteFile(nix, []byte("#!/bin/sh\necho \"nix $*\"\n"), 0o755)
+	// Evaluations answer a flake without machines, so a check builds nothing; the rest echoes.
+	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\necho \"nix $*\"\n"), 0o755)
 	svc.Jobs.Nix = nix
 
 	ctx := context.Background()

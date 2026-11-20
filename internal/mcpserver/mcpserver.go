@@ -17,7 +17,7 @@ const outputTail = 20000
 
 const instructions = `This server edits a git-backed Nix flake repository (NixOS, home-manager and other flake outputs).
 Typical flow: list_files / read_file, write_file with the base_hash from read_file, stage, run_check, commit, push.
-Commits and pushes are only accepted after run_check passed for exactly that content. Never store secrets in the repository.`
+Commits and pushes are only accepted after run_check passed for exactly that content; it builds every machine the change touches. Never store secrets in the repository.`
 
 type done struct {
 	Done bool `json:"done"`
@@ -32,9 +32,10 @@ type pathsIn struct {
 }
 
 type jobOut struct {
-	ID     string `json:"id"`
-	State  string `json:"state" jsonschema:"queued, running, passed or failed"`
-	Output string `json:"output" jsonschema:"the end of the command output"`
+	ID      string             `json:"id"`
+	State   string             `json:"state" jsonschema:"queued, running, passed or failed"`
+	Summary *core.CheckSummary `json:"summary,omitempty" jsonschema:"for a check: the machines it compared, built or failed, and what Nix built and downloaded"`
+	Output  string             `json:"output" jsonschema:"the end of the command output"`
 }
 
 // toolScope is the token scope each tool needs. A tool missing here needs full.
@@ -98,7 +99,7 @@ func waitJob(ctx context.Context, j *core.Job) jobOut {
 	if len(info.Output) > outputTail {
 		info.Output = "[…]\n" + info.Output[len(info.Output)-outputTail:]
 	}
-	return jobOut{ID: info.ID, State: info.State, Output: info.Output}
+	return jobOut{ID: info.ID, State: info.State, Summary: info.Summary, Output: info.Output}
 }
 
 // ready waits for the job that computes a model or index, then asks again.
@@ -236,7 +237,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		msg, err := svc.Merge(ctx, in.Branch)
 		return map[string]string{"message": msg}, err
 	})
-	tool(s, "push", "Push the current branch to the remote. Refused until the commit being pushed has passed run_check (e.g. after a pull rebased local commits: run_check, then push).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
+	tool(s, "push", "Push the current branch to the remote. Refused until the commit being pushed has passed run_check, which built every machine the push changes (e.g. after a pull rebased local commits: run_check, then push).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
 		out, err := svc.Push(ctx, false)
 		return map[string]string{"output": out}, err
 	})
@@ -372,12 +373,12 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		return svc.UnsetOption(in.Host, in.Path, nil)
 	})
 
-	tool(s, "list_targets", "List the NixOS, home-manager and nix-darwin configurations in the staged flake, with the attribute to pass to run_check.", func(ctx context.Context, _ struct{}) (map[string][]core.Target, error) {
+	tool(s, "list_targets", "List the NixOS, home-manager and nix-darwin configurations in the staged flake, with the attribute to pass to run_check for an extra dry build.", func(ctx context.Context, _ struct{}) (map[string][]core.Target, error) {
 		t, err := svc.Jobs.Targets(ctx)
 		return map[string][]core.Target{"targets": t}, err
 	})
-	tool(s, "run_check", "Validate the staged changes: nix flake check, then a dry build of each target attribute. Waits for the result.", func(ctx context.Context, in struct {
-		Targets []string `json:"targets,omitempty" jsonschema:"attributes from list_targets; empty runs only nix flake check"`
+	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with what is pushed (every machine when nothing is pushed), then a dry build of each extra target. Commit and push need it to pass. Waits for the result.", func(ctx context.Context, in struct {
+		Targets []string `json:"targets,omitempty" jsonschema:"extra attributes from list_targets to dry-build (evaluate only); the changed machines are always built"`
 	}) (jobOut, error) {
 		j, err := svc.Jobs.Submit(ctx, core.JobRequest{Kind: "check", Targets: in.Targets})
 		if err != nil {

@@ -20,18 +20,19 @@ import (
 )
 
 const (
-	jobTimeout  = 30 * time.Minute
-	maxOutput   = 8 << 20 // per job; nix -L can be chatty
-	keepJobs    = 50
-	queueLength = 256  // per lane; skipped model jobs keep their slot until the worker drains them
-	keepChecks  = 1000 // passed trees remembered; the oldest are forgotten first
+	jobTimeout   = 30 * time.Minute
+	checkTimeout = 3 * time.Hour // a check builds the machines a change touches; a new kernel can take a while
+	maxOutput    = 8 << 20       // per job; nix -L can be chatty
+	keepJobs     = 50
+	queueLength  = 256  // per lane; skipped model jobs keep their slot until the worker drains them
+	keepChecks   = 1000 // passed trees remembered; the oldest are forgotten first
 )
 
 // Jobs runs Nix commands in two lanes, each one job at a time in submission
-// order: checks, which can take half an hour, and everything else (the fleet
-// model, search indexes, option values, lock and update), so the fleet views
-// never wait for a check. It keeps the jobs' output for the UI and MCP, and
-// remembers which staged trees passed a check, in checks.json once
+// order: checks, which build machines and can take long, and everything else
+// (the fleet model, search indexes, option values, lock and update), so the
+// fleet views never wait for a check. It keeps the jobs' output for the UI and
+// MCP, and remembers which staged trees passed a check, in checks.json once
 // PersistChecks has named it.
 type Jobs struct {
 	Repo   *Repo
@@ -40,14 +41,18 @@ type Jobs struct {
 	// EvalJobs is how many machines the fleet model evaluates at once. Each is a
 	// whole NixOS evaluation, which can take a gigabyte of memory.
 	EvalJobs int
+	// GCRoots is the folder where a check keeps each machine's last built system
+	// from Nix's garbage collector, so the binary cache can still serve it; ""
+	// keeps none.
+	GCRoots string
 
 	mu          sync.Mutex
 	jobs        []*Job // oldest first
 	nextID      int
-	passed      map[string]bool
-	passedOrder []string  // the passed trees, oldest first
-	checksPath  string    // "" keeps them in memory only
-	queue       chan *Job // every kind but check
+	passed      map[string]CheckPass // by tree
+	passedOrder []string             // the passed trees, oldest first
+	checksPath  string               // "" keeps them in memory only
+	queue       chan *Job            // every kind but check
 	checkQueue  chan *Job
 	models      map[string]*Model // by git tree
 	retry       *Model            // replaced by Evaluate again: the next evaluation of its tree keeps what evaluated
@@ -58,7 +63,7 @@ type Jobs struct {
 }
 
 func newJobs(repo *Repo) *Jobs {
-	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", EvalJobs: min(2, runtime.NumCPU()), passed: map[string]bool{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{},
+	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", EvalJobs: min(2, runtime.NumCPU()), passed: map[string]CheckPass{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{},
 		queue: make(chan *Job, queueLength), checkQueue: make(chan *Job, queueLength)}
 	go j.worker(j.queue)
 	go j.worker(j.checkQueue)
@@ -66,7 +71,8 @@ func newJobs(repo *Repo) *Jobs {
 }
 
 // JobRequest asks for one of:
-//   - "check": nix flake check on the staged changes, then a dry build of each target attribute;
+//   - "check": nix flake check on the staged changes, a build of every machine whose
+//     system they change compared with what is pushed, then a dry build of each target attribute;
 //   - "lock": nix flake lock of the working copy;
 //   - "update": nix flake update of Inputs (all when empty) of the working copy.
 type JobRequest struct {
@@ -76,6 +82,9 @@ type JobRequest struct {
 	Host    string   `json:"host,omitempty"`  // options index jobs
 	Names   []string `json:"names,omitempty"` // option value jobs
 	Hosts   []string `json:"hosts,omitempty"`
+	// Base is the tree a push lands on, recorded by Submit for a check: the
+	// machines are compared with it. Never from a client.
+	Base string `json:"-"`
 }
 
 type Job struct {
@@ -90,21 +99,23 @@ type Job struct {
 	state    string
 	started  time.Time
 	finished time.Time
+	summary  *CheckSummary // a check's, once it ran
 	out      []byte
 	changed  chan struct{} // closed and replaced on every write
 	done     chan struct{}
 }
 
 type JobInfo struct {
-	ID       string    `json:"id"`
-	Kind     string    `json:"kind"`
-	State    string    `json:"state"` // queued, running, passed, failed
-	Targets  []string  `json:"targets"`
-	Inputs   []string  `json:"inputs,omitempty"`
-	Tree     string    `json:"tree,omitempty"`
-	Started  time.Time `json:"started,omitzero"`
-	Finished time.Time `json:"finished,omitzero"`
-	Output   string    `json:"output,omitempty"`
+	ID       string        `json:"id"`
+	Kind     string        `json:"kind"`
+	State    string        `json:"state"` // queued, running, passed, failed
+	Targets  []string      `json:"targets"`
+	Inputs   []string      `json:"inputs,omitempty"`
+	Tree     string        `json:"tree,omitempty"`
+	Started  time.Time     `json:"started,omitzero"`
+	Finished time.Time     `json:"finished,omitzero"`
+	Summary  *CheckSummary `json:"summary,omitempty"`
+	Output   string        `json:"output,omitempty"`
 }
 
 func newJob(id string, req JobRequest) *Job {
@@ -145,7 +156,7 @@ func (j *Job) Done() <-chan struct{} { return j.done }
 func (j *Job) Info(withOutput bool) JobInfo {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	info := JobInfo{ID: j.ID, Kind: j.Req.Kind, State: j.state, Targets: j.Req.Targets, Inputs: j.Req.Inputs, Tree: j.tree, Started: j.started, Finished: j.finished}
+	info := JobInfo{ID: j.ID, Kind: j.Req.Kind, State: j.state, Targets: j.Req.Targets, Inputs: j.Req.Inputs, Tree: j.tree, Started: j.started, Finished: j.finished, Summary: j.summary}
 	if info.Targets == nil {
 		info.Targets = []string{}
 	}
@@ -170,10 +181,12 @@ func (j *Job) finish(passed bool) {
 
 var inputName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_'-]*$`)
 
-// Submit validates and queues a job. A check records the staged tree now, so
-// later staging does not change what it validates.
+// Submit validates and queues a job. A check records the staged tree and the
+// tree a push lands on now, so later staging or fetching does not change what
+// it validates.
 func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 	var tree string
+	req.Base = ""
 	switch req.Kind {
 	case "check":
 		for _, t := range req.Targets {
@@ -184,6 +197,9 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 		js.Repo.mu.Lock()
 		var err error
 		tree, err = js.Repo.stagedTree(ctx)
+		if err == nil {
+			req.Base, err = js.Repo.pushBase(ctx)
+		}
 		js.Repo.mu.Unlock()
 		if err != nil {
 			return nil, err
@@ -253,13 +269,23 @@ func (js *Jobs) Get(id string) (*Job, bool) {
 
 // Passed reports whether a check passed for exactly this staged tree.
 func (js *Jobs) Passed(tree string) bool {
+	_, ok := js.PassOf(tree)
+	return ok
+}
+
+// PassOf returns the check that passed for exactly this tree.
+func (js *Jobs) PassOf(tree string) (CheckPass, bool) {
 	js.mu.Lock()
 	defer js.mu.Unlock()
-	return js.passed[tree]
+	p, ok := js.passed[tree]
+	return p, ok
 }
 
 type checksFile struct {
-	Passed []string `json:"passed"` // trees that passed a check, oldest first
+	Checks []CheckPass `json:"checks"` // oldest first
+	// Passed are trees that passed a check before checks built the machines:
+	// they only evaluated, so they no longer count.
+	Passed []string `json:"passed,omitempty"`
 }
 
 // PersistChecks loads the trees that passed a check from path and saves every
@@ -274,30 +300,37 @@ func (js *Jobs) PersistChecks(path string) error {
 	if err == nil {
 		if err := json.Unmarshal(b, &f); err != nil {
 			slog.Warn("cannot read the passed checks; they must run again", "file", path, "err", err)
-			f.Passed = nil
+			f = checksFile{}
 		}
+	}
+	if len(f.Passed) > 0 {
+		slog.Info("checks that passed before checks built the machines only evaluated; they must run again", "count", len(f.Passed))
 	}
 	js.mu.Lock()
 	defer js.mu.Unlock()
 	js.checksPath = path
-	for _, t := range f.Passed {
-		js.pass(t)
+	for _, p := range f.Checks {
+		js.pass(p)
 	}
 	return nil
 }
 
-// pass records a passed tree as the newest and returns the list to save; js.mu
-// must be held.
-func (js *Jobs) pass(tree string) []string {
-	js.passedOrder = append(slices.DeleteFunc(js.passedOrder, func(t string) bool { return t == tree }), tree)
-	js.passed[tree] = true
+// pass records a passed check as the newest and returns the list to save;
+// js.mu must be held.
+func (js *Jobs) pass(p CheckPass) []CheckPass {
+	js.passedOrder = append(slices.DeleteFunc(js.passedOrder, func(t string) bool { return t == p.Tree }), p.Tree)
+	js.passed[p.Tree] = p
 	if n := len(js.passedOrder) - keepChecks; n > 0 {
 		for _, t := range js.passedOrder[:n] {
 			delete(js.passed, t)
 		}
 		js.passedOrder = slices.Delete(js.passedOrder, 0, n)
 	}
-	return slices.Clone(js.passedOrder)
+	out := make([]CheckPass, len(js.passedOrder))
+	for i, t := range js.passedOrder {
+		out[i] = js.passed[t]
+	}
+	return out
 }
 
 func (js *Jobs) worker(lane <-chan *Job) {
@@ -316,10 +349,10 @@ func (js *Jobs) worker(lane <-chan *Job) {
 		}
 		if err == nil && job.Req.Kind == "check" {
 			js.mu.Lock()
-			passed, path := js.pass(job.tree), js.checksPath
+			passed, path := js.pass(CheckPass{Tree: job.tree, Base: job.Req.Base, Built: job.Info(false).Summary.Built}), js.checksPath
 			js.mu.Unlock()
 			if path != "" { // only the check lane saves, so the writes cannot overtake each other
-				b, _ := json.Marshal(checksFile{Passed: passed}) // strings always marshal
+				b, _ := json.Marshal(checksFile{Checks: passed}) // strings always marshal
 				if err := writeAtomic(path, b); err != nil {
 					fmt.Fprintf(job, "\nThe check passed, but saving that failed (%v): after a restart it must run again.\n", err)
 				}
@@ -334,9 +367,15 @@ func (js *Jobs) nixArgs(args ...string) []string {
 }
 
 func (js *Jobs) run(job *Job) error {
-	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
+	timeout := jobTimeout
+	if job.Req.Kind == "check" {
+		timeout = checkTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	switch job.Req.Kind {
+	case "check":
+		return js.runCheck(ctx, job)
 	case "model":
 		return js.runModel(ctx, job)
 	case "packages", "options":
@@ -348,22 +387,6 @@ func (js *Jobs) run(job *Job) error {
 	var steps [][]string
 	var after func() error // once every step passed
 	switch job.Req.Kind {
-	case "check":
-		tmp, err := os.MkdirTemp("", "nixmgr-check-")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tmp)
-		src := filepath.Join(tmp, "src")
-		if err := js.Repo.export(ctx, job.tree, src); err != nil {
-			return err
-		}
-		fmt.Fprintf(job, "Checking the staged changes (tree %.12s).\n", job.tree)
-		dir = src
-		steps = append(steps, js.nixArgs("flake", "check", "-L", "--keep-going", "--no-update-lock-file", "path:"+src))
-		for _, t := range job.Req.Targets {
-			steps = append(steps, js.nixArgs("build", "--dry-run", "--no-link", "-L", "--no-update-lock-file", "path:"+src+"#"+t))
-		}
 	case "lock", "update":
 		// Nix copies a path: flake whole into the world-readable store, so it gets an
 		// export, never the working copy with .git and stray files. Repo.mu is held
@@ -392,15 +415,8 @@ func (js *Jobs) run(job *Job) error {
 		}
 	}
 	for _, args := range steps {
-		fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
-		cmd := exec.CommandContext(ctx, js.Nix, args...)
-		cmd.Dir = dir
-		cmd.Stdout, cmd.Stderr = job, job
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("stopped after %s", jobTimeout)
-			}
-			return fmt.Errorf("failed: %v", err)
+		if err := js.step(ctx, job, dir, args); err != nil {
+			return err
 		}
 	}
 	if after != nil {
@@ -409,6 +425,21 @@ func (js *Jobs) run(job *Job) error {
 		}
 	}
 	fmt.Fprintln(job, "\nAll steps passed.")
+	return nil
+}
+
+// step runs one nix command in dir, its output going to the job's.
+func (js *Jobs) step(ctx context.Context, job *Job, dir string, args []string) error {
+	fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
+	cmd := exec.CommandContext(ctx, js.Nix, args...)
+	cmd.Dir = dir
+	cmd.Stdout, cmd.Stderr = job, job
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return errors.New("stopped: the job ran out of time")
+		}
+		return fmt.Errorf("failed: %v", err)
+	}
 	return nil
 }
 

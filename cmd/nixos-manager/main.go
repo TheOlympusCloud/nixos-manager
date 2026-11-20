@@ -131,6 +131,7 @@ func run() error {
 	if err := svc.Jobs.PersistChecks(filepath.Join(data, "checks.json")); err != nil {
 		return err
 	}
+	svc.Jobs.GCRoots = filepath.Join(data, "gcroots") // each machine's last system a check built
 	if svc.Deploys, err = core.OpenDeployments(data, repo); err != nil {
 		return err
 	}

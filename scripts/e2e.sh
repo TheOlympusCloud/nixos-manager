@@ -33,14 +33,17 @@ if [ "${E2E_STUB_NIX:-}" = 1 ]; then
   cat > "$work/bin/nix" <<'EOF'
 #!/bin/sh
 # Evaluations answer with JSON only, like nix eval --json; other commands echo.
+# The example machine's system derivation follows its default.nix.
 case "$*" in
   *"eval --json"*) ;;
   *) echo "nix $*" ;;
 esac
 case "$*" in
-  *"nixmgr:host"*) echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/0000-nixos-system-example-26.05.drv","boot":"","managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
+  *"nixmgr:host"*) drv=$(sha256sum < "${NIXMGR_FLAKE#path:}/hosts/example/default.nix" | cut -c1-32)
+    echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"]}' ;;
   *"eval --json"*) echo '{"nixos":["example"],"home":[],"darwin":[]}' ;;
   *"flake lock"*) d="${*##*path:}"; printf '{ "nodes": { "root": {} }, "root": "root", "version": 7 }\n' > "$d/flake.lock" ;;
+  *"--dry-run"*) printf 'these 3 derivations will be built:\nthese 9 paths will be fetched (1.50 MiB download, 6.00 MiB unpacked):\n' >&2 ;;
 esac
 EOF
   printf '#!/bin/sh\ncat\n' > "$work/bin/nixfmt"
@@ -73,13 +76,16 @@ start
 jar=$work/cookies
 api() { local m=$1 p=$2; shift 2; curl -s -b "$jar" -c "$jar" -X "$m" -H 'Content-Type: application/json' "$base$p" "$@"; }
 code() { local m=$1 p=$2; shift 2; api "$m" "$p" -o /dev/null -w '%{http_code}' "$@"; }
-# run_job <json> waits for the job and prints its final state.
+# run_job <json> waits for the job and prints its final state; built prints the
+# machines the last one built.
 run_job() {
   local id
   id=$(api POST /api/jobs -d "$1" | json '["id"]')
+  echo "$id" > "$work/last-job"
   api GET "/api/jobs/$id/events" > "$work/events-$id"
   api GET "/api/jobs/$id" | json '["state"]'
 }
+built() { api GET "/api/jobs/$(cat "$work/last-job")" | json '["summary"]["built"]'; }
 
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$base/api/tree")" = 401 ] || fail "API reachable without login"
 [ "$(code POST /api/login -d '{"password":"wrong"}')" = 401 ] || fail "wrong password accepted"
@@ -115,7 +121,14 @@ echo "ok   targets: $attr"
 state=$(run_job "{\"kind\":\"check\",\"targets\":[\"$attr\"]}")
 [ "$state" = passed ] || fail "check $state: $(cat "$work"/events-*)"
 [ "$(api GET /api/status | json '["staged_checked"]')" = True ] || fail "staged changes not marked checked"
-echo "ok   check passed (flake check + dry build)"
+[ "$(built)" = "['example']" ] || fail "nothing pushed yet, so the check must build every machine: $(built)"
+[ "$(api GET /api/status | json '["staged_check"]["built"]')" = "['example']" ] || fail "status does not say what the check built"
+if [ "${E2E_STUB_NIX:-}" != 1 ]; then
+  root=$(readlink "$NIXMGR_DATA/gcroots/example") || fail "no GC root for the example machine's system"
+  case "$root" in /nix/store/*-nixos-system-example-*) ;; *) fail "the GC root points at $root" ;; esac
+  [ -e "$root/activate" ] || fail "the built system $root has no activate script"
+fi
+echo "ok   check passed: flake check, and the example machine built"
 
 kill "$pid"; wait "$pid" 2>/dev/null || true
 start
@@ -138,6 +151,7 @@ new=$(api GET "/api/file?path=$file" | python3 -c 'import sys, json; print(json.
 api GET "/api/diff?staged=false&path=$file" | json '["diff"]' | grep -q '+  time.timeZone' || fail "diff"
 api POST /api/stage -d "{\"paths\":[\"$file\"]}" > /dev/null
 [ "$(run_job "{\"kind\":\"check\",\"targets\":[\"$attr\"]}")" = passed ] || fail "second check"
+[ "$(built)" = "['example']" ] || fail "the time zone changes the example machine, but the check built $(built)"
 sha2=$(api POST /api/commit -d '{"message":"feat(example): set the time zone"}' | json '["sha"]')
 api POST /api/push -d '{}' > /dev/null
 [ "$(git -C "$work/remote.git" rev-parse main)" = "$sha2" ] || fail "second push"
