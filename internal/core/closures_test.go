@@ -17,6 +17,10 @@ func TestParseDiffClosures(t *testing.T) {
 		"nano: 8.6 → ∅, \x1b[32;1m-2861.5 KiB\x1b[0m\n" +
 		"python3: 3.12.8, 3.13.1 → 3.12.9, 3.13.2\n" +
 		"unit-foo: ∅ → ε\n" +
+		// Nix 2.2x and later: no plus sign, and the unit Nix picks.
+		"curl: 8.16.0 → 8.17.0, \x1b[31;1m273.1 KiB\x1b[0m\n" +
+		"linux: 6.12.1 → 6.12.2, 1.5 MiB\n" +
+		"python3.13: \x1b[32;1m-2.0 GiB\x1b[0m\n" +
 		"\n" +
 		"warning: something nix says\n"
 	got := parseDiffClosures([]byte(out))
@@ -27,6 +31,9 @@ func TestParseDiffClosures(t *testing.T) {
 		{Name: "nano", From: "8.6", Delta: -2930176},
 		{Name: "python3", From: "3.12.8, 3.13.1", To: "3.12.9, 3.13.2"},
 		{Name: "unit-foo", To: "ε"},
+		{Name: "curl", From: "8.16.0", To: "8.17.0", Delta: 279654},
+		{Name: "linux", From: "6.12.1", To: "6.12.2", Delta: 1572864},
+		{Name: "python3.13", Delta: -2147483648},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("diff-closures\n got %+v\nwant %+v", got, want)

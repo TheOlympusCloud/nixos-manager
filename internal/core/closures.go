@@ -119,12 +119,13 @@ func (js *Jobs) nixOutput(ctx context.Context, args ...string) ([]byte, error) {
 
 var (
 	ansiEscape  = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-	closureSize = regexp.MustCompile(`(?:^|, )([+-]\d+(?:\.\d+)?) KiB$`)
+	closureSize = regexp.MustCompile(`(?:^|, )([+-]?\d+(?:\.\d+)?) ([KMGTPE])iB$`)
 )
 
-// parseDiffClosures reads nix store diff-closures: "name: 1.0 → 1.1, +12.3 KiB",
-// "name: +12.3 KiB" when only the size moved, ∅ for absent. Store path names
-// hold no spaces or colons, so the separators are unambiguous.
+// parseDiffClosures reads nix store diff-closures: "name: 1.0 → 1.1, 12.3 KiB",
+// "name: -1.5 MiB" when only the size moved, ∅ for absent. Older Nix prints
+// "+12.3 KiB", always in KiB. Store path names hold no spaces or colons, so
+// the separators are unambiguous.
 func parseDiffClosures(out []byte) []ClosureChange {
 	changes := []ClosureChange{}
 	for _, line := range strings.Split(ansiEscape.ReplaceAllString(string(out), ""), "\n") {
@@ -134,8 +135,9 @@ func parseDiffClosures(out []byte) []ClosureChange {
 		}
 		c := ClosureChange{Name: name}
 		if m := closureSize.FindStringSubmatchIndex(rest); m != nil {
-			kib, _ := strconv.ParseFloat(rest[m[2]:m[3]], 64)
-			c.Delta = int64(math.Round(kib * 1024))
+			n, _ := strconv.ParseFloat(rest[m[2]:m[3]], 64)
+			power := strings.Index("KMGTPE", rest[m[4]:m[5]]) + 1
+			c.Delta = int64(math.Round(n * math.Pow(1024, float64(power))))
 			rest = rest[:m[0]]
 		}
 		if rest != "" {
