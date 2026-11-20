@@ -48,6 +48,8 @@ let
   inherit (system) config;
   service = config.systemd.services.nixos-manager;
   path = service.environment.PATH;
+  # hasInfix matches with a regex, and a regex may not refer to a store path: compare the plain text.
+  onPath = p: lib.hasInfix (builtins.unsafeDiscardStringContext "${lib.getBin p}/bin") path;
   checks = {
     "ExecStart runs the package" =
       service.serviceConfig.ExecStart == lib.getExe config.services.nixos-manager.package;
@@ -55,8 +57,8 @@ let
     "the user's home is the state folder" =
       config.users.users.nixos-manager.home == "/var/lib/nixos-manager";
     "state folder" = service.serviceConfig.StateDirectory == "nixos-manager";
-    "nix on PATH" = lib.hasInfix "${lib.getBin config.nix.package}/bin" path;
-    "git on PATH" = lib.hasInfix "${lib.getBin pkgs.git}/bin" path;
+    "nix on PATH" = onPath config.nix.package;
+    "git on PATH" = onPath pkgs.git;
     "password hash as a credential" =
       service.serviceConfig.LoadCredential == [
         "password-hash:/var/lib/secrets/nixos-manager-password"
