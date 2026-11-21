@@ -2,7 +2,8 @@
 import { CanvasTexture, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three'
 import type { PackageLabel } from './packages'
 
-export const MONO = "'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+/** The console's --mono font (app.css), so the scene's labels are set in the same face as the page. */
+export const MONO = (typeof document === 'undefined' ? '' : getComputedStyle(document.documentElement).getPropertyValue('--mono').trim()) || 'monospace'
 
 export interface Canvas2D {
   canvas: HTMLCanvasElement

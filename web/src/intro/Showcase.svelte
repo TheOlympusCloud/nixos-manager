@@ -29,7 +29,7 @@
 <div class="console">
   <div class="shots" style:--d={drift}>
     <figure class="shot main">
-      <img src={fleet} width="1280" height="800" alt="The fleet graph: pi, homeserver and workstation on the left, each linked to the services and programs it runs" loading="lazy" decoding="async" />
+      <img src={fleet} width="1280" height="800" alt="The fleet graph: homeserver, workstation and pi on the left, each linked to the services and programs it runs" loading="lazy" decoding="async" />
       <figcaption class="mono">fleet · services &amp; programs</figcaption>
     </figure>
     <figure class="shot side a">
@@ -37,7 +37,7 @@
       <figcaption class="mono">machines / workstation</figcaption>
     </figure>
     <figure class="shot side b">
-      <img src={changes} width="1280" height="800" alt="The Changes view: homeserver +firefox, workstation +forgejo −docker, and the diff of managed.json" loading="lazy" decoding="async" />
+      <img src={changes} width="1280" height="800" alt="The Changes view: neovim and spotify added to homeserver and workstation, and the diff of each machine's managed.json" loading="lazy" decoding="async" />
       <figcaption class="mono">changes · before commit</figcaption>
     </figure>
     <figure class="shot side c">
@@ -82,12 +82,9 @@
   .shot {
     position: absolute;
     margin: 0;
-    background: #0b0f16;
-    border: 1px solid rgb(255 255 255 / 0.14);
-    box-shadow:
-      0 40px 90px rgb(0 0 0 / 0.65),
-      0 0 0 1px rgb(0 0 0 / 0.6),
-      0 0 120px rgb(82 119 195 / 0.12);
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-3);
     transform-style: preserve-3d;
     will-change: transform;
   }
@@ -102,9 +99,8 @@
     top: -26px;
     left: 0;
     color: var(--i-muted);
-    font-size: 0.7rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: 0.8rem;
+    font-weight: 600;
   }
   .main {
     left: 6%;
@@ -152,9 +148,8 @@
     background: var(--i-bg);
   }
   .wall h3 {
-    font-weight: 600;
+    font-weight: 700;
     font-size: 1.15rem;
-    letter-spacing: -0.015em;
   }
   .wall p {
     max-width: 34ch;
@@ -181,15 +176,12 @@
     font-weight: 800;
     font-size: clamp(2.6rem, 5.4vw, 5.6rem);
     line-height: 0.95;
-    letter-spacing: -0.045em;
-    text-transform: uppercase;
+    letter-spacing: -0.035em;
   }
   .stats dd {
     margin: 0;
     color: var(--i-muted);
-    font-size: 0.72rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    font-size: 0.875rem;
   }
 
   @media (max-width: 860px) {

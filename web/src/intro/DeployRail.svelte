@@ -55,7 +55,6 @@
     background: var(--i-blue);
     transform: scaleY(var(--fill));
     transform-origin: top;
-    box-shadow: 0 0 12px rgb(126 182 255 / 0.6);
   }
   li {
     position: relative;
@@ -86,7 +85,7 @@
   li.on .dot {
     border-color: var(--i-blue);
     background: var(--i-blue);
-    box-shadow: 0 0 0 4px rgb(126 182 255 / 0.18);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--i-blue) 16%, transparent);
   }
   li.done .dot {
     background: var(--i-green);
@@ -95,13 +94,12 @@
   }
   .idx {
     color: var(--i-muted);
-    font-size: 0.7rem;
-    letter-spacing: 0.1em;
+    font-size: 0.8rem;
   }
   .name {
-    font-weight: 600;
+    font-weight: 700;
     font-size: clamp(1.1rem, 1.6vw, 1.5rem);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
     line-height: 1.1;
   }
   .detail {
@@ -109,7 +107,7 @@
     max-height: 0;
     overflow: hidden;
     color: var(--i-blue);
-    font-size: 0.78rem;
+    font-size: 0.875rem;
     opacity: 0;
     transition:
       max-height 400ms var(--i-ease),

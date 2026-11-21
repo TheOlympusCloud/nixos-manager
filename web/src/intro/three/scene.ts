@@ -23,8 +23,7 @@ export const createIntroScene: CreateScene = ({ canvas, reducedMotion, machines 
   const renderer = new WebGLRenderer({
     canvas, antialias: false, alpha: false, stencil: false, powerPreference: 'high-performance',
   })
-  // Clear to true black: through the float render target and the tone mapping, any other clear colour
-  // came out navy. The page background is added back as a display-space floor in post.ts.
+  // Clear to true black: no light is no ink, so the print pass in post.ts leaves bare paper there.
   renderer.setClearColor(0x000000, 1)
   renderer.info.autoReset = false // the post passes render too; counters cover the whole frame
   renderer.toneMapping = NeutralToneMapping
@@ -109,7 +108,7 @@ export const createIntroScene: CreateScene = ({ canvas, reducedMotion, machines 
       const since = s.deploy - arrive
       const switched = smoothstep(0, 0.02, since)
       const flash = since > 0 ? Math.exp(-since * 16) * 2.2 : 0
-      // Above 1 so the bloom picks the nodes up.
+      // Above 1 so the nodes print in solid ink.
       const r = (0.6 + (0.35 - 0.6) * switched) * (1.5 + flash)
       const g = (0.78 + (1.0 - 0.78) * switched) * (1.5 + flash)
       const b = (1.0 + (0.6 - 1.0) * switched) * (1.5 + flash)

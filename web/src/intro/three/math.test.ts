@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  continent, easeInOut, easeOutExpo, fibonacciSphere, noise3, orbitPoint, orbitRadius, orbitTilt, prng, pulseWindow,
+  continent, easeInOut, easeOutExpo, fibonacciSphere, hexRgb, noise3, orbitPoint, orbitRadius, orbitTilt, prng, pulseWindow,
 } from './math'
 
 describe('fibonacciSphere', () => {
@@ -96,6 +96,15 @@ describe('orbits', () => {
 
   it('rings never share a radius', () => {
     expect(new Set([0, 1, 2].map(orbitRadius)).size).toBe(3)
+  })
+})
+
+describe('hexRgb', () => {
+  it('reads a theme colour and falls back on anything else', () => {
+    expect(hexRgb('#f2f1ec', [0, 0, 0])).toEqual([242 / 255, 241 / 255, 236 / 255])
+    expect(hexRgb(' #2D59AC ', [0, 0, 0])).toEqual([45 / 255, 89 / 255, 172 / 255])
+    expect(hexRgb('', [1, 0.5, 0])).toEqual([1, 0.5, 0])
+    expect(hexRgb('rgb(1 2 3)', [1, 0.5, 0])).toEqual([1, 0.5, 0])
   })
 })
 

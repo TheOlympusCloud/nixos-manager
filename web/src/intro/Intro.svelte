@@ -366,9 +366,8 @@
     align-items: center;
     gap: 10px;
     color: var(--i-fg);
-    font-weight: 600;
+    font-weight: 700;
     font-size: 0.95rem;
-    letter-spacing: -0.01em;
     text-decoration: none;
   }
   .brand svg {
@@ -410,7 +409,7 @@
     position: absolute;
     inset: -20% -30% -20% -40%;
     z-index: -1;
-    background: radial-gradient(ellipse at 40% 50%, rgb(5 7 10 / 0.88), rgb(5 7 10 / 0.55) 45%, transparent 72%);
+    background: radial-gradient(ellipse at 40% 50%, color-mix(in srgb, var(--i-bg) 90%, transparent), color-mix(in srgb, var(--i-bg) 60%, transparent) 45%, transparent 72%);
     pointer-events: none;
   }
   .deploy-inner .plate::before {
@@ -483,15 +482,13 @@
     align-items: flex-end;
     justify-content: space-between;
     color: var(--i-muted);
-    font-size: 0.7rem;
-    letter-spacing: 0.08em;
+    font-size: 0.8rem;
   }
   .cue {
     display: inline-flex;
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    text-transform: uppercase;
   }
   .cue-line {
     width: 1px;
@@ -577,9 +574,8 @@
   }
   .unit {
     color: var(--i-blue);
-    font-size: 0.8rem;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
+    font-size: 1rem;
+    font-weight: 600;
   }
 
   /* ---- orbit ---- */
@@ -675,7 +671,7 @@
     position: absolute;
     inset: -14% -20% -14% -16%;
     z-index: -1;
-    background: radial-gradient(ellipse at 50% 50%, rgb(5 7 10 / 0.92), rgb(5 7 10 / 0.7) 50%, transparent 76%);
+    background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--i-bg) 94%, transparent), color-mix(in srgb, var(--i-bg) 72%, transparent) 50%, transparent 76%);
     pointer-events: none;
   }
 
@@ -695,7 +691,7 @@
     padding: 56px var(--gutter) 28px;
     color: var(--i-muted);
     font-size: 0.88rem;
-    background: linear-gradient(transparent, rgb(5 7 10 / 0.94) 40px, var(--i-bg));
+    background: linear-gradient(transparent, color-mix(in srgb, var(--i-bg) 94%, transparent) 40px, var(--i-bg));
   }
   .footer .cols {
     display: grid;
@@ -710,12 +706,11 @@
   .footer .k {
     margin-bottom: 8px;
     color: var(--i-fg);
-    font-size: 0.7rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    font-size: 0.875rem;
+    font-weight: 700;
   }
   .footer .fine {
-    font-size: 0.7rem;
+    font-size: 0.8rem;
   }
 
   @media (max-width: 860px) {
