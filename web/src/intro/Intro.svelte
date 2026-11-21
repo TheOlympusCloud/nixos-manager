@@ -149,7 +149,7 @@
                   <button class="btn solid" onclick={onEnter}>Enter the console</button>
                   <button class="btn" onclick={() => scrollTo('drift')}>See how it works</button>
                 </div>
-                <div class="hero-meta mono" aria-hidden="true">
+                <div class="hero-meta mono halo" aria-hidden="true">
                   <span>fleet · 3 machines · 1 flake</span>
                   <span class="cue"><span class="cue-line"></span>scroll</span>
                   <span>/nix/store/8f3k…-nixos-system-homeserver-26.05</span>

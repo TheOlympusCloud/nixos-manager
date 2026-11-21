@@ -12,10 +12,10 @@
   const step = $derived(STEPS.findIndex((s) => s.id === state.step))
 
   type Box = { x: number; y: number; w: number; h: number; label: string }
-  const widths = { flake: 150, host: 196, module: 236, managed: 250, pkg: 150 }
+  const widths = { flake: 150, host: 196, module: 236, managed: 250, pkg: 164 }
   function box(n: Node): Box {
     if (narrow) {
-      const w = n.kind === 'pkg' ? 132 : 142
+      const w = n.kind === 'pkg' ? 138 : 142
       return { x: 86 + n.m[1] * 156 - w / 2, y: 80 + n.m[0] * 205, w, h: 40, label: n.short ?? n.label.replace(/^(hosts|modules)\//, '') }
     }
     const w = widths[n.kind]
@@ -47,11 +47,11 @@
     return s === 'fail' ? 'var(--i-orange)' : s === 'ok' ? 'var(--i-green)' : kindOf[id] === 'managed' ? 'var(--i-violet)' : 'var(--i-blue)'
   }
   const pi = $derived(boxes[FAILING])
-  const tw = $derived(narrow ? 580 : 350)
+  const tw = $derived(narrow ? 580 : 392)
   const errorOpacity = $derived(state.error * (1 - state.fix))
 </script>
 
-<svg class="bp" viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="bp-title bp-desc">
+<svg class="bp" class:narrow viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="bp-title bp-desc">
   <title id="bp-title">The fleet's configuration graph, drawn and checked</title>
   <desc id="bp-desc">
     flake.nix connects to hosts/workstation, hosts/homeserver and hosts/pi; the hosts import shared modules and their managed.json; those pull in packages and
@@ -204,7 +204,7 @@
   {/if}
 
   <!-- title block -->
-  <g class="title" opacity={state.paper} transform="translate({narrow ? 30 : 900} {narrow ? H - 112 : 700})" fill="none" stroke="var(--bp-ink)" stroke-width="1">
+  <g class="title" opacity={state.paper} transform="translate({narrow ? 30 : 862} {narrow ? H - 112 : 700})" fill="none" stroke="var(--bp-ink)" stroke-width="1">
     <rect x="0" y="0" width={tw} height="80" />
     <path d="M0 26H{tw}M0 53H{tw}M{tw * 0.5} 26V80" />
     <text x="10" y="17" class="tb strong">NIXOS-MANAGER</text>
@@ -239,12 +239,15 @@
     user-select: none;
   }
   .label {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
-    letter-spacing: 0.01em;
   }
   .label.pkg {
-    font-size: 12.5px;
+    font-size: 12px;
+  }
+  /* The narrow sheet's boxes are smaller; its labels shrink to fit the mono face. */
+  .narrow .label {
+    font-size: 10.5px;
   }
   .dim {
     font-size: 10.5px;
@@ -271,17 +274,16 @@
     letter-spacing: 0.16em;
   }
   .tb {
-    font-size: 10.5px;
+    font-size: 10px;
     fill: var(--i-fg);
-    letter-spacing: 0.08em;
   }
   .tb.strong {
     font-weight: 700;
-    letter-spacing: 0.14em;
   }
   .tb .dim {
     fill: var(--i-muted);
-    font-size: 9.5px;
+    font-size: 9px;
+    letter-spacing: 0;
   }
   .node path {
     transition: stroke 260ms var(--i-ease), fill 260ms var(--i-ease);
