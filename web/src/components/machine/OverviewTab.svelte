@@ -3,7 +3,7 @@
   import { homeUsers, plural } from '../../lib/format'
   import { isRepoFile } from '../../lib/graph'
   import { groupLabel, groupOrder } from '../../lib/matrix'
-  import { countUp, spotlight } from '../../lib/motion'
+  import { countUp } from '../../lib/motion'
   import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
   import DeploymentCard from '../deployments/DeploymentCard.svelte'
@@ -26,7 +26,7 @@
 
 <div class="tiles stagger">
   {#each tiles as t (t.label)}
-    <a class="tile lift" href={machineLink(host.name, t.tab)} use:spotlight>
+    <a class="tile lift" href={machineLink(host.name, t.tab)}>
       <span class="t-label">{t.label}</span>
       <span class="t-value num" use:countUp={t.value}>{t.value}</span>
       <span class="t-note">{t.note}</span>

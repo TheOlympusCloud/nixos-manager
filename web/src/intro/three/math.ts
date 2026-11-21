@@ -16,6 +16,14 @@ export const easeIn = (t: number): number => t * t * t
 export const easeOutExpo = (t: number): number => (t >= 1 ? 1 : 1 - 2 ** (-10 * t))
 export const easeInOutQuart = (t: number): number => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2)
 
+/** '#rrggbb' (a theme token's value) as 0..1 channels; anything else gives the fallback. */
+export function hexRgb(hex: string, fallback: [number, number, number]): [number, number, number] {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return fallback
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+}
+
 /** mulberry32: a tiny seeded generator, so the scene is identical on every load. */
 export function prng(seed: number): () => number {
   let a = seed >>> 0

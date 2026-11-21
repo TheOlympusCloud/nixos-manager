@@ -5,7 +5,6 @@
   import NewMachine from '../components/NewMachine.svelte'
   import { fleet } from '../lib/fleet.svelte'
   import { age, plural } from '../lib/format'
-  import { spotlight } from '../lib/motion'
   import { machineLink, replace, route } from '../lib/router.svelte'
   import { app, startJob } from '../lib/state.svelte'
 
@@ -41,7 +40,7 @@
 
       <div class="grid stagger">
         {#each hosts as h (h.name)}
-          <a class="card lift machine" class:err={!!h.error} href={machineLink(h.name)} aria-label="Open {h.name}" use:spotlight>
+          <a class="card lift machine" class:err={!!h.error} href={machineLink(h.name)} aria-label="Open {h.name}">
             <MachineCard host={h} />
           </a>
         {:else}
@@ -117,7 +116,7 @@
   }
   .machine.err {
     --lift-c: var(--red);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--red) 7%, var(--bg-raised)), var(--bg-raised) 70%);
+    background: color-mix(in srgb, var(--red) 5%, var(--bg-raised));
     border-color: color-mix(in srgb, var(--red) 35%, var(--border));
   }
   .intro {

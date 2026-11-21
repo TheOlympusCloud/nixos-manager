@@ -241,19 +241,8 @@
     position: relative;
     z-index: 5; /* its menus open over the page */
     padding: 0 var(--s3) 0 var(--s4);
-    background: var(--bg-deep);
-    border-bottom: 1px solid var(--border);
-  }
-  /* A hairline of light under the bar, brightest where the title sits. */
-  .topbar::after {
-    position: absolute;
-    right: 0;
-    bottom: -1px;
-    left: 0;
-    height: 1px;
-    background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 38%, transparent), transparent 46%);
-    content: '';
-    pointer-events: none;
+    background: var(--bg-raised);
+    border-bottom: 1px solid var(--line);
   }
   .title,
   .crumb {
@@ -289,7 +278,7 @@
     padding: 0 10px;
     gap: 8px;
     font-size: var(--fs-sm);
-    border-radius: 13px;
+    border-radius: var(--r);
   }
   .model {
     text-decoration: none;
@@ -298,10 +287,6 @@
       border-color var(--t) var(--ease),
       color var(--t) var(--ease),
       box-shadow var(--t) var(--ease);
-  }
-  .model.warn:hover,
-  .model.err:hover {
-    box-shadow: 0 0 18px -4px color-mix(in srgb, currentColor 55%, transparent);
   }
   .model.ok {
     color: var(--fg);
@@ -364,7 +349,7 @@
     font-size: var(--fs-sm);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     border-color: color-mix(in srgb, var(--accent) 32%, transparent);
-    border-radius: 13px;
+    border-radius: var(--r);
   }
   .incoming:hover:not(:disabled) {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -378,10 +363,10 @@
     place-items: center;
     width: 26px;
     height: 26px;
-    color: var(--fg-strong);
+    color: var(--on-accent);
     font-size: var(--fs-xs);
-    font-weight: 600;
-    background: color-mix(in srgb, var(--accent-strong) 55%, var(--bg-active));
+    font-weight: 700;
+    background: var(--fg);
     border-radius: 50%;
   }
   .menu {
@@ -391,11 +376,10 @@
     z-index: 50;
     width: 340px;
     padding: 6px;
-    background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+    background: var(--bg-raised);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--edge), var(--shadow-2);
-    backdrop-filter: blur(14px) saturate(1.3);
+    box-shadow: var(--shadow-2);
     transform-origin: top right;
     animation: drop 220ms var(--ease);
   }

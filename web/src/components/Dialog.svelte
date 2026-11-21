@@ -58,13 +58,13 @@
     background: var(--bg-side);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--edge), var(--shadow-3);
+    box-shadow: var(--shadow-3);
   }
   dialog.wide {
     width: min(760px, 94vw);
   }
   dialog::backdrop {
-    background: rgb(0 0 0 / 0.45);
+    background: var(--scrim);
   }
   form {
     display: flex;

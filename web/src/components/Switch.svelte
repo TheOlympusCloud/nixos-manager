@@ -39,12 +39,11 @@
       box-shadow 220ms var(--ease);
   }
   .switch:hover:not(:disabled) {
-    background: #2d3845;
+    background: var(--line);
   }
   .switch.on {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
-    box-shadow: 0 0 14px -3px color-mix(in srgb, var(--accent-strong) 90%, transparent);
   }
   .switch.on:hover:not(:disabled) {
     background: var(--accent-hover);
@@ -55,11 +54,11 @@
     left: 2px;
     width: 14px;
     height: 14px;
-    background: var(--fg-strong);
+    background: var(--bg-raised);
     border-radius: 50%;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    box-shadow: var(--shadow-1);
     transition:
-      transform 260ms var(--ease-spring),
+      transform 260ms var(--ease),
       width var(--t-fast) var(--ease);
   }
   .on .knob {

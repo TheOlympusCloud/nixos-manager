@@ -242,9 +242,11 @@
   .add {
     background: color-mix(in srgb, var(--green) 11%, transparent);
   }
-  .add .code,
+  .add .code {
+    color: var(--fg-strong);
+  }
   .add .sign {
-    color: #b8e3c4;
+    color: var(--green);
   }
   .add .no {
     color: color-mix(in srgb, var(--green) 55%, var(--fg-faint));
@@ -252,9 +254,11 @@
   .del {
     background: color-mix(in srgb, var(--red) 11%, transparent);
   }
-  .del .code,
+  .del .code {
+    color: var(--fg-strong);
+  }
   .del .sign {
-    color: #f3b1b1;
+    color: var(--red);
   }
   .del .no {
     color: color-mix(in srgb, var(--red) 55%, var(--fg-faint));

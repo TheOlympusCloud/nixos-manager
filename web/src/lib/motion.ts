@@ -41,24 +41,3 @@ export function countUp(el: HTMLElement, value: number) {
     destroy: () => cancelAnimationFrame(frame),
   }
 }
-
-/** Tracks the pointer over the element in --mx / --my (pixels), for the `.lift` spotlight. */
-export function spotlight(el: HTMLElement) {
-  let frame = 0
-  function move(e: PointerEvent) {
-    if (frame) return
-    frame = requestAnimationFrame(() => {
-      frame = 0
-      const r = el.getBoundingClientRect()
-      el.style.setProperty('--mx', `${e.clientX - r.left}px`)
-      el.style.setProperty('--my', `${e.clientY - r.top}px`)
-    })
-  }
-  el.addEventListener('pointermove', move, { passive: true })
-  return {
-    destroy() {
-      cancelAnimationFrame(frame)
-      el.removeEventListener('pointermove', move)
-    },
-  }
-}

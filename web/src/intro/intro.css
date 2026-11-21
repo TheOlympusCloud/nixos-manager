@@ -1,22 +1,22 @@
-/* The intro's own world: near-black, NixOS blues, Geist, hairlines. Everything is scoped under .intro
-   so the console keeps its own tokens. Scroll-scrubbed reveals read --p (the chapter's progress, 0..1)
+/* The intro is printed on the console's paper: its --i-* names are aliases of the theme tokens in
+   app.css, scoped under .intro. Scroll-scrubbed reveals read --p (the chapter's progress, 0..1)
    from the chapter element and --a/--b (their own window) from the revealed element. */
-@import '@fontsource-variable/geist';
-@import '@fontsource-variable/geist-mono';
 
 .intro {
-  --i-bg: #05070a;
-  --i-fg: #f2f5f9;
-  --i-muted: #8f9bab;
-  --i-blue: #7eb6ff;
-  --i-blue-deep: #5277c3;
-  --i-cta: #2468e0;
-  --i-orange: #ff8a3a;
-  --i-green: #4fd18b;
-  --i-line: rgb(255 255 255 / 0.12);
-  --i-line-soft: rgb(255 255 255 / 0.07);
-  --i-sans: 'Geist Variable', system-ui, -apple-system, sans-serif;
-  --i-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', monospace;
+  --i-bg: var(--bg);
+  --i-fg: var(--fg-strong);
+  --i-muted: var(--fg-muted);
+  --i-blue: var(--accent);
+  --i-blue-deep: var(--accent);
+  --i-cta: var(--accent-strong);
+  /* What fails or conflicts is marked in red pencil. */
+  --i-orange: var(--red);
+  --i-green: var(--green);
+  --i-violet: var(--purple);
+  --i-line: color-mix(in srgb, var(--fg-strong) 18%, transparent);
+  --i-line-soft: color-mix(in srgb, var(--fg-strong) 9%, transparent);
+  --i-sans: var(--sans);
+  --i-mono: var(--mono);
   --i-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --gutter: clamp(20px, 4vw, 64px);
   --p: 0;
@@ -28,16 +28,15 @@
   overscroll-behavior: contain;
   color: var(--i-fg);
   font: 400 16px / 1.5 var(--i-sans);
-  font-feature-settings: 'ss01', 'cv05';
   background: var(--i-bg);
   outline: none;
-  scrollbar-color: #1c2430 transparent;
+  scrollbar-color: var(--line) transparent;
   scrollbar-width: thin;
   -webkit-font-smoothing: antialiased;
 }
 .intro ::selection {
-  color: var(--i-bg);
-  background: var(--i-blue);
+  color: var(--i-fg);
+  background: color-mix(in srgb, var(--mark) 75%, transparent);
 }
 .intro :focus-visible {
   outline: 2px solid var(--i-blue);
@@ -56,20 +55,19 @@
 /* ---- type ---- */
 .intro .display {
   font-weight: 800;
-  font-size: clamp(2.9rem, 9.4vw, 9.75rem);
-  line-height: 0.88;
-  letter-spacing: -0.04em;
-  text-transform: uppercase;
+  font-size: clamp(2.9rem, 8.6vw, 8.5rem);
+  line-height: 0.94;
+  letter-spacing: -0.035em;
   text-wrap: balance;
 }
 .intro .display.sm {
   font-size: clamp(2.4rem, 6.4vw, 6.4rem);
 }
 .intro .statement {
-  font-weight: 600;
+  font-weight: 700;
   font-size: clamp(1.7rem, 3.4vw, 3.3rem);
-  line-height: 1.06;
-  letter-spacing: -0.028em;
+  line-height: 1.08;
+  letter-spacing: -0.022em;
   text-wrap: balance;
 }
 .intro .lede {
@@ -81,16 +79,14 @@
 }
 .intro .lede b {
   color: var(--i-fg);
-  font-weight: 500;
+  font-weight: 600;
 }
 .intro .eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--i-blue);
-  font: 500 0.72rem / 1 var(--i-mono);
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  font: 700 0.9rem / 1 var(--i-sans);
 }
 .intro .eyebrow::before {
   content: '';
@@ -119,14 +115,13 @@
   height: 52px;
   padding: 0 26px;
   color: var(--i-fg);
-  font: 600 0.78rem / 1 var(--i-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font: 700 1rem / 1 var(--i-sans);
   text-decoration: none;
   white-space: nowrap;
-  background: none;
-  border: 1px solid rgb(255 255 255 / 0.22);
-  border-radius: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
   transition:
     background 220ms var(--i-ease),
@@ -135,25 +130,25 @@
     transform 220ms var(--i-ease);
 }
 .intro .btn:hover {
-  border-color: rgb(255 255 255 / 0.4);
-  background: rgb(255 255 255 / 0.04);
+  border-color: var(--fg-muted);
+  background: var(--bg-hover);
 }
 .intro .btn:active {
   transform: translateY(1px);
 }
 .intro .btn.solid {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--i-cta);
   border-color: var(--i-cta);
 }
 .intro .btn.solid:hover {
-  background: #2f74ea;
-  border-color: #2f74ea;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 .intro .btn.small {
   height: 40px;
   padding: 0 18px;
-  font-size: 0.7rem;
+  font-size: 0.875rem;
 }
 
 /* ---- chapters ---- */
@@ -177,9 +172,11 @@
   padding: clamp(80px, 12vh, 140px) var(--gutter);
 }
 
-/* A text block over the scene keeps a soft dark halo so it stays legible whatever is behind it. */
+/* A text block over the scene keeps a halo of bare paper so the ink drawing never runs through it. */
 .intro .halo {
-  text-shadow: 0 2px 28px rgb(5 7 10 / 0.75);
+  text-shadow:
+    0 0 3px var(--i-bg),
+    0 0 22px var(--i-bg);
 }
 
 /* ---- scroll-scrubbed reveals ---- */

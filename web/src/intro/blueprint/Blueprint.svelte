@@ -12,10 +12,10 @@
   const step = $derived(STEPS.findIndex((s) => s.id === state.step))
 
   type Box = { x: number; y: number; w: number; h: number; label: string }
-  const widths = { flake: 150, host: 196, module: 236, managed: 250, pkg: 150 }
+  const widths = { flake: 150, host: 196, module: 236, managed: 250, pkg: 164 }
   function box(n: Node): Box {
     if (narrow) {
-      const w = n.kind === 'pkg' ? 132 : 142
+      const w = n.kind === 'pkg' ? 138 : 142
       return { x: 86 + n.m[1] * 156 - w / 2, y: 80 + n.m[0] * 205, w, h: 40, label: n.short ?? n.label.replace(/^(hosts|modules)\//, '') }
     }
     const w = widths[n.kind]
@@ -44,14 +44,14 @@
   const kindOf = Object.fromEntries(NODES.map((n) => [n.id, n.kind]))
   const stroke = (id: string) => {
     const s = state.nodes[id].status
-    return s === 'fail' ? 'var(--i-orange)' : s === 'ok' ? 'var(--i-green)' : kindOf[id] === 'managed' ? '#a7d1ff' : 'var(--i-blue)'
+    return s === 'fail' ? 'var(--i-orange)' : s === 'ok' ? 'var(--i-green)' : kindOf[id] === 'managed' ? 'var(--i-violet)' : 'var(--i-blue)'
   }
   const pi = $derived(boxes[FAILING])
-  const tw = $derived(narrow ? 580 : 350)
+  const tw = $derived(narrow ? 580 : 392)
   const errorOpacity = $derived(state.error * (1 - state.fix))
 </script>
 
-<svg class="bp" viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="bp-title bp-desc">
+<svg class="bp" class:narrow viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="bp-title bp-desc">
   <title id="bp-title">The fleet's configuration graph, drawn and checked</title>
   <desc id="bp-desc">
     flake.nix connects to hosts/workstation, hosts/homeserver and hosts/pi; the hosts import shared modules and their managed.json; those pull in packages and
@@ -60,20 +60,17 @@
   </desc>
   <defs>
     <pattern id="bp-minor" width="20" height="20" patternUnits="userSpaceOnUse">
-      <path d="M20 0H0V20" fill="none" stroke="rgb(126 182 255 / 0.07)" stroke-width="1" />
+      <path d="M20 0H0V20" fill="none" stroke="var(--grid)" stroke-width="1" />
     </pattern>
     <pattern id="bp-major" width="100" height="100" patternUnits="userSpaceOnUse">
-      <path d="M100 0H0V100" fill="none" stroke="rgb(126 182 255 / 0.14)" stroke-width="1" />
+      <path d="M100 0H0V100" fill="none" stroke="var(--grid-major)" stroke-width="1" />
     </pattern>
-    <filter id="bp-glow" x="-10%" y="-10%" width="120%" height="120%">
-      <feGaussianBlur stdDeviation="4" />
-    </filter>
     <linearGradient id="bp-scan" x1="0" x2="1">
       <stop offset="0" stop-color="var(--i-blue)" stop-opacity="0" />
       <stop offset="1" stop-color="var(--i-blue)" stop-opacity="0.55" />
     </linearGradient>
     <marker id="bp-tick" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-      <path d="M2 8L8 2" stroke="rgb(126 182 255 / 0.7)" stroke-width="1.2" />
+      <path d="M2 8L8 2" stroke="var(--bp-ink)" stroke-width="1.2" />
     </marker>
     <marker id="bp-dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
       <circle cx="5" cy="5" r="3" fill="var(--i-blue)" />
@@ -83,15 +80,15 @@
     {/each}
   </defs>
 
-  <!-- paper -->
-  <rect width={W} height={H} fill="#070d1a" />
+  <!-- paper: a whiteprint, ink-blue lines on the sheet -->
+  <rect width={W} height={H} fill="var(--bg-raised)" />
   <rect width={W} height={H} fill="url(#bp-minor)" opacity={state.paper} />
   <rect width={W} height={H} fill="url(#bp-major)" opacity={state.paper} />
-  <rect x="0.5" y="0.5" width={W - 1} height={H - 1} fill="none" stroke="rgb(126 182 255 / 0.35)" opacity={state.paper} />
-  <rect x="12.5" y="12.5" width={W - 25} height={H - 25} fill="none" stroke="rgb(126 182 255 / 0.18)" opacity={state.paper} />
+  <rect x="0.5" y="0.5" width={W - 1} height={H - 1} fill="none" stroke="var(--bp-ink)" opacity={state.paper} />
+  <rect x="12.5" y="12.5" width={W - 25} height={H - 25} fill="none" stroke="var(--bp-faint)" opacity={state.paper} />
 
   <!-- annotations: dimension lines, leaders, notes -->
-  <g class="paper" opacity={state.paper} fill="none" stroke="rgb(126 182 255 / 0.55)" stroke-width="1">
+  <g class="paper" opacity={state.paper} fill="none" stroke="var(--bp-ink)" stroke-width="1">
     {#if narrow}
       <path d="M40 44H600" marker-start="url(#bp-tick)" marker-end="url(#bp-tick)" />
       <text x="320" y="36" class="dim" text-anchor="middle">evaluation · flake → hosts → modules → packages</text>
@@ -113,9 +110,9 @@
     {/if}
   </g>
 
-  <!-- edges: a soft glow under crisp strokes -->
+  <!-- edges: a broad pale stroke, like a highlighter pass, under crisp ink -->
   <g fill="none" stroke-linecap="round">
-    <g filter="url(#bp-glow)" stroke="var(--i-blue)" stroke-width="3" opacity="0.5">
+    <g stroke="var(--i-blue)" stroke-width="5" opacity="0.1">
       {#each EDGES as [a, b], i (a + b)}
         <path d={edge(boxes[a], boxes[b])} pathLength="1" stroke-dasharray="1" stroke-dashoffset={1 - state.edges[i]} />
       {/each}
@@ -125,7 +122,7 @@
       <path
         d={edge(boxes[a], boxes[b])}
         pathLength="1"
-        stroke={failing ? 'var(--i-orange)' : 'rgb(190 220 255 / 0.85)'}
+        stroke={failing ? 'var(--i-orange)' : 'var(--i-blue)'}
         stroke-width="1.25"
         stroke-dasharray={failing ? '0.03 0.02' : '1'}
         stroke-dashoffset={failing ? 0 : 1 - state.edges[i]}
@@ -142,12 +139,12 @@
       <path d={outline(b)} fill={col} fill-opacity={s.status === 'idle' ? 0.05 * s.draw : s.status === 'fail' ? 0.14 : 0.09} stroke="none" />
       <path d={outline(b)} fill="none" stroke={col} stroke-width={s.status === 'fail' || s.status === 'fixing' ? 1.6 : 1.2} pathLength="1" stroke-dasharray="1" stroke-dashoffset={1 - (s.status === 'fixing' ? Math.max(s.scan, 0.02) : s.draw)} />
       {#if s.draw > 0.4}
-        <text x={b.x + 14} y={b.y + b.h / 2 + 4.5} class="label" class:pkg={n.kind === 'pkg'} fill={s.status === 'fail' ? 'var(--i-orange)' : '#e8f1ff'} opacity={Math.min(1, (s.draw - 0.4) / 0.4)}>{b.label}</text>
+        <text x={b.x + 14} y={b.y + b.h / 2 + 4.5} class="label" class:pkg={n.kind === 'pkg'} fill={s.status === 'fail' ? 'var(--i-orange)' : 'var(--i-fg)'} opacity={Math.min(1, (s.draw - 0.4) / 0.4)}>{b.label}</text>
       {/if}
       {#if s.status === 'scanning' || s.status === 'fixing'}
         <g clip-path="url(#bp-clip-{n.id})">
           <rect x={b.x + (s.scan - 0.35) * b.w} y={b.y} width={0.35 * b.w} height={b.h} fill="url(#bp-scan)" />
-          <line x1={b.x + s.scan * b.w} x2={b.x + s.scan * b.w} y1={b.y} y2={b.y + b.h} stroke="#dbeaff" stroke-width="1.5" />
+          <line x1={b.x + s.scan * b.w} x2={b.x + s.scan * b.w} y1={b.y} y2={b.y + b.h} stroke="var(--i-blue)" stroke-width="1.5" />
         </g>
       {/if}
       {#if s.status === 'ok' || s.status === 'fail'}
@@ -169,9 +166,9 @@
     {@const ey = narrow ? pi.y + 70 : 640}
     <g opacity={errorOpacity} transform="translate({ex} {ey})">
       <path d="M{pi.x + pi.w / 2 - ex} {pi.y + pi.h - ey}V-14H0" fill="none" stroke="var(--i-orange)" stroke-width="1" stroke-dasharray="3 3" />
-      <rect x="0" y="-14" width={narrow ? 560 : 356} height={14 + ERROR_LINES.length * 17 + 12} fill="rgb(255 138 58 / 0.07)" stroke="var(--i-orange)" stroke-width="1" />
+      <rect x="0" y="-14" width={narrow ? 560 : 356} height={14 + ERROR_LINES.length * 17 + 12} fill="var(--bp-red-wash)" stroke="var(--i-orange)" stroke-width="1" />
       {#each ERROR_LINES as line, i (i)}
-        <text x="12" y={6 + i * 17} class="code" fill={i === 0 ? 'var(--i-orange)' : '#ffd3b3'} xml:space="preserve">{line}</text>
+        <text x="12" y={6 + i * 17} class="code" fill={i === 0 ? 'var(--i-orange)' : 'var(--i-fg)'} xml:space="preserve">{line}</text>
       {/each}
     </g>
   {/if}
@@ -182,10 +179,10 @@
     {@const fy = narrow ? pi.y + 56 : 630}
     <g opacity={state.fix} transform="translate({fx} {fy})">
       <path d="M{pi.x - fx} {pi.y + pi.h / 2 - fy}H{narrow ? 100 : 236}V0" fill="none" stroke="var(--i-green)" stroke-width="1" marker-start="url(#bp-dot)" />
-      <rect x="0" y="0" width={narrow ? 560 : 336} height={22 + FIX_LINES.length * 17 + 10} fill="rgb(79 209 139 / 0.06)" stroke="var(--i-green)" stroke-width="1" />
+      <rect x="0" y="0" width={narrow ? 560 : 336} height={22 + FIX_LINES.length * 17 + 10} fill="var(--bp-green-wash)" stroke="var(--i-green)" stroke-width="1" />
       <text x="12" y="16" class="note" fill="var(--i-green)">patch · hosts/pi/default.nix</text>
       {#each FIX_LINES as line, i (i)}
-        <text x="12" y={38 + i * 17} class="code" fill={line.startsWith('+') ? 'var(--i-green)' : '#ff9b9b'} xml:space="preserve">{line}</text>
+        <text x="12" y={38 + i * 17} class="code" fill={line.startsWith('+') ? 'var(--i-green)' : 'var(--i-orange)'} xml:space="preserve">{line}</text>
       {/each}
     </g>
   {/if}
@@ -198,7 +195,7 @@
     <g opacity={state.stamp} transform="translate({sx} {sy}) rotate(-4) scale({k})">
       {#each STAMPS as s, i (s)}
         <g transform="translate(0 {i * 36})">
-          <rect x="-150" y="-13" width="300" height="28" fill="rgb(79 209 139 / 0.08)" stroke="var(--i-green)" stroke-width="1.5" />
+          <rect x="-150" y="-13" width="300" height="28" fill="var(--bp-green-wash)" stroke="var(--i-green)" stroke-width="1.5" />
           <rect x="-146" y="-9" width="292" height="20" fill="none" stroke="var(--i-green)" stroke-width="0.5" opacity="0.7" />
           <text y="5" class="stamp" text-anchor="middle" fill="var(--i-green)">{s.toUpperCase()}</text>
         </g>
@@ -207,7 +204,7 @@
   {/if}
 
   <!-- title block -->
-  <g class="title" opacity={state.paper} transform="translate({narrow ? 30 : 900} {narrow ? H - 112 : 700})" fill="none" stroke="rgb(126 182 255 / 0.5)" stroke-width="1">
+  <g class="title" opacity={state.paper} transform="translate({narrow ? 30 : 862} {narrow ? H - 112 : 700})" fill="none" stroke="var(--bp-ink)" stroke-width="1">
     <rect x="0" y="0" width={tw} height="80" />
     <path d="M0 26H{tw}M0 53H{tw}M{tw * 0.5} 26V80" />
     <text x="10" y="17" class="tb strong">NIXOS-MANAGER</text>
@@ -221,7 +218,7 @@
   <!-- the act readout -->
   <g class="readout" transform="translate({narrow ? 30 : 40} {narrow ? H - 14 : H - 18})">
     <text class="tb strong" fill="var(--i-blue)">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</text>
-    <text x="64" class="tb" fill="#c7dbff">{STEPS[step].label.toUpperCase()}</text>
+    <text x="64" class="tb" fill="var(--i-fg)">{STEPS[step].label.toUpperCase()}</text>
   </g>
 </svg>
 
@@ -230,35 +227,40 @@
     display: block;
     width: 100%;
     height: 100%;
+    --bp-ink: color-mix(in srgb, var(--i-blue) 70%, transparent);
+    --bp-faint: color-mix(in srgb, var(--i-blue) 35%, transparent);
+    --bp-red-wash: color-mix(in srgb, var(--i-orange) 6%, transparent);
+    --bp-green-wash: color-mix(in srgb, var(--i-green) 7%, transparent);
     font-family: var(--i-mono);
-    box-shadow:
-      0 30px 80px rgb(0 0 0 / 0.6),
-      0 0 0 1px rgb(126 182 255 / 0.12);
+    box-shadow: var(--shadow-3);
   }
   text {
     stroke: none;
     user-select: none;
   }
   .label {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
-    letter-spacing: 0.01em;
   }
   .label.pkg {
-    font-size: 12.5px;
+    font-size: 12px;
+  }
+  /* The narrow sheet's boxes are smaller; its labels shrink to fit the mono face. */
+  .narrow .label {
+    font-size: 10.5px;
   }
   .dim {
     font-size: 10.5px;
-    fill: rgb(170 200 240 / 0.8);
+    fill: var(--i-muted);
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .note {
     font-size: 11.5px;
-    fill: #c7dbff;
+    fill: var(--i-fg);
   }
   .note.dim {
-    fill: rgb(170 200 240 / 0.8);
+    fill: var(--i-muted);
     text-transform: none;
     letter-spacing: 0.02em;
   }
@@ -272,17 +274,16 @@
     letter-spacing: 0.16em;
   }
   .tb {
-    font-size: 10.5px;
-    fill: #c7dbff;
-    letter-spacing: 0.08em;
+    font-size: 10px;
+    fill: var(--i-fg);
   }
   .tb.strong {
     font-weight: 700;
-    letter-spacing: 0.14em;
   }
   .tb .dim {
-    fill: rgb(170 200 240 / 0.6);
-    font-size: 9.5px;
+    fill: var(--i-muted);
+    font-size: 9px;
+    letter-spacing: 0;
   }
   .node path {
     transition: stroke 260ms var(--i-ease), fill 260ms var(--i-ease);

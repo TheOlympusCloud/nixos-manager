@@ -212,10 +212,10 @@
     background: color-mix(in srgb, var(--accent-strong) 70%, transparent);
   }
   .sw.repo {
-    background: #4a5666;
+    background: var(--line-strong);
   }
   .sw.default {
-    border: 1px dashed #4a5666;
+    border: 1px dashed var(--line-strong);
   }
   .matrix-wrap {
     overflow: auto;
@@ -298,16 +298,16 @@
     border-radius: var(--r-sm);
   }
   .has.repo {
-    background: #253040;
+    background: var(--bg-active);
   }
   .has.managed {
-    background: color-mix(in srgb, var(--accent-strong) 45%, transparent);
+    background: color-mix(in srgb, var(--accent-strong) 16%, var(--bg-raised));
   }
   .has.managed .ver {
     color: var(--fg-strong);
   }
   .has.default {
-    border: 1px dashed #3b4757;
+    border: 1px dashed var(--line-strong);
   }
   .ver {
     overflow: hidden;
@@ -330,7 +330,7 @@
   }
   .cell-btn:hover:not(:disabled) {
     color: var(--fg-strong);
-    background: color-mix(in srgb, var(--red) 25%, transparent);
+    background: color-mix(in srgb, var(--red) 14%, transparent);
     border-color: transparent;
   }
   .cell-add {
@@ -362,11 +362,11 @@
     border-style: dashed;
   }
   .tick.managed {
-    color: #fff;
-    background: color-mix(in srgb, var(--c) 55%, transparent);
+    color: var(--on-accent);
+    background: var(--c);
   }
   .toggle-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--red) 35%, transparent);
+    background: color-mix(in srgb, var(--red) 18%, transparent);
     border-color: color-mix(in srgb, var(--red) 50%, transparent);
   }
   .group-row th {

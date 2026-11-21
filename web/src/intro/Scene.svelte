@@ -94,7 +94,7 @@
     width: 100%;
     height: 100%;
   }
-  /* The static stand-in: a dark sphere low in the frame, rim-lit, with a dot-matrix surface. */
+  /* The static stand-in: a globe printed low on the page, an ink outline over a dot screen. */
   .planet {
     position: absolute;
     left: 50%;
@@ -102,13 +102,8 @@
     width: 120vmin;
     height: 120vmin;
     border-radius: 50%;
-    background:
-      radial-gradient(circle at 50% 20%, rgb(126 182 255 / 0.18), transparent 46%),
-      radial-gradient(circle, #0b1220 0%, #070b12 60%, #05070a 100%);
-    box-shadow:
-      0 -2px 40px rgb(126 182 255 / 0.35),
-      0 -1px 2px rgb(200 225 255 / 0.5),
-      0 -40px 160px rgb(82 119 195 / 0.25);
+    background: var(--bg-raised);
+    border: 1.5px solid color-mix(in srgb, var(--accent) 70%, transparent);
     transform: translateX(-50%);
   }
   .planet::after {
@@ -116,8 +111,8 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    background-image: radial-gradient(rgb(126 182 255 / 0.5) 0.8px, transparent 1.2px);
+    background-image: radial-gradient(color-mix(in srgb, var(--accent) 55%, transparent) 0.8px, transparent 1.2px);
     background-size: 9px 9px;
-    mask-image: radial-gradient(circle at 50% 30%, #000 0%, transparent 62%);
+    mask-image: radial-gradient(circle at 50% 30%, black 0%, transparent 62%);
   }
 </style>

@@ -110,7 +110,6 @@
     height: 100%;
     background: var(--green);
     border-radius: 2px;
-    box-shadow: 0 0 10px color-mix(in srgb, var(--green) 60%, transparent);
     transition: width 520ms var(--ease);
   }
   .commits {

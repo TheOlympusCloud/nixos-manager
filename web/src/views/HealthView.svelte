@@ -345,13 +345,12 @@
     height: 100%;
     overflow: hidden;
     background: var(--accent);
-    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
     transition: width 360ms var(--ease);
   }
   .progress span::after {
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.5), transparent);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg-raised) 55%, transparent), transparent);
     animation: sheen 1.4s var(--ease) infinite;
     content: '';
   }

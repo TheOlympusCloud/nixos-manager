@@ -253,14 +253,10 @@
     padding: 0;
     overflow: hidden;
     color: var(--fg);
-    background: color-mix(in srgb, var(--bg-side) 86%, transparent);
+    background: var(--bg-raised);
     border: 1px solid var(--line-strong);
-    border-radius: 12px;
-    box-shadow:
-      var(--edge),
-      var(--shadow-3),
-      0 0 80px -20px color-mix(in srgb, var(--accent-strong) 55%, transparent);
-    backdrop-filter: blur(22px) saturate(1.4);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-3);
   }
   .palette[open] {
     animation: pal-in 260ms var(--ease);
@@ -272,7 +268,7 @@
     }
   }
   .palette::backdrop {
-    background: rgb(4 6 9 / 0.55);
+    background: var(--scrim);
   }
   .box {
     display: flex;
@@ -335,7 +331,7 @@
     transform: scale(1.1);
   }
   .ico {
-    transition: transform var(--t) var(--ease-spring);
+    transition: transform var(--t) var(--ease);
   }
   .ico {
     display: grid;
