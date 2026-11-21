@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Background, Controls, MiniMap, Position, SvelteFlow, useSvelteFlow, type Edge, type Node } from '@xyflow/svelte'
+  import { Background, BackgroundVariant, Controls, MiniMap, Position, SvelteFlow, useSvelteFlow, type Edge, type Node } from '@xyflow/svelte'
   import '@xyflow/svelte/dist/style.css'
   import './fleet.css'
   import { tick } from 'svelte'
@@ -12,7 +12,6 @@
   import { groupLabel, groupOrder } from '../../lib/matrix'
   import HealthSummary from '../HealthSummary.svelte'
   import Icon, { type IconName } from '../Icon.svelte'
-  import Backdrop from './Backdrop.svelte'
   import GroupNode from './GroupNode.svelte'
   import Inspector from './Inspector.svelte'
   import MachineNode from './MachineNode.svelte'
@@ -202,9 +201,9 @@
 
   const minimapColor = (n: Node) => {
     const g = n.data as GNode
-    if (g.kind === 'machine') return g.host.error ? '#8a3a40' : '#4a6a90'
+    if (g.kind === 'machine') return g.host.error ? 'color-mix(in srgb, var(--red) 45%, var(--bg-raised))' : 'color-mix(in srgb, var(--accent) 35%, var(--bg-raised))'
     if (g.kind === 'feature') return `var(--g-${g.group})`
-    return '#3a4654'
+    return 'var(--line-strong)'
   }
 
   const stats = $derived.by(() => {
@@ -287,9 +286,8 @@
   </div>
 
   <div class="canvas" class:ready={laidOut}>
-    <Backdrop view={() => flow.getViewport()} {active} />
     <SvelteFlow
-      class="fleet-flow dark"
+      class="fleet-flow"
       bind:nodes
       {edges}
       {nodeTypes}
@@ -303,7 +301,9 @@
       onnodepointerenter={({ node }) => (graphUi.hover = node.id)}
       onnodepointerleave={() => (graphUi.hover = '')}
       onpaneclick={() => (graphUi.selected = '')}>
-      <Background gap={22} size={1.2} />
+      <!-- Engineering paper: a fine grid, and a heavier line every fifth square. -->
+      <Background id="minor" variant={BackgroundVariant.Lines} gap={22} patternColor="var(--grid)" />
+      <Background id="major" variant={BackgroundVariant.Lines} gap={110} patternColor="var(--grid-major)" />
       <Controls position="bottom-left" showLock={false} showFitView={false} />
       <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} nodeBorderRadius={6} width={180} height={120} />
     </SvelteFlow>
@@ -469,7 +469,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background: radial-gradient(120% 90% at 50% 110%, color-mix(in srgb, var(--accent-strong) 16%, var(--bg-deep)), var(--bg-deep) 62%);
+    background: var(--bg);
   }
   .canvas :global(.svelte-flow) {
     opacity: 0;

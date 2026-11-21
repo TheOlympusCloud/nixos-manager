@@ -44,11 +44,10 @@
     align-items: flex-start;
     gap: 10px;
     padding: 10px 8px 10px 12px;
-    background: color-mix(in srgb, var(--bg-raised) 90%, transparent);
+    background: var(--bg-raised);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--edge), var(--shadow-2);
-    backdrop-filter: blur(14px);
+    box-shadow: var(--shadow-2);
   }
   .ico {
     display: grid;

@@ -91,8 +91,8 @@
     width: 200px;
     height: 100%;
     padding: var(--s2);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 5%, var(--bg-deep)), var(--bg-deep) 38%);
-    border-right: 1px solid var(--border);
+    background: var(--bg-rail);
+    border-right: 1px solid color-mix(in srgb, var(--fg-strong) 14%, var(--bg-rail));
     transition: width 260ms var(--ease);
   }
   .marker {
@@ -100,9 +100,9 @@
     top: 0;
     right: var(--s2);
     left: var(--s2);
-    background: var(--bg-active);
+    background: var(--bg-raised);
     border-radius: var(--r);
-    box-shadow: var(--edge);
+    box-shadow: var(--shadow-1);
     transition:
       transform 320ms var(--ease),
       height var(--t) var(--ease);
@@ -116,8 +116,7 @@
     left: -1px;
     width: 3px;
     background: var(--accent);
-    border-radius: 2px;
-    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 80%, transparent);
+    border-radius: 1px;
     content: '';
   }
   .rail.collapsed {
@@ -142,18 +141,12 @@
     place-items: center;
     width: 30px;
     height: 30px;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: 8px;
-    box-shadow: 0 0 18px -6px color-mix(in srgb, var(--accent) 60%, transparent);
-    transition: box-shadow var(--t-slow) var(--ease);
+    color: var(--on-accent);
+    background: var(--accent);
+    border-radius: var(--r);
   }
   .mark :global(svg) {
     transition: transform 700ms var(--ease);
-  }
-  .brand:hover .mark {
-    box-shadow: 0 0 22px -2px color-mix(in srgb, var(--accent) 70%, transparent);
   }
   .brand:hover .mark :global(svg) {
     transform: rotate(60deg);
@@ -193,11 +186,11 @@
     flex: none;
     transition:
       color var(--t) var(--ease),
-      transform var(--t) var(--ease-spring);
+      transform var(--t) var(--ease);
   }
   .item:hover {
     color: var(--fg-strong);
-    background: var(--bg-hover);
+    background: color-mix(in srgb, var(--fg-strong) 7%, transparent);
   }
   .item:hover :global(svg) {
     transform: scale(1.12);
@@ -225,30 +218,32 @@
   .count {
     min-width: 20px;
     padding: 0 6px;
-    color: var(--fg-strong);
+    color: var(--on-accent);
     font-size: var(--fs-xs);
+    font-weight: 700;
     line-height: 18px;
     text-align: center;
-    background: color-mix(in srgb, var(--accent-strong) 60%, var(--bg-active));
-    border-radius: 9px;
-    animation: bump var(--t-slow) var(--ease-spring) backwards;
+    background: var(--accent);
+    border-radius: var(--r-sm);
+    animation: bump var(--t-slow) var(--ease) backwards;
   }
   .count.sev {
-    color: #1b1406;
-    background: var(--yellow);
+    color: var(--fg-strong);
+    background: var(--mark);
   }
   .count.sev.err {
-    color: #fff;
-    background: #b4424b;
+    color: var(--on-accent);
+    background: var(--danger);
   }
   .find {
     margin-bottom: var(--s2);
     color: var(--fg-muted);
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: var(--bg-input);
+    border: 1px solid color-mix(in srgb, var(--fg-strong) 16%, var(--bg-rail));
+    box-shadow: none;
   }
   .find:hover {
-    border-color: var(--line);
+    border-color: var(--line-strong);
   }
   .keys {
     display: inline-flex;

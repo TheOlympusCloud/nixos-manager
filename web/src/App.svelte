@@ -186,30 +186,13 @@
     flex: 1;
     flex-direction: column;
     min-width: 0;
-    isolation: isolate; /* the glow's layer; a drawer's scrim inside .content still covers the top bar */
+    isolation: isolate; /* a drawer's scrim inside .content still covers the top bar */
   }
   .content {
     position: relative;
     flex: 1;
     min-height: 0;
     overflow: clip;
-  }
-  /* Ambient light behind every page: two soft glows that drift very slowly. */
-  .content::before {
-    position: absolute;
-    inset: -30%;
-    z-index: -1;
-    background:
-      radial-gradient(38% 34% at 24% 22%, color-mix(in srgb, var(--accent-strong) 13%, transparent), transparent 100%),
-      radial-gradient(34% 30% at 82% 78%, color-mix(in srgb, var(--purple) 7%, transparent), transparent 100%);
-    animation: drift 46s ease-in-out infinite alternate;
-    content: '';
-    pointer-events: none;
-  }
-  @keyframes drift {
-    to {
-      transform: translate3d(6%, 5%, 0) rotate(4deg);
-    }
   }
   /* Every view fades in as you arrive, kept ones included (they restart when shown again). */
   .content > :global(*) {
@@ -246,10 +229,10 @@
     width: 56px;
     height: 56px;
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: 16px;
-    box-shadow: 0 0 44px -6px color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-1);
   }
   .boot-mark :global(svg) {
     animation: turn 9s linear infinite;

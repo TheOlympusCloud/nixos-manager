@@ -57,8 +57,7 @@
     position: fixed;
     inset: 0;
     z-index: 29;
-    background: rgb(4 6 9 / 0.42);
-    backdrop-filter: blur(3px);
+    background: var(--scrim);
   }
   .drawer {
     position: fixed;

@@ -1,43 +1,61 @@
-@import '@fontsource-variable/inter';
+@import '@fontsource-variable/atkinson-hyperlegible-next';
+@import '@fontsource-variable/atkinson-hyperlegible-mono';
 
+/* The one theme: office paper, drafting ink and pencil. Every colour, font and depth in the console
+   (and the intro, through its own aliases) comes from here; components never hard-code one. */
 :root {
-  /* Surfaces, darkest to lightest. Cool slate, tinted toward the NixOS blue. */
-  --bg-deep: #0b0e12;
-  --bg: #10141a;
-  --bg-side: #141920;
-  --bg-raised: #181e26;
-  --bg-hover: #1e252e;
-  --bg-active: #252e39;
-  --bg-input: #0d1116;
-  --border: #1d242d;
-  --line: #2a3440;
-  --line-strong: #3a4654;
+  /* Paper, back to front: the desk under the sheets, the page, sheets laid on it, and the marks hover
+     and selection leave. Uncoated stock, neither cream nor blue-white. */
+  --bg-deep: #e6e5dd;
+  --bg: #f2f1ec;
+  --bg-side: #eae9e2;
+  --bg-raised: #fbfaf7;
+  --bg-hover: #e6e5dd;
+  --bg-active: #dcdbd1;
+  --bg-input: #fdfdfb;
+  /* The navigation rail is a manila folder the sheets are filed in. */
+  --bg-rail: #e4dcc6;
+  --border: #dad8cf;
+  --line: #c9c6bb;
+  --line-strong: #a9a598;
 
-  --fg: #cdd5df;
-  --fg-strong: #eef2f7;
-  --fg-muted: #8a96a5;
-  --fg-faint: #5f6b79;
+  /* Ink. Every text colour below holds 4.5:1 or more on every paper above. */
+  --fg: #2a2e33;
+  --fg-strong: #15181c;
+  --fg-muted: #4e535b;
+  --fg-faint: #5c6067;
 
-  --accent: #7ebae4;
-  --accent-strong: #4870bb;
-  --accent-hover: #557ec9;
+  /* NixOS blue as drafting ink. */
+  --accent: #2d59ac;
+  --accent-strong: #2d59ac;
+  --accent-hover: #234a91;
+  /* Text on a filled accent or danger button. */
+  --on-accent: #fbfaf7;
 
-  /* Status */
-  --green: #4fcb8d;
-  --red: #f07272;
-  --yellow: #e6c157;
-  --blue: #7ebae4;
-  --purple: #a78bfa;
-  --cyan: #4fc1d0;
+  /* Status, in the inks a reviewer marks paper with. */
+  --green: #276b42;
+  --red: #aa322a;
+  --yellow: #785700;
+  --blue: #2d59ac;
+  --purple: #6847a6;
+  --cyan: #11666f;
+  /* Filled marks: a highlighter stroke, and the red of a correction. */
+  --mark: #f2d45c;
+  --danger: #aa322a;
+  --danger-hover: #8f2922;
 
   /* One colour per feature group. */
-  --g-services: #4fc1d0;
-  --g-programs: #a78bfa;
-  --g-virtualisation: #f08cba;
-  --g-hardware: #e9a25f;
+  --g-services: #11666f;
+  --g-programs: #6847a6;
+  --g-virtualisation: #9b3769;
+  --g-hardware: #8f4813;
 
-  --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'SF Mono', 'DejaVu Sans Mono', monospace;
-  --sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Engineering paper: the faint printed grid behind the fleet graph. */
+  --grid: rgb(45 89 172 / 0.09);
+  --grid-major: rgb(45 89 172 / 0.16);
+
+  --mono: 'Atkinson Hyperlegible Mono Variable', ui-monospace, 'SF Mono', 'DejaVu Sans Mono', monospace;
+  --sans: 'Atkinson Hyperlegible Next Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   --fs-xs: 11px;
   --fs-sm: 12px;
@@ -53,25 +71,26 @@
   --s5: 24px;
   --s6: 32px;
 
-  --r-sm: 4px;
-  --r: 6px;
-  --r-lg: 10px;
+  /* Cut sheets: corners barely softened. */
+  --r-sm: 2px;
+  --r: 3px;
+  --r-lg: 4px;
 
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.35), 0 4px 14px rgb(0 0 0 / 0.22);
-  --shadow-2: 0 10px 34px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
-  --shadow-3: 0 24px 70px rgb(0 0 0 / 0.6), 0 4px 14px rgb(0 0 0 / 0.35);
-  /* Raised surfaces catch a little light on their top edge. */
-  --edge: inset 0 1px 0 rgb(255 255 255 / 0.045);
-  --surface: linear-gradient(180deg, color-mix(in srgb, #fff 2.6%, var(--bg-raised)) 0%, var(--bg-raised) 64px);
-  --glass: color-mix(in srgb, var(--bg-side) 78%, transparent);
-  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent), 0 8px 28px -10px color-mix(in srgb, var(--accent) 55%, transparent);
+  /* Paper casts short, soft, warm shadows; a sheet lifted higher casts a longer one. */
+  --shadow-1: 0 1px 1px rgb(52 46 32 / 0.06), 0 2px 6px -2px rgb(52 46 32 / 0.12);
+  --shadow-2: 0 2px 4px rgb(52 46 32 / 0.06), 0 12px 28px -10px rgb(52 46 32 / 0.24);
+  --shadow-3: 0 4px 10px rgb(52 46 32 / 0.08), 0 24px 56px -18px rgb(52 46 32 / 0.34);
+  /* A sheet resting on the desk. */
+  --edge: 0 1px 0 rgb(52 46 32 / 0.05);
+  --surface: var(--bg-raised);
+  /* What dims the console under a dialog, drawer or palette. */
+  --scrim: rgb(52 46 32 / 0.28);
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.45, 0.5, 1);
   --t-fast: 120ms;
   --t: 180ms;
   --t-slow: 420ms;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * {
@@ -88,19 +107,19 @@ body {
 body {
   color: var(--fg);
   font: 400 var(--fs-md) / 1.45 var(--sans);
-  font-feature-settings: 'cv11', 'ss03';
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   caret-color: var(--accent);
 }
 
+/* Selected text is highlighted the way paper is: with a marker. */
 ::selection {
-  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--mark) 75%, transparent);
   color: var(--fg-strong);
 }
 
 * {
-  scrollbar-color: #2c3642 transparent;
+  scrollbar-color: var(--line) transparent;
   scrollbar-width: thin;
 }
 
@@ -110,7 +129,7 @@ h3,
 h4 {
   margin: 0;
   color: var(--fg-strong);
-  font-weight: 600;
+  font-weight: 700;
   text-wrap: balance;
 }
 
@@ -164,9 +183,10 @@ button {
   color: var(--fg);
   font: 500 var(--fs-md) var(--sans);
   white-space: nowrap;
-  background: var(--bg-hover);
+  background: var(--bg-raised);
   border: 1px solid var(--line);
   border-radius: var(--r);
+  box-shadow: var(--edge);
   cursor: pointer;
   transition:
     background var(--t-fast) var(--ease),
@@ -176,7 +196,7 @@ button {
     transform var(--t-fast) var(--ease);
 }
 button:hover:not(:disabled) {
-  background: var(--bg-active);
+  background: var(--bg-hover);
   border-color: var(--line-strong);
 }
 button:active:not(:disabled) {
@@ -187,32 +207,27 @@ button:disabled {
   cursor: default;
 }
 button.primary {
-  color: #fff;
-  background: linear-gradient(180deg, color-mix(in srgb, #fff 10%, var(--accent-strong)), var(--accent-strong));
-  border-color: color-mix(in srgb, #fff 12%, var(--accent-strong));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.16),
-    0 1px 2px rgb(0 0 0 / 0.4);
+  color: var(--on-accent);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 button.primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, color-mix(in srgb, #fff 12%, var(--accent-hover)), var(--accent-hover));
-  border-color: color-mix(in srgb, #fff 16%, var(--accent-hover));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.2),
-    0 6px 22px -6px color-mix(in srgb, var(--accent-strong) 85%, transparent);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 button.danger {
-  color: #fff;
-  background: #b4424b;
-  border-color: #b4424b;
+  color: var(--on-accent);
+  background: var(--danger);
+  border-color: var(--danger);
 }
 button.danger:hover:not(:disabled) {
-  background: #c24f58;
-  border-color: #c24f58;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 button.ghost {
   background: none;
   border-color: transparent;
+  box-shadow: none;
 }
 button.ghost:hover:not(:disabled) {
   background: var(--bg-hover);
@@ -224,6 +239,7 @@ button.icon {
   color: var(--fg-muted);
   background: none;
   border-color: transparent;
+  box-shadow: none;
 }
 button.icon:hover:not(:disabled) {
   color: var(--fg-strong);
@@ -237,6 +253,7 @@ button.link {
   font-weight: 400;
   background: none;
   border: 0;
+  box-shadow: none;
 }
 button.link:hover:not(:disabled) {
   text-decoration: underline;
@@ -254,31 +271,26 @@ a.btn {
   font-weight: 500;
   white-space: nowrap;
   text-decoration: none;
-  background: var(--bg-hover);
+  background: var(--bg-raised);
   border: 1px solid var(--line);
   border-radius: var(--r);
+  box-shadow: var(--edge);
   transition:
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease);
 }
 a.btn:hover {
-  background: var(--bg-active);
+  background: var(--bg-hover);
   border-color: var(--line-strong);
 }
 a.btn.primary {
-  color: #fff;
-  background: linear-gradient(180deg, color-mix(in srgb, #fff 10%, var(--accent-strong)), var(--accent-strong));
-  border-color: color-mix(in srgb, #fff 12%, var(--accent-strong));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.16),
-    0 1px 2px rgb(0 0 0 / 0.4);
+  color: var(--on-accent);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 a.btn.primary:hover {
-  background: linear-gradient(180deg, color-mix(in srgb, #fff 12%, var(--accent-hover)), var(--accent-hover));
-  border-color: color-mix(in srgb, #fff 16%, var(--accent-hover));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.2),
-    0 6px 22px -6px color-mix(in srgb, var(--accent-strong) 85%, transparent);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 button.small {
   height: 24px;
@@ -309,7 +321,7 @@ textarea {
 select {
   padding-right: 28px;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a96a5' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234e535b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 9px center;
 }
@@ -324,7 +336,7 @@ input[type='number']::-webkit-outer-spin-button {
 input[type='search']::-webkit-search-cancel-button {
   width: 14px;
   height: 14px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a96a5' stroke-width='2.5' stroke-linecap='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E")
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234e535b' stroke-width='2.5' stroke-linecap='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E")
     center / 14px no-repeat;
   cursor: pointer;
   appearance: none;
@@ -343,7 +355,7 @@ textarea:focus,
 select:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 input[type='checkbox'],
 input[type='radio'] {
@@ -380,13 +392,13 @@ input[type='radio'] {
   height: 22px;
   padding: 0 8px;
   overflow: hidden;
-  color: color-mix(in srgb, var(--c) 78%, var(--fg-strong));
+  color: color-mix(in srgb, var(--c) 80%, var(--fg-strong));
   font-size: var(--fs-sm);
   white-space: nowrap;
   text-overflow: ellipsis;
-  background: color-mix(in srgb, var(--c) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c) 28%, transparent);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 9%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  border-radius: var(--r-sm);
   transition:
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease);
@@ -394,9 +406,10 @@ input[type='radio'] {
 button.chip {
   height: 22px;
   font-weight: 400;
+  box-shadow: none;
 }
 button.chip:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--c) 20%, transparent);
+  background: color-mix(in srgb, var(--c) 16%, var(--bg-raised));
   border-color: color-mix(in srgb, var(--c) 45%, transparent);
 }
 .chip.mono {
@@ -420,6 +433,7 @@ button.chip:hover:not(:disabled) {
   background: none;
   border: 0;
   border-radius: 50%;
+  box-shadow: none;
   opacity: 0.7;
 }
 .chip .x:hover:not(:disabled) {
@@ -460,10 +474,6 @@ button.chip:hover:not(:disabled) {
 }
 .dot.off {
   --c: var(--fg-faint);
-}
-.dot.ok,
-.dot.err {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent);
 }
 /* A failing machine keeps calling for attention, quietly. */
 .dot.err {
@@ -509,23 +519,23 @@ button.chip:hover:not(:disabled) {
   font-size: var(--fs-xs);
   font-weight: 500;
   white-space: nowrap;
-  background: var(--bg-hover);
+  background: var(--bg-raised);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
 }
 .badge.ok {
   color: var(--green);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, var(--bg-raised));
   border-color: color-mix(in srgb, var(--green) 28%, transparent);
 }
 .badge.err {
   color: var(--red);
-  background: color-mix(in srgb, var(--red) 10%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, var(--bg-raised));
   border-color: color-mix(in srgb, var(--red) 30%, transparent);
 }
 .badge.busy {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
@@ -572,7 +582,7 @@ button.chip:hover:not(:disabled) {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--edge);
+  box-shadow: var(--shadow-1);
 }
 
 .toolbar {
@@ -600,11 +610,11 @@ table.data th {
   padding: 0 var(--s3);
   color: var(--fg-muted);
   font-size: var(--fs-sm);
-  font-weight: 500;
+  font-weight: 700;
   text-align: left;
   white-space: nowrap;
   background: var(--bg-side);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
 }
 table.data td {
   height: 36px;
@@ -615,14 +625,14 @@ table.data td {
   transition: background var(--t-fast) var(--ease);
 }
 table.data tbody tr:hover td {
-  background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
 }
 
 /* Loading skeletons */
 .skel {
   display: block;
   height: 12px;
-  background: linear-gradient(90deg, var(--bg-hover) 0%, color-mix(in srgb, var(--accent) 14%, var(--bg-active)) 50%, var(--bg-hover) 100%) 0 0 / 200% 100%;
+  background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-active) 50%, var(--bg-hover) 100%) 0 0 / 200% 100%;
   border-radius: var(--r-sm);
   animation: shimmer 1.4s linear infinite;
 }
@@ -695,11 +705,9 @@ table.data tbody tr:hover td {
 .panel-head h2,
 .section-head h3 {
   margin: 0;
-  color: var(--fg-muted);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: var(--fg-strong);
+  font-size: var(--fs-sm);
+  font-weight: 700;
 }
 .section-head {
   min-height: 30px;
@@ -714,7 +722,7 @@ table.data tbody tr:hover td {
   padding: 0 6px;
   font-weight: 500;
   background: var(--bg-active);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 .scroll {
   flex: 1;
@@ -932,52 +940,34 @@ table.data tbody tr:hover td {
   --n: 7;
 }
 
-/* Surfaces you can open lift toward you, and light up under the pointer (use:spotlight sets --mx / --my). */
+/* Surfaces you can open lift off the desk a little under the pointer. */
 .lift {
   position: relative;
-  isolation: isolate;
   background: var(--surface);
-  box-shadow: var(--edge);
+  box-shadow: var(--shadow-1);
   transition:
     transform var(--t) var(--ease),
     border-color var(--t) var(--ease),
     box-shadow var(--t) var(--ease);
 }
-.lift::before {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), color-mix(in srgb, var(--lift-c, var(--accent)) 11%, transparent), transparent 70%);
-  border-radius: inherit;
-  opacity: 0;
-  transition: opacity var(--t-slow) var(--ease);
-  content: '';
-  pointer-events: none;
-}
 .lift:hover,
 a:focus-visible > .lift,
 .lift:focus-visible {
-  border-color: color-mix(in srgb, var(--lift-c, var(--accent)) 42%, var(--line));
-  box-shadow:
-    var(--edge),
-    0 10px 30px -12px rgb(0 0 0 / 0.7),
-    0 0 0 1px color-mix(in srgb, var(--lift-c, var(--accent)) 10%, transparent);
-  transform: translateY(-2px);
-}
-.lift:hover::before {
-  opacity: 1;
+  border-color: color-mix(in srgb, var(--lift-c, var(--accent)) 45%, var(--line));
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 .lift:active {
   transform: translateY(0);
   transition-duration: var(--t-fast);
 }
 
-/* Dialogs rise out of a blurred console. */
+/* Dialogs are a sheet laid over the console, which dims under it. */
 dialog[open] {
   animation: dialog-in 300ms var(--ease);
 }
 dialog::backdrop {
-  backdrop-filter: blur(5px) saturate(0.85);
+  background: var(--scrim);
   animation: fade-in 260ms var(--ease);
 }
 @keyframes dialog-in {
@@ -989,7 +979,7 @@ dialog::backdrop {
 
 /* Numbers that just changed, badges that just appeared. */
 .bump {
-  animation: bump var(--t-slow) var(--ease-spring) backwards;
+  animation: bump var(--t-slow) var(--ease) backwards;
 }
 @keyframes bump {
   from {
@@ -1006,7 +996,7 @@ dialog::backdrop {
 .sheen::after {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg-raised) 45%, transparent), transparent);
   transform: translateX(-100%);
   animation: sheen 1.6s var(--ease) infinite;
   content: '';

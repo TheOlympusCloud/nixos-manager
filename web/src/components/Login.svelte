@@ -52,18 +52,14 @@
 <style>
   dialog {
     padding: 0;
-    color: #f2f5f9;
-    font-family: 'Geist Variable', var(--sans);
-    background: #05070a;
-    border: 1px solid rgb(255 255 255 / 0.14);
-    border-radius: 0;
-    box-shadow:
-      0 30px 80px rgb(0 0 0 / 0.7),
-      0 0 0 1px rgb(0 0 0 / 0.8);
+    color: var(--fg);
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-3);
   }
   dialog::backdrop {
-    background: rgb(5 7 10 / 0.72);
-    backdrop-filter: blur(6px);
+    background: var(--scrim);
   }
   .card {
     display: flex;
@@ -82,68 +78,50 @@
     place-items: center;
     width: 32px;
     height: 32px;
-    color: #7eb6ff;
-    border: 1px solid rgb(126 182 255 / 0.4);
+    color: var(--on-accent);
+    background: var(--accent);
+    border-radius: var(--r);
   }
   h1 {
-    color: inherit;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 17px;
-    letter-spacing: -0.01em;
   }
   .tag {
     margin-bottom: 22px;
-    color: #8f9bab;
+    color: var(--fg-muted);
     font-size: 13px;
   }
   label {
-    color: #8f9bab;
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    color: var(--fg-strong);
+    font-size: var(--fs-sm);
+    font-weight: 700;
   }
   input {
     height: 44px;
-    color: #f2f5f9;
     font-size: 15px;
-    background: #0a0e14;
-    border: 1px solid rgb(255 255 255 / 0.16);
-    border-radius: 0;
-  }
-  input:focus {
-    border-color: #7eb6ff;
-    box-shadow: 0 0 0 3px rgb(126 182 255 / 0.2);
   }
   .error {
     margin: 0;
-    color: #ff8a8a;
+    color: var(--red);
     font-size: 13px;
   }
   button.primary {
-    height: 46px;
+    height: 44px;
     margin-top: 10px;
-    font-weight: 600;
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    background: #2468e0;
-    border-color: #2468e0;
-    border-radius: 0;
-  }
-  button.primary:hover:not(:disabled) {
-    background: #2f74ea;
-    border-color: #2f74ea;
+    font-weight: 700;
+    font-size: 14px;
   }
   .back {
     height: 36px;
     margin-top: 4px;
-    color: #8f9bab;
+    color: var(--fg-muted);
     font-size: 12px;
     background: none;
     border: 0;
+    box-shadow: none;
   }
   .back:hover:not(:disabled) {
-    color: #f2f5f9;
+    color: var(--fg-strong);
     background: none;
     text-decoration: underline;
     text-underline-offset: 3px;

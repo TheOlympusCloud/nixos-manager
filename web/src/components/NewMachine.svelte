@@ -329,10 +329,10 @@
     background: var(--bg-side);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--edge), var(--shadow-3);
+    box-shadow: var(--shadow-3);
   }
   .nm::backdrop {
-    background: rgb(4 6 9 / 0.6);
+    background: var(--scrim);
   }
   header {
     display: flex;
@@ -362,7 +362,8 @@
     font-size: var(--fs-sm);
     background: none;
     border-color: transparent;
-    border-radius: 13px;
+    border-radius: var(--r);
+    box-shadow: none;
   }
   .step-btn:disabled {
     opacity: 1;
@@ -382,7 +383,7 @@
     background: var(--bg-active);
   }
   .now .num {
-    color: #fff;
+    color: var(--on-accent);
     background: var(--accent-strong);
     border-color: var(--accent-strong);
   }

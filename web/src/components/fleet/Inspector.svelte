@@ -244,11 +244,10 @@
     flex-direction: column;
     width: 360px;
     max-width: calc(100% - 24px);
-    background: color-mix(in srgb, var(--bg-side) 84%, transparent);
+    background: var(--bg-raised);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: var(--edge), var(--shadow-2);
-    backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: var(--shadow-2);
   }
   header {
     display: flex;

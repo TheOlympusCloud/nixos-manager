@@ -1,17 +1,16 @@
 /* Fleet graph: Svelte Flow theme and node styles. */
 
 .fleet-flow {
-  --xy-background-color: transparent; /* the WebGL backdrop shows through */
-  --xy-background-pattern-dots-color-default: rgb(140 170 210 / 0.13);
-  --xy-node-border-radius-default: 10px;
-  --xy-edge-stroke-default: #3a4654;
+  --xy-background-color: transparent; /* the canvas's paper shows through */
+  --xy-node-border-radius-default: var(--r-lg);
+  --xy-edge-stroke-default: var(--line-strong);
   --xy-edge-stroke-width-default: 1.4;
   --xy-edge-stroke-selected-default: var(--accent);
   --xy-minimap-background-color-default: var(--bg-side);
-  --xy-minimap-mask-background-color-default: rgb(8 10 14 / 0.62);
-  --xy-minimap-node-background-color-default: #2c3642;
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--bg-deep) 70%, transparent);
+  --xy-minimap-node-background-color-default: var(--line-strong);
   --xy-controls-button-background-color-default: var(--bg-raised);
-  --xy-controls-button-background-color-hover-default: var(--bg-active);
+  --xy-controls-button-background-color-hover-default: var(--bg-hover);
   --xy-controls-button-color-default: var(--fg);
   --xy-controls-button-color-hover-default: var(--fg-strong);
   --xy-controls-button-border-color-default: var(--line);
@@ -92,7 +91,6 @@
   /* What you point at flows along its edges, from the machine outward. */
   stroke-dasharray: 7 5;
   animation: edge-flow 900ms linear infinite;
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--c, #6d7d8f) 70%, transparent));
 }
 @keyframes edge-flow {
   to {
@@ -100,7 +98,7 @@
   }
 }
 .fleet-flow .svelte-flow__edge.hl:not(.grouped) .svelte-flow__edge-path {
-  stroke: #6d7d8f;
+  stroke: var(--fg-muted);
 }
 .fleet-flow .svelte-flow__edge.hl.grouped .svelte-flow__edge-path {
   stroke: var(--c);
@@ -166,36 +164,28 @@
 .node.sel {
   border-color: var(--accent);
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent),
-    0 0 34px -6px color-mix(in srgb, var(--accent) 50%, transparent),
-    var(--shadow-1);
+    0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent),
+    var(--shadow-2);
 }
 .node.machine {
-  border-radius: 10px;
-  box-shadow: var(--edge), var(--shadow-1);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
 }
 .node.machine:hover:not(.sel) {
-  box-shadow:
-    var(--edge),
-    0 14px 36px -14px rgb(0 0 0 / 0.8),
-    0 0 28px -10px color-mix(in srgb, var(--accent) 55%, transparent);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 .node.machine.err:hover:not(.sel) {
   --c: var(--red);
-  box-shadow:
-    var(--edge),
-    0 14px 36px -14px rgb(0 0 0 / 0.8),
-    0 0 28px -10px color-mix(in srgb, var(--red) 55%, transparent);
 }
 .node.pill:hover:not(.sel),
 .node.group:hover:not(.sel) {
-  box-shadow: 0 0 20px -6px color-mix(in srgb, var(--c, var(--accent)) 70%, transparent);
+  box-shadow: var(--shadow-1);
 }
 .node.pill .ico,
 .node.group .ico {
-  transition: transform var(--t) var(--ease-spring);
+  transition: transform var(--t) var(--ease);
 }
 .node.pill:hover .ico,
 .node.group:hover .ico {
@@ -203,7 +193,7 @@
 }
 .node.machine.err {
   border-color: color-mix(in srgb, var(--red) 45%, var(--line));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--red) 9%, var(--bg-raised)), color-mix(in srgb, var(--red) 4%, var(--bg-raised)));
+  background: color-mix(in srgb, var(--red) 6%, var(--bg-raised));
 }
 .node.machine.sel.err {
   border-color: var(--red);
@@ -215,12 +205,12 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px 0 6px;
-  border-radius: 16px;
+  border-radius: var(--r);
   cursor: pointer;
 }
 .node.pill.tall,
 .node.group {
-  border-radius: 12px;
+  border-radius: var(--r-lg);
 }
 .node.pill .ico,
 .node.group .ico {
@@ -230,14 +220,14 @@
   width: 22px;
   height: 22px;
   color: var(--c, var(--fg-muted));
-  background: color-mix(in srgb, var(--c, var(--fg-muted)) 14%, transparent);
-  border-radius: 50%;
+  background: color-mix(in srgb, var(--c, var(--fg-muted)) 12%, transparent);
+  border-radius: var(--r-sm);
 }
 .node.pill.tall .ico,
 .node.group .ico {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--r);
 }
 .node .text {
   display: flex;
@@ -249,7 +239,7 @@
   overflow: hidden;
   color: var(--fg-strong);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -273,19 +263,19 @@
   font-size: 10.5px;
   line-height: 16px;
   text-align: center;
-  background: var(--bg-active);
-  border-radius: 8px;
+  background: var(--bg-raised);
+  border-radius: var(--r);
 }
 .node.pill.k-feature {
   border-color: color-mix(in srgb, var(--c) 35%, var(--line));
 }
 .node.pill.k-file {
-  --c: #93a4b8;
+  --c: var(--fg-muted);
   background: var(--bg-side);
   border-style: dashed;
 }
 .node.pill.k-package {
-  --c: #b9c6d4;
+  --c: var(--fg-muted);
 }
 .node.pill.k-user,
 .node.pill.k-home {
@@ -300,7 +290,7 @@
   border-color: color-mix(in srgb, var(--red) 45%, var(--line));
 }
 .node.group {
-  --c: #b9c6d4;
+  --c: var(--fg-muted);
   padding-right: 4px;
 }
 .node.group .icon {
@@ -338,13 +328,13 @@
   line-height: 18px;
   white-space: nowrap;
   text-overflow: ellipsis;
-  background: color-mix(in srgb, var(--c, var(--fg-muted)) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c, var(--fg-muted)) 26%, transparent);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--c, var(--fg-muted)) 9%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--c, var(--fg-muted)) 28%, transparent);
+  border-radius: var(--r-sm);
 }
 .solo-chip.lit {
   color: var(--fg-strong);
-  background: color-mix(in srgb, var(--c) 30%, transparent);
+  background: color-mix(in srgb, var(--c) 18%, var(--bg-raised));
   border-color: var(--c);
 }
 .solo-chip.more {
