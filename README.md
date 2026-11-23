@@ -625,8 +625,9 @@ two ways:
 - **Installed by hand**: install NixOS from the installer as usual and paste
   the output of `nixos-generate-config --show-hardware-config` (or leave it
   empty and replace the placeholder before the first deploy). That output has
-  no boot loader: copy it from the machine's `/etc/nixos/configuration.nix`
-  into `default.nix`. Then switch it once from a checkout, `nixos-rebuild
+  no boot loader, so pick the one the installer set up: **UEFI** (systemd-boot)
+  or, on x86_64, **BIOS** (GRUB on the disk you give); `default.nix` gets it.
+  Then switch it once from a checkout, `nixos-rebuild
   switch --flake .#<name>`; comin keeps it up to date from then on. Step by
   step: [A new machine from the NixOS ISO](docs/new-machine-from-iso.md).
 - **nixos-anywhere**: pick a disk layout and the disk to erase, and

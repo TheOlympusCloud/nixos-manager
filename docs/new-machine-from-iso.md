@@ -30,7 +30,7 @@ As root (`sudo -i`):
 nixos-generate-config --show-hardware-config     # the hardware configuration
 ssh-keygen -A                                     # makes the SSH host keys if the install has none
 cat /etc/ssh/ssh_host_ed25519_key.pub             # the machine's key, for its secrets
-grep -nE 'boot\.|stateVersion' /etc/nixos/configuration.nix   # boot loader and stateVersion
+grep -nE 'boot\.|stateVersion' /etc/nixos/configuration.nix   # boot loader, encrypted disks and stateVersion
 ```
 
 Paste them into the console from a browser on the machine, or turn on
@@ -41,29 +41,23 @@ over SSH.
 
 1. **Machines → New machine**: its name (it becomes the host name, which comin
    finds its configuration by), architecture and role; **Physical machine** (or
-   **Proxmox VM**), **Installed by hand**; paste the hardware configuration.
-2. **Code**, `hosts/<name>/default.nix`: add the boot loader lines from step 2,
-   and any `boot.initrd.luks` lines if the disk is encrypted. Set
-   `system.stateVersion` to the install's value if it is not `26.05`. The wizard
-   writes no boot loader, so until then the machine does not evaluate (`You must
-   set the option 'boot.loader.grub.devices'…`). For the installer's UEFI
-   default that is:
-
-   ```nix
-   boot.loader.systemd-boot.enable = true;
-   boot.loader.efi.canTouchEfiVariables = true;
-   ```
-
-3. The machine's page → **Users → Add user**: the user from the installer, same
+   **Proxmox VM**), **Installed by hand**; the boot loader the install's
+   `configuration.nix` shows (**UEFI** for `boot.loader.systemd-boot`, **BIOS**
+   for `boot.loader.grub.device`, with that disk); paste the hardware
+   configuration. The wizard writes the boot loader into
+   `hosts/<name>/default.nix`. Only if the install's `system.stateVersion` is
+   not `26.05`, or it has `boot.initrd.luks` lines the hardware configuration
+   lacks (an encrypted swap, say), copy those into that file in **Code**.
+2. The machine's page → **Users → Add user**: the user from the installer, same
    name, group `wheel`, with your SSH public key. Its password stays as set.
    The roles create no user, and **Server** allows SSH keys only.
-4. **Settings → Secrets → Machine keys → Add key** next to the machine: paste
+3. **Settings → Secrets → Machine keys → Add key** next to the machine: paste
    the `.pub` line from step 2. With deployment reports on, click **Store every
    machine's token** again: it only covers machines that had a key when
    clicked.
-5. Time zone, locale and keyboard from the installer are not carried over: set
+4. Time zone, locale and keyboard from the installer are not carried over: set
    them in the machine's **Essentials** if they differ from the fleet's.
-6. **Changes**: stage everything, run the check, commit, **Push**.
+5. **Changes**: stage everything, run the check, commit, **Push**.
 
 ## 4. Switch it once
 
