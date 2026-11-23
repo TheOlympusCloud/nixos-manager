@@ -30,7 +30,7 @@ As root (`sudo -i`):
 nixos-generate-config --show-hardware-config     # the hardware configuration
 ssh-keygen -A                                     # makes the SSH host keys if the install has none
 cat /etc/ssh/ssh_host_ed25519_key.pub             # the machine's key, for its secrets
-grep -nE 'boot\.|stateVersion' /etc/nixos/configuration.nix   # boot loader and stateVersion
+grep -nE 'boot\.|networking|stateVersion' /etc/nixos/configuration.nix   # boot loader, network, stateVersion
 ```
 
 Paste them into the console from a browser on the machine, or turn on
@@ -42,6 +42,7 @@ over SSH.
 1. **Machines → New machine**: its name (it becomes the host name, which comin
    finds its configuration by), architecture and role; **Physical machine** (or
    **Proxmox VM**), **Installed by hand**; paste the hardware configuration.
+   **Desktop** is Plasma: a machine installed with GNOME gets Plasma at step 4.
 2. **Code**, `hosts/<name>/default.nix`: add the boot loader lines from step 2,
    and any `boot.initrd.luks` lines if the disk is encrypted. Set
    `system.stateVersion` to the install's value if it is not `26.05`. The wizard
@@ -55,14 +56,23 @@ over SSH.
    ```
 
 3. The machine's page → **Users → Add user**: the user from the installer, same
-   name, group `wheel`, with your SSH public key. Its password stays as set.
+   name, group `wheel` (and `networkmanager` where NetworkManager is on, as the
+   installer had it), with your SSH public key. Its password stays as set.
    The roles create no user, and **Server** allows SSH keys only.
 4. **Settings → Secrets → Machine keys → Add key** next to the machine: paste
    the `.pub` line from step 2. With deployment reports on, click **Store every
    machine's token** again: it only covers machines that had a key when
    clicked.
-5. Time zone, locale and keyboard from the installer are not carried over: set
-   them in the machine's **Essentials** if they differ from the fleet's.
+5. Nothing else in `/etc/nixos/configuration.nix` is carried over: the
+   desktop, services, time zone, locale and keyboard picked in the installer
+   are gone at step 4 unless you add them in the console (time zone, locale
+   and keyboard are in the machine's **Essentials**). **Above all the
+   network:** the installer turns NetworkManager on, and of the roles only
+   **Desktop** has it. A Wi-Fi machine on **Server** or **Minimal** needs
+   `networking.networkmanager.enable = true;` in `default.nix` before step 4
+   (the Wi-Fi it already saved then keeps working). Without it the machine
+   loses its network at the switch, comin can never fetch again, and only its
+   own keyboard can bring it back (boot the previous generation).
 6. **Changes**: stage everything, run the check, commit, **Push**.
 
 ## 4. Switch it once
