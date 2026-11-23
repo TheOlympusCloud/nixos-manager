@@ -1,0 +1,487 @@
+/* Cellwork: the component language. Three rules hold everywhere:
+   1. Every size is a whole number of cells (1ch x 1 --lh). No pixel paddings.
+   2. Every line, corner, icon and bar is a glyph. No border, radius, box-shadow or SVG.
+   3. Colour fills whole cells only (hover, selection, chips), the way a terminal paints them. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  font-variant-ligatures: none;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  color: var(--fg);
+  font: 400 var(--fs) / var(--lh) var(--mono);
+  background: var(--bars), var(--bg);
+  background-attachment: local;
+  -webkit-font-smoothing: antialiased;
+  caret-color: var(--accent);
+  caret-shape: block;
+  tab-size: 2;
+}
+
+::selection {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+* {
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+b,
+strong,
+h1,
+h2,
+h3,
+h4,
+th {
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+i,
+em {
+  font-style: normal;
+}
+ul,
+ol {
+  list-style: none;
+}
+a {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+a:hover {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+pre,
+code,
+kbd {
+  font: inherit;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+[hidden] {
+  display: none !important;
+}
+
+/* Tones: one word colours a glyph, a badge or a frame. */
+.ok { color: var(--green); }
+.warn { color: var(--yellow); }
+.err { color: var(--red); }
+.info { color: var(--blue); }
+.off { color: var(--fg-faint); }
+.busy { color: var(--accent); }
+.mut { color: var(--fg-muted); }
+.faint { color: var(--fg-faint); }
+.acc { color: var(--accent); }
+.strong { color: var(--fg-strong); font-weight: 700; }
+.g-services { color: var(--g-services); }
+.g-programs { color: var(--g-programs); }
+.g-virtualisation { color: var(--g-virtualisation); }
+.g-hardware { color: var(--g-hardware); }
+
+/* ---- Frames --------------------------------------------------------------------------------- */
+
+/* js/ascii.js draws the glyphs into a <pre class="fr"> laid over the element. The element keeps one
+   row and two columns free on each side for them. */
+[data-frame] {
+  position: relative;
+  padding: var(--lh) 2ch;
+}
+.fr {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  color: var(--line);
+  white-space: pre;
+  pointer-events: none;
+  user-select: none;
+}
+.fr b { color: var(--fg-strong); }
+.fr i { color: var(--fg-muted); }
+.fr s { color: var(--shade); text-decoration: none; }
+[data-tone='err'] > .fr { color: var(--red); }
+[data-tone='ok'] > .fr { color: var(--green); }
+[data-tone='warn'] > .fr { color: var(--yellow); }
+[data-tone='accent'] > .fr { color: var(--accent); }
+.lift:hover > .fr,
+.lift:focus-visible > .fr { color: var(--accent); }
+.lift { cursor: pointer; }
+.sel > .fr { color: var(--accent); }
+.raised { background: var(--bg-raised); }
+
+/* A rule is a row of ─. */
+hr,
+.rule {
+  position: relative;
+  display: block;
+  height: var(--lh);
+  overflow: hidden;
+  color: var(--border);
+  white-space: nowrap;
+}
+hr::before,
+.rule::before {
+  /* Out of flow, so 240 glyphs never widen a shrink-to-fit parent (a menu, a table cell). */
+  position: absolute;
+  left: 0;
+  content: '────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────';
+}
+.rule.dash::before {
+  content: '┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄';
+}
+
+/* ---- Type ----------------------------------------------------------------------------------- */
+
+/* One size. Hierarchy comes from weight, colour, case and the pixel face. */
+h2 {
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+h2::before { content: '▌'; color: var(--accent); margin-right: 1ch; }
+h3 { color: var(--fg-strong); }
+.eyebrow {
+  color: var(--fg-muted);
+  text-transform: uppercase;
+}
+/* The pixel face: 5 pixel rows in 3 text rows, drawn with half blocks. */
+.big {
+  display: block;
+  color: var(--fg-strong);
+  white-space: pre;
+  text-shadow: var(--glow);
+  overflow: hidden;
+  user-select: none;
+}
+.big.acc { color: var(--accent); }
+.big.ok { color: var(--green); }
+.big.warn { color: var(--yellow); }
+.big.err { color: var(--red); }
+
+/* ---- Controls ------------------------------------------------------------------------------- */
+
+button,
+.btn {
+  display: inline-block;
+  color: var(--fg-strong);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.btn::before { content: '[ '; color: var(--line-strong); }
+.btn::after { content: ' ]'; color: var(--line-strong); }
+.btn:hover,
+.btn:focus-visible {
+  color: var(--on-accent);
+  background: var(--accent);
+  outline: 0;
+}
+.btn:hover::before,
+.btn:hover::after,
+.btn:focus-visible::before,
+.btn:focus-visible::after { color: var(--on-accent); }
+.btn:focus-visible::before { content: '▸ '; }
+.btn:focus-visible::after { content: ' ◂'; }
+.btn:active::before { content: ' ['; }
+.btn:active::after { content: '] '; }
+.btn.primary {
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 700;
+}
+.btn.primary::before { content: '▐ '; color: var(--on-accent); }
+.btn.primary::after { content: ' ▌'; color: var(--on-accent); }
+.btn.primary:hover,
+.btn.primary:focus-visible { background: var(--accent-strong); }
+.btn.danger { color: var(--red); }
+.btn.danger::before { content: '[! '; color: var(--red); }
+.btn.danger::after { color: var(--red); }
+.btn.danger:hover,
+.btn.danger:focus-visible { color: var(--on-accent); background: var(--red); }
+.btn.danger:hover::before,
+.btn.danger:hover::after { color: var(--on-accent); }
+.btn.ghost::before { content: ' '; }
+.btn.ghost::after { content: ' '; }
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  color: var(--fg-faint);
+  background: none;
+  font-weight: 400;
+  cursor: not-allowed;
+}
+.btn:disabled::before { content: '┆ '; color: var(--line); }
+.btn:disabled::after { content: ' ┆'; color: var(--line); }
+.btn.is-busy { color: var(--accent); background: none; cursor: progress; }
+
+:focus-visible {
+  outline: 0;
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+/* A field is a run of filled cells behind a prompt. */
+.field {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  min-width: 0;
+}
+.field > span:first-child { color: var(--fg-muted); white-space: nowrap; }
+input[type='text'],
+input[type='password'],
+input[type='search'],
+input[type='number'],
+textarea,
+select {
+  flex: 1;
+  min-width: 0;
+  height: var(--lh);
+  padding: 0 1ch;
+  color: var(--fg-strong);
+  background: var(--bg-input);
+  outline: 0;
+  appearance: none;
+  resize: none;
+}
+textarea { height: calc(var(--lh) * 4); display: block; width: 100%; }
+select { cursor: pointer; padding-right: 3ch; }
+input::placeholder,
+textarea::placeholder { color: var(--fg-faint); }
+input:focus,
+textarea:focus,
+select:focus {
+  color: var(--fg-strong);
+  background: var(--bg-active);
+}
+.prompt { color: var(--accent); font-weight: 700; }
+.invalid input { color: var(--red); }
+
+/* Check, radio and switch are glyphs: [x] ( ) ──● */
+.chk,
+.rad,
+.sw {
+  display: inline-flex;
+  gap: 1ch;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.chk input,
+.rad input,
+.sw input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.chk i::before { content: '[ ]'; color: var(--line-strong); }
+.chk input:checked + i::before { content: '[x]'; color: var(--accent); }
+.rad i::before { content: '( )'; color: var(--line-strong); }
+.rad input:checked + i::before { content: '(•)'; color: var(--accent); }
+.sw i::before { content: '○──'; color: var(--fg-faint); }
+.sw input:checked + i::before { content: '──●'; color: var(--green); }
+.sw.is-busy i::before { content: '─◐─'; color: var(--accent); }
+.chk:hover,
+.rad:hover,
+.sw:hover { background: var(--bg-hover); }
+.chk input:focus-visible + i,
+.rad input:focus-visible + i,
+.sw input:focus-visible + i { background: var(--accent); }
+.chk input:focus-visible + i::before,
+.rad input:focus-visible + i::before,
+.sw input:focus-visible + i::before { color: var(--on-accent); }
+.chk input:disabled ~ *,
+.sw input:disabled ~ * { color: var(--fg-faint); }
+
+/* Segmented choice: ‹ a │ b │ c › with the pick in reverse video. */
+.seg { display: inline-flex; white-space: nowrap; }
+.seg::before { content: '‹'; color: var(--line-strong); }
+.seg::after { content: '›'; color: var(--line-strong); }
+.seg > * { padding: 0 1ch; cursor: pointer; color: var(--fg-muted); }
+.seg > * + *::before { content: '│'; color: var(--line); margin-left: -1ch; margin-right: 1ch; }
+.seg > .on { color: var(--on-accent); background: var(--accent); font-weight: 700; }
+.seg > .on::before { color: var(--on-accent); }
+.seg > :not(.on):hover { background: var(--bg-hover); color: var(--fg-strong); }
+
+/* Tabs sit on a rule; the active one stands on a heavy stretch of it (ascii.js slides it). */
+.tabs { position: relative; display: flex; gap: 3ch; height: calc(var(--lh) * 2); white-space: nowrap; }
+.tabs > a { color: var(--fg-muted); height: var(--lh); }
+.tabs > a:hover { color: var(--fg-strong); background: none; }
+.tabs > a.on { color: var(--fg-strong); font-weight: 700; }
+.tabs > a > small { color: var(--fg-faint); font-weight: 400; }
+.tabs > .ink {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--lh);
+  overflow: hidden;
+  color: var(--border);
+  white-space: pre;
+  pointer-events: none;
+}
+.tabs > .ink b { color: var(--accent); }
+
+/* Badges are a sigil and a word; chips are filled cells. */
+.badge { white-space: nowrap; }
+.chip {
+  display: inline-block;
+  padding: 0 1ch;
+  color: var(--fg);
+  background: var(--bg-hover);
+  white-space: nowrap;
+}
+.chip[class*='g-'],
+.chip.ok,
+.chip.err,
+.chip.warn,
+.chip.acc { background: color-mix(in srgb, currentColor 14%, transparent); }
+.chips { display: flex; flex-wrap: wrap; gap: 0 1ch; }
+kbd {
+  padding: 0 1ch;
+  color: var(--fg-strong);
+  background: var(--bg-active);
+  white-space: nowrap;
+}
+.count {
+  padding: 0 1ch;
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 700;
+}
+.count.err { background: var(--red); color: var(--on-accent); }
+.flash { background: var(--fg-strong) !important; color: var(--bg) !important; }
+
+/* Tables: a caps header on a rule, rows that light up whole. */
+th {
+  color: var(--fg-muted);
+  font-weight: 400;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+  height: calc(var(--lh) * 2);
+  vertical-align: top;
+}
+/* The header's rule is glyphs too: the first cell prints it across the whole table. */
+.tbl { overflow: hidden; }
+th:first-child::after {
+  display: block;
+  width: 0;
+  margin-left: -1ch;
+  color: var(--border);
+  content: '────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────';
+}
+th,
+td { padding: 0 2ch 0 0; }
+td { vertical-align: top; }
+th:first-child,
+td:first-child { padding-left: 1ch; }
+tbody tr:hover { background: var(--bg-hover); }
+tr.sel { background: var(--bg-active); }
+td.num,
+th.num { text-align: right; }
+
+/* Key/value lists. */
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0 3ch; }
+.kv > dt { color: var(--fg-muted); }
+.kv > dd { min-width: 0; }
+
+/* Lists of rows you can pick: the cursor bar marks the row, reverse video the selection. */
+.rows > * { display: flex; gap: 1ch; padding: 0 1ch; white-space: nowrap; cursor: pointer; }
+.rows > *:hover { background: var(--bg-hover); }
+.rows > .on { color: var(--on-accent); background: var(--accent); font-weight: 700; }
+.rows > .on * { color: inherit !important; }
+.grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Meters, sparks and skeletons are text; ascii.js writes them. */
+.bar { white-space: pre; color: var(--accent); }
+.bar s { color: var(--border); text-decoration: none; }
+.skel { color: var(--line); white-space: pre; overflow: hidden; display: block; }
+.spin { color: var(--accent); }
+.cursor::after { content: '█'; color: var(--accent); animation: blink 1.04s steps(1) infinite; }
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ---- Overlays ------------------------------------------------------------------------------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: var(--scrim);
+}
+/* The scrim is a dither, not a blur. */
+.scrim > .dither {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--border);
+  white-space: pre-wrap;
+  word-break: break-all;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.modal {
+  position: relative;
+  width: 64ch;
+  max-width: calc(100vw - 8ch);
+  background: var(--bg-raised);
+}
+.modal > .fr { color: var(--line-strong); }
+.modal .actions { display: flex; gap: 2ch; justify-content: flex-end; margin-top: var(--lh); }
+.menu {
+  position: absolute;
+  z-index: 40;
+  min-width: 30ch;
+  background: var(--bg-raised);
+}
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  width: 66ch;
+  background: var(--bg-raised);
+  overflow: auto;
+}
+.toasts {
+  position: fixed;
+  right: 3ch;
+  bottom: calc(var(--lh) * 2);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lh);
+  width: 46ch;
+}
+.toast { background: var(--bg-raised); }
+.toast .x { float: right; color: var(--fg-faint); cursor: pointer; }
+
+/* Reduced motion: glyph animation is frozen by ascii.js; nothing here moves either. */
+@media (prefers-reduced-motion: reduce) {
+  .cursor::after { animation: none; }
+}
