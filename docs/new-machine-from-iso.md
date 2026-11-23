@@ -59,7 +59,7 @@ over SSH.
    name, group `wheel` (and `networkmanager` where NetworkManager is on, as the
    installer had it), with your SSH public key. Its password stays as set.
    The roles create no user, and **Server** allows SSH keys only.
-4. **Settings → Secrets → Machine keys → Add key** next to the machine: paste
+3. **Settings → Secrets → Machine keys → Add key** next to the machine: paste
    the `.pub` line from step 2. With deployment reports on, click **Store every
    machine's token** again: it only covers machines that had a key when
    clicked.
