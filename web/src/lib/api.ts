@@ -174,7 +174,9 @@ export type MachineRole = 'minimal' | 'server' | 'desktop'
 export type MachinePlatform = 'hardware' | 'proxmox-lxc' | 'proxmox-vm'
 /** A disko disk layout, for a machine nixos-anywhere installs. */
 export type MachineDisk = 'ext4' | 'btrfs'
-/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). */
+/** The boot loader of a machine installed by hand: systemd-boot on UEFI, or GRUB on BIOS (x86_64 only, on device). */
+export type MachineBoot = 'uefi' | 'bios'
+/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). With boot bios, device is GRUB's disk. */
 export type MachineSpec = {
   name: string
   system: 'x86_64-linux' | 'aarch64-linux'
@@ -183,6 +185,7 @@ export type MachineSpec = {
   platform?: MachinePlatform
   disk?: MachineDisk
   device?: string
+  boot?: MachineBoot
 }
 /** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. inputSnippet: the disko input flake.nix lacks. */
 export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string; inputSnippet?: string }

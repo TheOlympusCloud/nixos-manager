@@ -102,6 +102,58 @@ func TestCreateMachineOnProxmox(t *testing.T) {
 	isErr(t, err, ErrInvalid)
 }
 
+// nixos-generate-config's hardware configuration has no boot loader, so default.nix gets the installer's.
+func TestCreateMachineInstalledByHandGetsABootLoader(t *testing.T) {
+	s := newService(t)
+	uefi := "  boot.loader.systemd-boot.enable = true;\n  boot.loader.efi.canTouchEfiVariables = true;\n"
+
+	// UEFI unless asked otherwise, for a physical machine and a VM alike.
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "pc", System: "x86_64-linux", Role: "minimal"}))
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "vm", System: "aarch64-linux", Role: "minimal", Platform: "proxmox-vm", Boot: "uefi"}))
+	for _, name := range []string{"pc", "vm"} {
+		def, _, _ := s.Read("hosts/" + name + "/default.nix")
+		hw, _, _ := s.Read("hosts/" + name + "/hardware-configuration.nix")
+		if !strings.Contains(def, uefi) || strings.Contains(def, "grub") || strings.Contains(def, "%!") {
+			t.Errorf("%s default.nix:\n%s", name, def)
+		}
+		// The placeholder must not set GRUB too: a BIOS machine's device would clash with it.
+		if strings.Contains(hw, "boot.loader") {
+			t.Errorf("%s placeholder sets a boot loader:\n%s", name, hw)
+		}
+	}
+
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "old", System: "x86_64-linux", Role: "minimal", Boot: "bios", Device: "/dev/sda"}))
+	def, _, _ := s.Read("hosts/old/default.nix")
+	if !strings.Contains(def, "  boot.loader.grub.device = \"/dev/sda\";\n") || strings.Contains(def, "systemd-boot") || strings.Contains(def, "%!") {
+		t.Errorf("bios default.nix:\n%s", def)
+	}
+
+	// A container and a disk layout get none from here.
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "ct", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-lxc"}))
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "nas", System: "x86_64-linux", Role: "minimal", Disk: "ext4", Device: "/dev/sda"}))
+	for _, name := range []string{"ct", "nas"} {
+		if def, _, _ := s.Read("hosts/" + name + "/default.nix"); strings.Contains(def, "boot.loader") || strings.Contains(def, "%!") {
+			t.Errorf("%s default.nix:\n%s", name, def)
+		}
+	}
+
+	for _, bad := range []MachineSpec{
+		{Name: "a", System: "x86_64-linux", Role: "minimal", Boot: "coreboot"},
+		{Name: "b", System: "x86_64-linux", Role: "minimal", Boot: "bios"},                                   // no disk for GRUB
+		{Name: "c", System: "x86_64-linux", Role: "minimal", Boot: "bios", Device: `/dev/sda"; x = "`},       // not a plain path
+		{Name: "d", System: "aarch64-linux", Role: "minimal", Boot: "bios", Device: "/dev/sda"},              // GRUB's BIOS target is x86 only
+		{Name: "e", System: "x86_64-linux", Role: "minimal", Boot: "uefi", Device: "/dev/sda"},               // systemd-boot takes no disk
+		{Name: "f", System: "x86_64-linux", Role: "minimal", Platform: "proxmox-lxc", Boot: "uefi"},          // a container boots no loader
+		{Name: "g", System: "x86_64-linux", Role: "minimal", Disk: "ext4", Device: "/dev/sda", Boot: "uefi"}, // disk-config.nix sets it
+	} {
+		_, err := s.CreateMachine(bad)
+		isErr(t, err, ErrInvalid)
+		if _, _, err := s.Read("hosts/" + bad.Name + "/default.nix"); err == nil {
+			t.Errorf("%+v was written", bad)
+		}
+	}
+}
+
 // The platform templates and disk layouts must make machines Nix can evaluate: instantiate whole
 // systems from the starter flake, and the disko script nixos-anywhere runs.
 func TestCreatedMachinesEvaluate(t *testing.T) {
@@ -115,6 +167,9 @@ func TestCreatedMachinesEvaluate(t *testing.T) {
 	for _, spec := range []MachineSpec{
 		{Name: "ct", System: "x86_64-linux", Role: "server", Platform: "proxmox-lxc"},
 		{Name: "vm", System: "x86_64-linux", Role: "server", Platform: "proxmox-vm"},
+		// Installed by hand: the boot loader comes from default.nix, the placeholder has none.
+		{Name: "desk", System: "x86_64-linux", Role: "desktop"},
+		{Name: "old", System: "x86_64-linux", Role: "minimal", Boot: "bios", Device: "/dev/sda"},
 		// What nixos-anywhere builds: the system and the disko script that partitions the disk.
 		{Name: "pc", System: "x86_64-linux", Role: "desktop", Disk: "ext4", Device: "/dev/nvme0n1"},
 		{Name: "vmb", System: "x86_64-linux", Role: "server", Platform: "proxmox-vm", Disk: "btrfs", Device: "/dev/sda"},
@@ -144,6 +199,17 @@ func TestCreatedMachinesEvaluate(t *testing.T) {
 	}
 	if err != nil || strings.TrimSpace(string(out)) != `{"boot":"vfat","efi":true,"grub":["/dev/nvme0n1"],"root":"ext4"}` {
 		t.Errorf("pc: %v\n%s", err, out)
+	}
+	for name, want := range map[string]string{"desk": `{"grub":false,"systemd-boot":true}`, "old": `{"grub":true,"systemd-boot":false}`} {
+		attr := "path:" + s.Repo.Dir + "#nixosConfigurations." + name + ".config.boot.loader"
+		out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "eval", "--json", attr,
+			"--apply", `l: { grub = l.grub.enable; systemd-boot = l.systemd-boot.enable; }`).Output()
+		if ee, ok := err.(*exec.ExitError); ok {
+			out = append(out, ee.Stderr...)
+		}
+		if err != nil || strings.TrimSpace(string(out)) != want {
+			t.Errorf("%s boot loader: %v\n%s", name, err, out)
+		}
 	}
 }
 
