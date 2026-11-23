@@ -26,6 +26,8 @@
   let boot = $state<MachineBoot>('uefi')
   let disk = $state<MachineDisk>('ext4')
   let device = $state('')
+  // Its own state: a disk typed for GRUB must never pre-fill the disk nixos-anywhere erases.
+  let grubDevice = $state('')
   let creating = $state(false)
   let flakeText = $state<string | null>(null)
   const autoFlake = $derived(flakeText === null ? null : flakeText.includes('readDir ./hosts'))
@@ -43,6 +45,7 @@
   // Installed by hand on BIOS: GRUB goes on a disk. GRUB's BIOS target is x86 only.
   const grubBIOS = $derived(!lxc && !anywhere && system === 'x86_64-linux' && boot === 'bios')
   const devProblem = $derived(deviceProblem(device.trim()))
+  const grubProblem = $derived(deviceProblem(grubDevice.trim()))
   const spec = $derived<MachineSpec>({
     name: name.trim(),
     system,
@@ -52,13 +55,15 @@
       ? { disk, device: device.trim() }
       : lxc
         ? {}
-        : { boot: grubBIOS ? 'bios' : 'uefi', ...(grubBIOS ? { device: device.trim() } : {}), ...(hardware.trim() ? { hardware } : {}) }),
+        : { boot: grubBIOS ? 'bios' : 'uefi', ...(grubBIOS ? { device: grubDevice.trim() } : {}), ...(hardware.trim() ? { hardware } : {}) }),
   })
   const noDiskoInput = $derived(layout && flakeText !== null && !hasDiskoInput(flakeText))
   const files = $derived(previewFiles(spec))
   let openName = $state('managed.json')
   const shown = $derived(files.find((f) => f.path.endsWith('/' + openName)) ?? files[files.length - 1])
-  const canNext = $derived(step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !hw.error && (!(layout || grubBIOS) || (!!device.trim() && !devProblem)) : true)
+  const canNext = $derived(
+    step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !hw.error && (!layout || (!!device.trim() && !devProblem)) && (!grubBIOS || (!!grubDevice.trim() && !grubProblem)) : true,
+  )
 
   onMount(() => {
     el.showModal()
@@ -254,9 +259,9 @@
           {#if grubBIOS}
             <label class="field">
               <span class="label">Disk GRUB is on</span>
-              <input class="mono" bind:value={device} placeholder="/dev/sda" spellcheck="false" autocomplete="off" aria-invalid={!!devProblem} aria-describedby="grub-hint" />
-              {#if devProblem}
-                <span class="problem" id="grub-hint">{devProblem}</span>
+              <input class="mono" bind:value={grubDevice} placeholder="/dev/sda" spellcheck="false" autocomplete="off" aria-invalid={!!grubProblem} aria-describedby="grub-hint" />
+              {#if grubProblem}
+                <span class="problem" id="grub-hint">{grubProblem}</span>
               {:else}
                 <span class="hint" id="grub-hint">The installer's <span class="mono">boot.loader.grub.device</span>: a whole disk such as <span class="mono">/dev/sda</span>, not a partition.</span>
               {/if}
