@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Managed } from './api'
-import { SHARED_FILE, cleanOverride, formatArgs, homeRows, homeStateVersion, overriddenAttrs, overrideSummary, packageFile, parseArgs, systemRows } from './packages'
+import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeRows, homeStateVersion, overriddenAttrs, overrideSummary, packageFile, parseArgs, systemRows } from './packages'
 import { host } from './testmodel'
 
 const mf = 'hosts/pc/managed.json'
@@ -143,5 +143,36 @@ describe('override text', () => {
       src: { github: 'a/b', rev: 'v1' },
       patches: [{ file: 'p.patch' }, { url: 'https://x' }],
     })
+  })
+})
+
+describe('copy to other machines', () => {
+  const pablo = { name: 'pablo', description: '', groups: [], home: null }
+  const hosts = [
+    host('pc', { managedVersion: 3, homeManager: true, users: [pablo] }),
+    host('laptop', { managedVersion: 2, homeManager: true, users: [pablo] }),
+    host('old', { managedVersion: 1, homeManager: true, users: [pablo] }),
+    host('code', { managedFile: null, managedVersion: 3, homeManager: true, users: [pablo] }),
+    host('nohm', { managedVersion: 3, users: [pablo] }),
+    host('nouser', { managedVersion: 3, homeManager: true }),
+  ]
+  it('offers machines whose managed.nix applies customisations, and for a home those with the user and home-manager', () => {
+    expect(copyTargets(hosts, 'pc').map((h) => h.name)).toEqual(['laptop', 'nohm', 'nouser'])
+    expect(copyTargets(hosts, 'pc', 'pablo').map((h) => h.name)).toEqual(['laptop'])
+  })
+  it('says where it went, where it was already, and why a machine refused', () => {
+    expect(copySummary('htop', [{ host: 'a', changed: true }, { host: 'b', changed: true }])).toEqual({ text: 'Copied htop to a, b.', ok: true })
+    expect(
+      copySummary('htop', [
+        { host: 'a', changed: true },
+        { host: 'b', changed: false },
+        { host: 'c', changed: false, conflicts: ['packageOverrides.htop', 'hosts/c/packages/htop.nix'] },
+        { host: 'd', changed: false, error: 'hosts/d/managed.json is not valid JSON' },
+      ]),
+    ).toEqual({
+      text: 'Copied htop to a. b already has it. Not copied to c, which has another value for packageOverrides.htop, hosts/c/packages/htop.nix. Not copied to d: hosts/d/managed.json is not valid JSON.',
+      ok: false,
+    })
+    expect(copySummary('htop', [{ host: 'a', changed: false }, { host: 'b', changed: false }]).text).toBe('a, b already have it.')
   })
 })

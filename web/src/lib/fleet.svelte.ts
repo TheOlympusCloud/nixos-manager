@@ -1,7 +1,7 @@
 // The evaluated fleet (stale while a new evaluation runs) and editing by clicking.
 import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
 import { fillPath, optionSegments, pathName } from './options'
-import { SHARED, SHARED_FILE } from './packages'
+import { SHARED, SHARED_FILE, copySummary } from './packages'
 import { codeLink, go } from './router.svelte'
 import { refresh, refreshStatus } from './state.svelte'
 import { confirmBox, report, toast, type ToastAction } from './ui.svelte'
@@ -198,6 +198,29 @@ export const setPackageOverride = (host: string, attr: string, o: PackageOverrid
 /** Turns home-manager on (stateVersion for a user without it yet) or off for a user. */
 export const setHome = (host: string, user: string, enable: boolean, stateVersion?: string) =>
   write(host, () => api.editHome(host, { user, enable, stateVersion }), enable ? `home-manager is on for ${user} on ${host}` : `${user}'s home on ${host} is no longer set here`)
+
+/**
+ * Copies a package's customisation (packageOverride) or a user's home from a machine to
+ * others, in one toast for all of them. Resolves with the machines it changed.
+ */
+export async function copyToMachines(from: string, req: { packageOverride?: string; home?: string; to: string[] }, what: string): Promise<string[]> {
+  let results
+  try {
+    results = await api.copy(from, req)
+  } catch (e) {
+    report(e, `Could not copy ${what}`)
+    return []
+  }
+  const changed = results.filter((r) => r.changed).map((r) => r.host)
+  for (const h of changed) {
+    if (!fleet.pending.includes(h)) fleet.pending.push(h)
+    if (fleet.managed[h]) void loadManaged(h)
+  }
+  const { text, ok } = copySummary(what, results)
+  toast(text, ok ? 'ok' : 'error', ok ? undefined : 'Not copied everywhere', changed.length ? { label: 'View changes', run: () => go('#/changes') } : undefined)
+  if (changed.length) await refreshStatus()
+  return changed
+}
 
 /**
  * Opens a file next to the machine's managed.json in Code, written from

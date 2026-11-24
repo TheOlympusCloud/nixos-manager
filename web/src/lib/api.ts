@@ -233,6 +233,8 @@ export type PackageSource = { url?: string; github?: string; rev?: string; hash?
 export type PackagePatch = { url?: string; hash?: string; file?: string }
 /** .override with override, then .overrideAttrs with overrideAttrs, version, src, and patches after the package's own. */
 export type PackageOverride = { override?: Record<string, unknown>; overrideAttrs?: Record<string, unknown>; version?: string; src?: PackageSource; patches?: PackagePatch[] }
+/** What a copy did on one machine. conflicts: what it already has with another value, so nothing was written there. */
+export type CopyResult = { host: string; changed: boolean; conflicts?: string[]; error?: string }
 /** user: a home-manager user's home.packages. exclude/restore: package names, wherever they are added. */
 export type PackageEdit = { user?: string; add?: string[]; remove?: string[]; exclude?: string[]; restore?: string[] }
 /** base_hash: the managed file the edit was based on; the server answers 409 if it changed since. */
@@ -372,6 +374,8 @@ export const api = {
     post<Managed>(`/api/hosts/${encodeURIComponent(host)}/package-overrides`, { attr, override, base_hash }),
   /** stateVersion only when turning it on for a user without home-manager. */
   editHome: (host: string, edit: { user: string; enable: boolean; stateVersion?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home`, edit),
+  /** Copies how a package is changed (packageOverride) or a user's home from the machine to others, never overwriting. */
+  copy: (host: string, req: { packageOverride?: string; home?: string; to: string[] }) => post<CopyResult[]>(`/api/hosts/${encodeURIComponent(host)}/copy`, req),
   /** Writes this server's modules/managed.nix over the repository's (base_hash '' when it has none). */
   updateManagedModule: (base_hash: string) => post<{ hash: string }>('/api/managed-module', { base_hash }),
   editSetting: (host: string, edit: SettingEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/settings`, edit),

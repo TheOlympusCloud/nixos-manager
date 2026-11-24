@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api, type Host, type PackagePatch } from '../../lib/api'
-  import { fleet, openOrCreate, setPackageOverride, targetName } from '../../lib/fleet.svelte'
-  import { SHARED, cleanOverride, formatArgs, overrideSummary, packageFile, packageFileTemplate, parseArgs } from '../../lib/packages'
+  import { copyToMachines, fleet, openOrCreate, setPackageOverride, targetName } from '../../lib/fleet.svelte'
+  import { SHARED, cleanOverride, copyTargets, formatArgs, overrideSummary, packageFile, packageFileTemplate, parseArgs } from '../../lib/packages'
   import { link } from '../../lib/router.svelte'
   import { app, refresh } from '../../lib/state.svelte'
   import { confirmBox, report } from '../../lib/ui.svelte'
+  import CopyTo from '../CopyTo.svelte'
   import Icon from '../Icon.svelte'
 
   /**
@@ -84,6 +85,9 @@
       busy = false
     }
   }
+  // A copy takes what is saved, so it waits for the form to be saved.
+  const saved = $derived(JSON.stringify(override) === JSON.stringify(current ?? null))
+  const copyHosts = $derived(everywhere ? [] : copyTargets(fleet.model?.hosts ?? [], host.name).map((h) => ({ name: h.name })))
   const feature = $derived(host.features.find((f) => (f.group === 'programs' || f.group === 'services') && f.name === name))
 </script>
 
@@ -171,6 +175,24 @@
       <a class="btn small" href={link('options', [host.name], { q: `${name}.enable` })}><Icon name="search" /> Find modules for {name}</a>
     </p>
   </section>
+
+  {#if changed && copyHosts.length}
+    <section>
+      <h3>Other machines</h3>
+      {#if saved}
+        <div class="row">
+          <CopyTo
+            title="Change {attr} as {host.name} does on:"
+            note="Each machine gets this change in its managed.json{rawExists ? `, with ${attr}.nix` : ''}{current?.patches?.some((p) => p.file) ? ' and its patch files' : ''}. A machine that already changes {attr} another way is left as it is."
+            targets={copyHosts}
+            copy={(to) => copyToMachines(host.name, { packageOverride: attr, to }, `how ${attr} is built`)}
+          />
+        </div>
+      {:else}
+        <p class="muted small">Save first: Copy to… copies what is saved.</p>
+      {/if}
+    </section>
+  {/if}
 
   <div class="buttons">
     <button class="primary" disabled={busy || !!problem} onclick={save}>{busy ? 'Saving…' : 'Save'}</button>

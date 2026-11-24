@@ -1,6 +1,6 @@
 // Customising packages: the rows of a machine's (or a home's) packages, and
 // the text forms of a package override.
-import type { Host, Managed, Package, PackageOverride } from './api'
+import type { CopyResult, Host, Managed, Package, PackageOverride } from './api'
 
 /** Edits take this in place of a machine name to change modules/managed.json, set for every machine. */
 export const SHARED = '*'
@@ -114,6 +114,30 @@ export function homeRows(host: Host, user: string, managed: Managed | undefined,
 
 /** The release a new home starts at (home.stateVersion): the machine's NixOS release, 26.05. */
 export const homeStateVersion = (host: Host) => /^\d{2}\.\d{2}/.exec(host.release)?.[0] ?? host.stateVersion
+
+// ---- copying a customisation or a home to other machines ----
+
+/**
+ * The machines a package's customisation can be copied to from `from`: editable, with a
+ * managed.nix that applies it (version 2). For a user's home, also with the user and home-manager.
+ */
+export const copyTargets = (hosts: Host[], from: string, user?: string) =>
+  hosts.filter((h) => h.name !== from && !!h.managedFile && (h.managedVersion ?? 1) >= 2 && (!user || (!!h.homeManager && h.users.some((u) => u.name === user))))
+
+/** One sentence per outcome of a copy; ok is false when a machine did not get it. */
+export function copySummary(what: string, results: CopyResult[]): { text: string; ok: boolean } {
+  const names = (rs: CopyResult[]) => rs.map((r) => r.host).join(', ')
+  const copied = results.filter((r) => r.changed)
+  const same = results.filter((r) => !r.changed && !r.conflicts?.length && !r.error)
+  const parts: string[] = []
+  if (copied.length) parts.push(`Copied ${what} to ${names(copied)}.`)
+  if (same.length) parts.push(`${names(same)} already ${same.length > 1 ? 'have' : 'has'} it.`)
+  for (const r of results) {
+    if (r.conflicts?.length) parts.push(`Not copied to ${r.host}, which has another value for ${r.conflicts.join(', ')}.`)
+    else if (r.error) parts.push(`Not copied to ${r.host}: ${r.error}.`)
+  }
+  return { text: parts.join(' '), ok: results.every((r) => !r.conflicts?.length && !r.error) }
+}
 
 // ---- override arguments as text: one `name = <JSON value>` per line ----
 

@@ -2,13 +2,14 @@
   import { untrack } from 'svelte'
   import { api, type Host } from '../../lib/api'
   import { frame } from '../../lib/ascii'
-  import { addHomePackages, excludePackages, fleet, loadManaged, openOrCreate, removeHomePackages, restorePackages, setHome, targetName } from '../../lib/fleet.svelte'
+  import { addHomePackages, copyToMachines, excludePackages, fleet, loadManaged, managedValue, openOrCreate, removeHomePackages, restorePackages, setHome, targetName } from '../../lib/fleet.svelte'
   import { pathName } from '../../lib/options'
-  import { SHARED, SHARED_FILE, appliesShared, dotfilesDir, homeNixFile, homeNixTemplate, homeRows, homeStateVersion, type PackageRow } from '../../lib/packages'
+  import { SHARED, SHARED_FILE, appliesShared, copyTargets, dotfilesDir, homeNixFile, homeNixTemplate, homeRows, homeStateVersion, type PackageRow } from '../../lib/packages'
   import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import { app, refresh } from '../../lib/state.svelte'
-  import { confirmBox, report } from '../../lib/ui.svelte'
+  import { confirmBox, quietly, report } from '../../lib/ui.svelte'
   import { managedOptions, showValue } from '../../lib/values'
+  import CopyTo from '../CopyTo.svelte'
   import Drawer from '../Drawer.svelte'
   import Icon from '../Icon.svelte'
   import OptionBrowser from '../OptionBrowser.svelte'
@@ -93,6 +94,27 @@
     if (ok) await run(p.name, () => excludePackages(t, [p.name], user))
   }
 
+  // Copy to…: home.stateVersion stays each machine's own, so where the user has no home
+  // yet it is turned on afterwards with that machine's release, as Turn on does.
+  const copyHosts = $derived(
+    copyTargets(fleet.model?.hosts ?? [], host.name, user).map((h) => ({
+      name: h.name,
+      note: h.users.find((x) => x.name === user)?.home || fleet.managed[h.name]?.home?.[user] ? undefined : `turns home-manager on (${homeStateVersion(h)})`,
+    })),
+  )
+  async function copyHome(to: string[]) {
+    await Promise.all(to.filter((t) => !fleet.managed[t]).map(loadManaged))
+    const hasNone = (t: string) => {
+      const th = fleet.model?.hosts.find((h) => h.name === t)
+      return !!th && !th.users.find((x) => x.name === user)?.home && !fleet.managed[t]?.home?.[user] && managedValue(t, ['home-manager', 'users', user, 'home', 'stateVersion']) === undefined
+    }
+    const turnOn = to.filter(hasNone)
+    const done = await copyToMachines(host.name, { home: user, to }, `${user}'s home`)
+    await quietly(async () => {
+      for (const t of done.filter((t) => turnOn.includes(t))) await setHome(t, user, true, homeStateVersion(fleet.model!.hosts.find((h) => h.name === t)!))
+    })
+  }
+
   async function addFile(e: SubmitEvent) {
     e.preventDefault()
     const f = newFile.trim()
@@ -152,12 +174,20 @@
       {/if}
     </section>
   {:else}
-    <p class="src">
+    <div class="src">
       {#if mine}<span class="chip ok" title="{user} is in managed.json's home">✎ Managed here</span>{/if}
       {#if u?.home && !mine}<span class="chip">λ Written by hand</span>{/if}
       {#if !u?.home}<span class="badge busy">{fleet.computing ? 'Evaluating…' : 'Not in the evaluation yet'}</span>{/if}
-      {#if mine && full}<button class="link small" disabled={busy === 'on'} onclick={turnOff}>Stop managing here</button>{/if}
-    </p>
+      {#if mine && full}
+        <button class="link small" disabled={busy === 'on'} onclick={turnOff}>Stop managing here</button>
+        <CopyTo
+          title="Give {user} on these machines the home {user} has on {host.name}:"
+          note="Each machine gets {user}'s packages and removed packages, joined with its own; the options set here, except home.stateVersion; custom.nix and the files in ~. A machine that already has another value for any of them is left as it is. Home-manager configuration written by hand elsewhere is not copied."
+          targets={copyHosts}
+          copy={copyHome}
+        />
+      {/if}
+    </div>
 
     <section class="block" aria-labelledby="hp-title">
       <div class="head">
