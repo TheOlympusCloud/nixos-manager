@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -272,6 +273,21 @@ func TestCreateMachinePlatform(t *testing.T) {
 	}
 	if r := call(t, cs, "create_machine", map[string]any{"name": "x", "system": "x86_64-linux", "role": "minimal", "platform": "xen"}, nil); !r.IsError {
 		t.Fatal("an unknown platform was accepted")
+	}
+}
+
+// The first user, through MCP: the machine can be logged into once deployed.
+func TestCreateMachineWithAUser(t *testing.T) {
+	cs, svc := session(t)
+	key := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl pablo@laptop"
+	user := map[string]any{"name": "pablo", "keys": []string{key}, "wheel": true, "home": true}
+	call(t, cs, "create_machine", map[string]any{"name": "nas", "system": "x86_64-linux", "role": "server", "user": user}, nil)
+	v, err := svc.ManagedView("nas")
+	if err != nil || v.Home["pablo"].Packages == nil || !strings.Contains(fmt.Sprint(v.Settings["users"]), key) {
+		t.Fatalf("%v %+v", err, v)
+	}
+	if r := call(t, cs, "create_machine", map[string]any{"name": "x", "system": "x86_64-linux", "role": "server", "user": map[string]any{"name": "Root!"}}, nil); !r.IsError {
+		t.Fatal("a bad user name was accepted")
 	}
 }
 
