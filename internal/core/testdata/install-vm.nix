@@ -35,7 +35,6 @@ let
             substituters = lib.mkForce [ ];
             # nixos-install copies the system into /mnt's store, but builds what has
             # allowSubstitutes = false (system-path, the system itself…), which needs stdenv.
-            always-allow-substitutes = true;
           };
         }
       ];
