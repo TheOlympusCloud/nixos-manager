@@ -1,8 +1,9 @@
 # Two machines whose managed.nix has modules/managed.json next to it: a
-# manages pablo's home, b has no pablo. dir is a fleet copy (modules/, hosts/a,
-# hosts/b) made by TestManagedSharedByEveryMachine (needs real Nix and network).
-{ dir }:
+# manages pablo's home, b has no pablo. $NIXMGR_TEST_FLEET is a fleet copy
+# (modules/, hosts/a, hosts/b) made by TestManagedSharedByEveryMachine (needs
+# real Nix and network).
 let
+  dir = builtins.getEnv "NIXMGR_TEST_FLEET";
   root = /. + dir;
   nixpkgs = builtins.getFlake "github:NixOS/nixpkgs/nixos-26.05";
   home-manager = builtins.getFlake "github:nix-community/home-manager/release-26.05";

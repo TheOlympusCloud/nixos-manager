@@ -93,8 +93,11 @@ func TestManagedSharedByEveryMachine(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
-		"eval", "--impure", "--json", "--file", "testdata/managed-shared.nix", "--argstr", "dir", dir).Output()
+	// The fleet copy goes in the environment: nix eval --file does not call the file with --argstr.
+	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+		"eval", "--impure", "--json", "--file", "testdata/managed-shared.nix")
+	cmd.Env = append(os.Environ(), "NIXMGR_TEST_FLEET="+dir)
+	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			t.Fatalf("nix eval: %v\n%s", err, ee.Stderr)
@@ -109,13 +112,13 @@ func TestManagedSharedByEveryMachine(t *testing.T) {
 		"a": map[string]any{
 			"packages": []any{"hello", "perl"}, "home": []any{"cowsay"}, "sessionVariable": "shared",
 			"helloFrom": "shared", "helloPatch": true, "jqFrom": "a",
-			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(4),
+			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(5),
 			"helloFile": []any{"modules/managed.json"},
 		},
 		"b": map[string]any{
 			"packages": []any{"hello", "jq"}, "home": nil, "sessionVariable": nil,
 			"helloFrom": "shared", "helloPatch": true, "jqFrom": "shared",
-			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(4),
+			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(5),
 			"helloFile": []any{"modules/managed.json"},
 		},
 	}
@@ -172,9 +175,14 @@ func TestManagedHomeSecrets(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
 	}
+	// The JSON on success, Nix's messages (fetching inputs, the error) on failure.
 	eval := func(attr string) ([]byte, error) {
-		return exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
-			"eval", "--impure", "--json", "--file", "testdata/managed-home-secrets.nix", attr).CombinedOutput()
+		out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+			"eval", "--impure", "--json", "--file", "testdata/managed-home-secrets.nix", attr).Output()
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.Stderr, err
+		}
+		return out, err
 	}
 	out, err := eval("ok")
 	if err != nil {
