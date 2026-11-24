@@ -11,7 +11,8 @@
   machine's `custom.nix`, `packages/<attribute>.nix` (how a package is built),
   and per home-manager user `home/<user>/custom.nix` and the dotfiles in
   `home/<user>/files/`.
-- `modules/`: settings shared by several machines; `common.nix` enables comin everywhere,
+- `modules/`: settings shared by several machines; `managed.json` (when it exists) is what
+  nixos-manager sets for every machine, under each machine's own `managed.json`; `common.nix` enables comin everywhere,
   and connects the machines to nixos-manager: deployment reports, its binary cache and
   secrets (`secrets.nix`).
 - `home/`: home-manager configurations for users.

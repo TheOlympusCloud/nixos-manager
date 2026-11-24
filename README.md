@@ -50,6 +50,10 @@ An MCP server gives automation the same features.
   arguments, attributes, version, source or patches, or with a Nix file of its
   own; **Reset to default** puts it back. See [Customise any
   package](#customise-any-package).
+- **Every machine at once**: add, remove, replace or customise a package, and
+  a user's home packages, for every machine in one click, in
+  `modules/managed.json`; each machine's own `managed.json` still wins. See
+  [Every machine at once](#every-machine-at-once).
 - **home-manager**: per machine and user, turn it on, add and remove packages,
   set any home-manager option from a search, keep dotfiles, and write a module
   of your own, all checked, committed and deployed like the rest. See
@@ -1197,7 +1201,9 @@ Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `compare_option`, `search_packages`, `search_options`, `add_packages`,
 `remove_packages`, `edit_packages` (any package removed by name, and a
 home-manager user's packages), `set_package_override`, `set_home_manager`,
-`update_managed_module`, `set_option`, `unset_option`, `create_machine`. File and git
+`update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
+package and option tools take host `*` for every machine
+(`modules/managed.json`). File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `delete_path`, `format_nix`, `status`, `diff`, `stage`, `unstage`, `discard`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
@@ -1344,6 +1350,34 @@ as for any commit. You can edit `managed.json` and these files by hand too:
 the console reads them each time and never writes over a change it has not
 seen.
 
+### Every machine at once
+
+The Packages tab, and a user's packages on the Home tab, switch between the
+machine and **Every machine**. With Every machine, the same actions (add,
+remove, restore, replace, customise) write `modules/managed.json`, which
+`modules/managed.nix` applies to every machine that loads it, as it applies a
+machine's own `managed.json`. **Add packages** offers Every machine too. Where
+both files set something, the machine's own wins:
+
+- Packages and removed packages are joined. A name a machine removes takes a
+  shared package out of that machine; a name removed for every machine never
+  takes out what either file adds, so adding it on one machine keeps it there.
+- A machine's own change to a package replaces the shared one whole. A shared
+  patch file is a path in `modules/`.
+- A user's shared home packages reach the machines whose `managed.json` has that
+  user's home (turned on in the Home tab): never a machine without the user.
+- Options in `settings` apply at priority 95: they still win over hand-written
+  values, and a machine's own (90) wins over them. There is no form for shared
+  options yet: set them with MCP's `set_option` and host `*`, or in Code.
+  `settings.home-manager.users.<user>` applies as home packages do.
+
+The Packages tab and the Packages matrix show what comes from
+`modules/managed.json` (⇉ Every machine) and what a machine sets itself
+(✎ Set here). Files next to `modules/managed.json` (`custom.nix`, `packages/`,
+`home/`) are not read: those stay per machine. MCP's `add_packages`,
+`remove_packages`, `edit_packages`, `set_package_override`, `set_option` and
+`unset_option` take host `*` for the same file.
+
 ### Homes with home-manager
 
 The **Home** tab of a machine has one section per user, through home-manager's
@@ -1374,10 +1408,10 @@ the user; the files stay until you delete them.
 
 ### Upgrading a fleet's managed.nix
 
-Removing and customising packages, and homes, need the `modules/managed.nix` of
-this release (it sets `nixosManager.version = 2`). A fleet made by an earlier
-nixos-manager still has its first one: **Health** and the machine's Packages
-and Home tabs say so and offer **Update managed.nix**, which writes this
+Removing and customising packages, and homes, need a `modules/managed.nix` with
+`nixosManager.version = 2`, and Every machine needs this release's (3). A fleet
+made by an earlier nixos-manager still has an older one: **Health** and the
+machine's Packages and Home tabs say so and offer **Update managed.nix**, which writes this
 release's file for you to review in Changes. Changes you made to that file by hand are replaced,
 so check the diff. MCP: `update_managed_module`.
 
