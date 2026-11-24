@@ -72,6 +72,20 @@ fi
 cfg=$src#nixosConfigurations.$host.config
 disks=$(nix eval --raw "$cfg" --apply 'c: toString (map (d: d.device) (builtins.attrValues (c.disko.devices.disk or { })))')
 lsblk -o NAME,SIZE,TYPE,MODEL,MOUNTPOINTS || true
+# The stick this installer runs from (mounted at /iso) is never one of them: disko would erase it under itself.
+if [ -n "$disks" ] && boot=$(findmnt -no SOURCE "$root/iso" 2> /dev/null); then
+  stick=$boot
+  parent=$(lsblk -no PKNAME "$boot" 2> /dev/null | head -n 1 || true)
+  if [ -n "$parent" ]; then
+    stick=/dev/$parent
+  fi
+  for d in $disks; do
+    if [ "$(readlink -f "$d")" = "$(readlink -f "$stick")" ]; then
+      echo "$d, in hosts/$host/disk-config.nix, is the USB stick this installer runs from. Name the disk to install on there (lsblk lists them), commit and push, then run fleet-install again." >&2
+      exit 1
+    fi
+  done
+fi
 if [ -n "$disks" ]; then
   echo "This erases $disks, partitions it as hosts/$host/disk-config.nix says, and installs $host."
 elif mountpoint -q "$mnt"; then

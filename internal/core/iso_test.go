@@ -208,6 +208,7 @@ func TestFleetInstallScript(t *testing.T) {
 	tool("ip", "")
 	tool("lsblk", "")
 	tool("mountpoint", "exit 1\n")
+	tool("findmnt", "exit 1\n") // no /iso: not booted from a stick
 	tool("reboot", "")
 	tool("nixos-install", "")
 	tool("nixos-enter", "")
@@ -264,6 +265,26 @@ esac
 	if gitOut(t, bare, "rev-parse", "main") != pushed {
 		t.Error("offline pushed")
 	}
+	// Nothing is erased or installed before the machine's name is typed, nor on the stick it runs from.
+	refused := func(stdin, want string, args ...string) {
+		t.Helper()
+		os.Remove(log)
+		cmd := exec.Command(fleetInstall(t, bare, filepath.Join(baked, "src"), sha), args...)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FLEET_INSTALL_ROOT="+root)
+		cmd.Stdin = strings.NewReader(stdin)
+		out, err := cmd.CombinedOutput()
+		calls, _ := os.ReadFile(log)
+		if err == nil || !strings.Contains(string(out), want) || strings.Contains(string(calls), "\ndisko") || strings.Contains(string(calls), "nixos-install") {
+			t.Errorf("%v: %v\n%s\ncalls:\n%s", args, err, out, calls)
+		}
+	}
+	refused("\nnot-pc\n", "Stopped: nothing was changed.")
+	tool("findmnt", "echo /dev/vda1\n")
+	tool("lsblk", `case "$*" in *PKNAME*) echo vda ;; esac
+`)
+	refused("", "is the USB stick this installer runs from", "--yes")
+	tool("findmnt", "exit 1\n")
+
 	// Without a disk layout, it wants the disks mounted at /mnt first.
 	tool("nix", "")
 	cmd := exec.Command(fleetInstall(t, "", filepath.Join(baked, "src"), sha), "--yes")
@@ -308,7 +329,10 @@ func TestISOEvaluatesWithRealNix(t *testing.T) {
 		"; gitName = \"Pablo\"; gitEmail = \"pablo@example.invalid\"; }"
 	nix := func(args ...string) string {
 		t.Helper()
-		out, err := exec.Command("nix", append([]string{"--extra-experimental-features", "nix-command flakes"}, args...)...).CombinedOutput()
+		out, err := exec.Command("nix", append([]string{"--extra-experimental-features", "nix-command flakes"}, args...)...).Output()
+		if ee, isExit := err.(*exec.ExitError); isExit {
+			out = append(out, ee.Stderr...)
+		}
 		if err != nil {
 			t.Fatalf("nix %s: %v\n%s", args[0], err, out)
 		}
