@@ -49,11 +49,12 @@
   })
   const leaveIntro = () => go('#/fleet')
 
-  // Every view is repainted top to bottom as you arrive, kept ones included.
+  // Every view is repainted top to bottom as you arrive, kept ones included: a new view, or another machine or
+  // tab of the machine page. A derived string, so a new query (a search, a picked commit) or file does not repaint.
   let content = $state<HTMLElement>()
+  const arrival = $derived(route.view === 'machines' ? `machines/${route.parts[0] ?? ''}/${route.parts[1] ?? ''}` : route.view)
   $effect(() => {
-    void route.view
-    void route.parts.join('/')
+    void arrival
     if (content) tick().then(() => content && sweep(content))
   })
 
