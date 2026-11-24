@@ -37,6 +37,7 @@
   { "name": "wifi", "path": "/run/secrets/wifi", "file": "secrets/common.json", "owner": "root", "group": "root", "mode": "0400" }
  ],
  "managedFile": "hosts/homeserver/managed.json",
+ "managedVersion": 2,
  "packages": [
   {
    "name": "git",
@@ -312,5 +313,15 @@
  "managedPackages": {
   "restic": "restic",
   "rclone": "rclone"
- }
+ },
+ "removedPackages": [],
+ "corePackages": [
+  "bash",
+  "coreutils",
+  "findutils",
+  "gnugrep",
+  "gnused",
+  "util-linux"
+ ],
+ "homeManager": true
 }
