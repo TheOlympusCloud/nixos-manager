@@ -1,8 +1,13 @@
 # A new machine from the NixOS ISO
 
 From a fresh install to a machine that comin keeps in step with the fleet and
-that reports to nixos-manager. The console never connects to the machine: you
-copy three things from it, and switch it once by hand.
+that reports to nixos-manager. There are two ways:
+
+- **An installer ISO from the console** (below): the console builds a USB
+  stick for the machine, and one command on it installs the machine already
+  enrolled. Nothing to copy by hand.
+- **By hand, from the NixOS ISO** (further down): install NixOS as usual, copy
+  three things from it into the console, and switch it once.
 
 ## Once, before the first machine
 
@@ -17,12 +22,43 @@ copy three things from it, and switch it once by hand.
 - A private repository: **Settings → Secrets → Private repository** holds
   comin's read token ([details](../README.md#private-repository-and-report-tokens)).
 
-## 1. Install NixOS
+## The installer ISO from the console
+
+1. **Machines → New machine**: its name, architecture and role, **Physical
+   machine** (or **Proxmox VM**) with a disk layout (**ext4** or **Btrfs**)
+   and the disk to erase. Commit and push it in **Changes**. A machine that is
+   already in the repository with its real hardware configuration works too.
+2. **Machines → Installer ISO**: pick it, **Build ISO**, and wait for the
+   build (its log shows meanwhile). **Download** it, check its SHA-256, and
+   write it to a USB stick: **Install steps** gives the `dd` command.
+3. Boot the machine from the stick and run `sudo fleet-install`. It shows the
+   machine's addresses and the SSH host key it will keep. Wi-Fi: `nmtui`
+   first.
+4. Under **Install steps** in the console: the address, **Fetch host key**,
+   compare the fingerprint with the one on the machine, **Use it for secrets**
+   (this stores its report token too). Commit and push in **Changes**.
+5. On the machine, press Enter. It fetches the repository (a private one asks
+   for your Forgejo user and a token), lists the disks, and erases the one in
+   the disk layout once you type the machine's name. It installs, offers to
+   set the users' passwords, and pushes the hardware configuration it wrote
+   (a token that can write). Take out the stick and reboot.
+
+Users come from the console (**Users → Add user**, before step 2), with their
+SSH keys: the install sets no root password. Then [check it is
+in](#5-check-it-is-in). What fleet-install does, step by step, and what it
+needs: [Install from an installer ISO](../README.md#install-from-an-installer-iso).
+
+## By hand, from the NixOS ISO
+
+The console never connects to the machine: you copy three things from it, and
+switch it once by hand.
+
+### 1. Install NixOS
 
 Install from the ISO as usual and reboot into it. The host name, user and
 password you pick are fine as they are.
 
-## 2. Copy three things from the machine
+### 2. Copy three things from the machine
 
 As root (`sudo -i`):
 
@@ -37,7 +73,7 @@ Paste them into the console from a browser on the machine, or turn on
 `services.openssh.enable = true;` in the installer's configuration and copy them
 over SSH.
 
-## 3. Add it in the console
+### 3. Add it in the console
 
 1. **Machines → New machine**: its name (it becomes the host name, which comin
    finds its configuration by), architecture and role; **Physical machine** (or
@@ -75,7 +111,7 @@ over SSH.
    own keyboard can bring it back (boot the previous generation).
 6. **Changes**: stage everything, run the check, commit, **Push**.
 
-## 4. Switch it once
+### 4. Switch it once
 
 On the machine, as root:
 
@@ -93,7 +129,7 @@ From now on comin pulls `main` and switches the machine; `/etc/nixos` is no
 longer used. Change the machine in the console only: a `nixos-rebuild` on the
 machine shows as **Changed by hand**.
 
-## 5. Check it is in
+### 5. Check it is in
 
 - On the machine: `journalctl -u comin -f` shows comin fetching the
   repository.

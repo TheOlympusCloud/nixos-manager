@@ -137,6 +137,9 @@ func run() error {
 		return err
 	}
 	svc.Jobs.GCRoots = filepath.Join(data, "gcroots") // each machine's last system a check built
+	if svc.ISOs, err = core.OpenISOs(filepath.Join(data, "isos"), svc.Jobs); err != nil {
+		return err
+	}
 	if svc.Deploys, err = core.OpenDeployments(data, repo); err != nil {
 		return err
 	}

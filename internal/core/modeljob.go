@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-//go:embed nix/*.nix
+//go:embed nix/*.nix nix/*.sh
 var nixFiles embed.FS
 
 func nixExpr(name string) string {

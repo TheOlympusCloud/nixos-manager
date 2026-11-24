@@ -773,8 +773,9 @@ func (s *Secrets) Reencrypt(ctx context.Context) error {
 }
 
 // StoreReportTokens puts each machine's own report token in its secrets, for
-// every machine with a key; modules/secrets.nix points the report hook at it.
-func (s *Service) StoreReportTokens(ctx context.Context) ([]string, error) {
+// every machine with a key, or only those of them in only; modules/secrets.nix
+// points the report hook at it.
+func (s *Service) StoreReportTokens(ctx context.Context, only ...string) ([]string, error) {
 	if s.Deploys == nil || s.Secrets == nil {
 		return nil, errorf(ErrInvalid, "deployment reports or secrets are off on this server")
 	}
@@ -786,9 +787,14 @@ func (s *Service) StoreReportTokens(ctx context.Context) ([]string, error) {
 	}
 	hosts := []string{}
 	for _, m := range ms {
-		hosts = append(hosts, m.Name)
+		if len(only) == 0 || slices.Contains(only, m.Name) {
+			hosts = append(hosts, m.Name)
+		}
 	}
-	if len(hosts) == 0 {
+	switch {
+	case len(hosts) == 0 && len(only) > 0:
+		return nil, errorf(ErrInvalid, "%s has no approved key yet: approve its SSH host key first", strings.Join(only, ", "))
+	case len(hosts) == 0:
 		return nil, errorf(ErrInvalid, "no machine has a key yet: add their SSH host keys first")
 	}
 	return hosts, s.Secrets.update(ctx, hosts, s.reportToken)

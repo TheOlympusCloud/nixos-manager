@@ -373,6 +373,7 @@ func (s *Server) apiMux() *http.ServeMux {
 	s.notifyRoutes(api)
 	s.secretRoutes(api)
 	s.updateRoutes(api)
+	s.isoRoutes(api)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API route")
 	})

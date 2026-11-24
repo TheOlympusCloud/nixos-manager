@@ -11,6 +11,15 @@ flake=$(arg flakeRef); flake=${flake#path:}; flake=${flake%%\?*}
 host=$(arg host)
 case "$*" in
   *" hash path "*) echo "sha256-fake" ;;
+  *"nixmgr:iso"*)
+    # An installer ISO: a megabyte of noise in a folder the out-link points at.
+    out=$(printf '%s\n' "$all" | sed -n 's/.* --out-link \([^ ]*\) .*/\1/p')
+    echo "building '/nix/store/fake-nixos-minimal-26.05-x86_64-linux.iso.drv'..."
+    sleep "${NIXMGR_FAKE_DELAY:-0}"
+    iso=$(mktemp -d "${TMPDIR:-/tmp}/fake-iso-XXXXXX")
+    mkdir "$iso/iso"
+    head -c 1048576 /dev/urandom > "$iso/iso/nixos-minimal-26.05-x86_64-linux.iso"
+    ln -s "$iso" "$out" ;;
   *"nixmgr:discover"*)
     # A file named BROKEN in the evaluated tree plays a flake with a syntax error.
     if [ -f "$flake/BROKEN" ]; then
