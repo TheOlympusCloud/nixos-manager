@@ -30,7 +30,7 @@
   }
   function jobLine(j: Job) {
     const what = (KIND[j.kind] ?? j.kind) + (j.commit ? ' ' + j.commit.slice(0, 7) : j.targets?.length ? ' ' + j.targets.join(', ') : j.kind === 'iso' ? ' ' + j.host : '')
-    const built = j.summary ? ` · built ${j.summary.built.length}` : ''
+    const built = j.summary?.evaluatedOnly?.length ? ` · evaluated ${j.summary.evaluatedOnly.length}` : j.summary ? ` · built ${j.summary.built.length}` : ''
     return j.state === 'running' || j.state === 'queued' ? `${what}: ${j.state}…` : `${what} ${j.state}${built}`
   }
   const lastJob = $derived(app.jobs.length ? app.jobs.reduce((a, b) => ((b.finished || b.started || '') > (a.finished || a.started || '') ? b : a)) : null)

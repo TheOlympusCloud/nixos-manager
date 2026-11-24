@@ -9,6 +9,12 @@ describe('builtText', () => {
     expect(builtText({ base: 'abc', built: ['pi', 'web'] })).toBe('built the 2 machines it changes: pi, web')
     expect(builtText({ base: '', built: ['pi', 'web'] })).toBe('built every machine (2), as no pushed commit had passed a check')
   })
+  it('says which machines it only evaluated, when checks do not build', () => {
+    expect(builtText({ base: 'abc', built: [], evaluatedOnly: ['hades'] })).toBe('evaluated hades, the one machine it changes, without building it here: each machine builds itself when comin deploys')
+    expect(builtText({ base: '', built: [], evaluatedOnly: ['pi', 'web'] })).toBe(
+      'evaluated every machine (2), as no pushed commit had passed a check, without building them here: each machine builds itself when comin deploys',
+    )
+  })
 })
 
 describe('summaryLines', () => {
@@ -24,6 +30,12 @@ describe('summaryLines', () => {
   it('says when no machine changes, and when everything was already built', () => {
     expect(summaryLines(sum({}))).toEqual(['No machine changes compared with the newest pushed commit that passed a check'])
     expect(summaryLines(sum({ base: '', changed: ['web'], built: ['web'] }))).toEqual(['Built: web (every machine: no pushed commit had passed a check)', 'Everything was already in the server’s store'])
+  })
+  it('names the machines only evaluated, and what a build here would have needed', () => {
+    expect(summaryLines(sum({ changed: ['hades'], evaluatedOnly: ['hades'], toBuild: 3, toFetch: 2, download: '450 MiB', unpacked: '1.4 GiB' }))).toEqual([
+      'Evaluated only, not built here: hades (it builds itself when comin deploys)',
+      'A build here would build 3 derivations and download 2 paths (450 MiB, 1.4 GiB unpacked)',
+    ])
   })
   it('names a machine that did not evaluate, without claiming anything was built', () => {
     expect(summaryLines(sum({ failed: ['pi'] }))).toEqual(['Failed: pi'])

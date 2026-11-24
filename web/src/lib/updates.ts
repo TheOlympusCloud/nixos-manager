@@ -27,14 +27,19 @@ export function updateLine(u: Update, outdated = false): UpdateLine {
     case 'updating':
       return { tone: 'busy', title: 'Updating the inputs…', detail: `nix flake update, on top of ${branch} as it is on the remote.` }
     case 'checking':
-      return { tone: 'busy', title: 'Checking the update…', detail: 'nix flake check, then a build of every machine it changes.' }
+      return { tone: 'busy', title: 'Checking the update…', detail: 'nix flake check, then a build (a dry build, with checks.build = false) of every machine it changes.' }
     case 'ready': {
       if (outdated) return { tone: 'bad', title: `${branch} moved on since this update`, detail: 'Update again to make one on top of it.' }
       const built = u.summary?.built ?? []
+      const evaluated = u.summary?.evaluatedOnly ?? []
       return {
         tone: 'ok',
         title: `Ready to merge into ${branch}`,
-        detail: built.length ? `Passed its check, which built ${plural(built.length, 'machine')}: ${built.join(', ')}.` : 'Passed its check; no machine had to be built.',
+        detail: built.length
+          ? `Passed its check, which built ${plural(built.length, 'machine')}: ${built.join(', ')}.`
+          : evaluated.length
+            ? `Passed its check, which evaluated ${plural(evaluated.length, 'machine')} without building ${evaluated.length === 1 ? 'it' : 'them'} here: ${evaluated.join(', ')}.`
+            : 'Passed its check; no machine had to be built.',
       }
     }
     case 'failed':
