@@ -1583,6 +1583,21 @@ builds the package and passes `nix flake check`, which also makes and keeps a
 binary cache key with the module's script, and an update of a local input is
 locked on `flake-update`, checked and merged.
 
+`NIXMGR_VM_TESTS=1 go test -v -timeout 80m -run InVMWithRealNix ./internal/core`
+installs a machine as on a real computer, in QEMU (KVM, a few GB of downloads
+and about a quarter of an hour; `internal/core/testdata/install-vm.nix`). A
+machine made in New machine with a disk layout and a home-manager user, then
+customised as by clicking (packages added, a NixOS default removed, a package
+built differently, the user's own package and a file in their `~`), has its
+installer ISO booted; `fleet-install --yes --offline` installs it on an empty
+disk; the disk boots, and the user logs in on the console with those packages
+on the `PATH` and that file in `~`. The VM has no network, so the test gives the
+machine a QEMU hardware configuration instead of the placeholder (which
+`fleet-install` would replace, so the VM would have to build the system) and
+puts the system's closure and the flake inputs on the ISO. CI
+(`.github/workflows/vm-tests.yml`) runs it nightly on `main`, on demand (Run
+workflow), and on a push that changes the test itself.
+
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines
 (`internal/core/testdata/fleet/`). Run the server with
