@@ -21,6 +21,17 @@
   let name = $state('')
   let system = $state<MachineSpec['system']>('x86_64-linux')
   let role = $state<MachineRole>('server')
+  /** The packages it starts with, when changed from the role's; null: the role's own. */
+  let packages = $state<string[] | null>(null)
+  const chosen = $derived(packages ?? roles.find((r) => r.role === role)?.packages ?? [])
+  let newPkg = $state('')
+  const pkgProblem = $derived(newPkg.trim() && !/^[A-Za-z0-9_+-][A-Za-z0-9_+'-]*(\.[A-Za-z0-9_+-][A-Za-z0-9_+'-]*)*$/.test(newPkg.trim()) ? 'A nixpkgs attribute, such as htop.' : '')
+  function addPkg() {
+    const p = newPkg.trim()
+    if (!p || pkgProblem) return
+    if (!chosen.includes(p)) packages = [...chosen, p]
+    newPkg = ''
+  }
   let platform = $state<MachinePlatform>('hardware')
   let hardware = $state('')
   // nixos-anywhere installs it on a disko layout, instead of NixOS installed by hand.
@@ -47,6 +58,7 @@
     system,
     role,
     platform,
+    ...(packages ? { packages } : {}),
     ...(layout ? { disk, device: device.trim() } : !lxc && hardware.trim() ? { hardware } : {}),
   })
   const noDiskoInput = $derived(layout && flakeText !== null && !hasDiskoInput(flakeText))
@@ -150,7 +162,7 @@
           <div class="choices three">
             {#each roles as r (r.role)}
               <label class="choice role lift" class:on={role === r.role} use:frame={{ kind: role === r.role ? 'heavy' : 'round', lift: true }}>
-                <input type="radio" name="role" value={r.role} bind:group={role} />
+                <input type="radio" name="role" value={r.role} bind:group={role} onchange={() => (packages = null)} />
                 <span class="c-title"><Icon name={r.role === 'server' ? 'server' : r.role === 'desktop' ? 'box' : 'terminal'} /> {r.label}</span>
                 <span class="c-note">{r.note}</span>
                 <ul class="gets">
@@ -159,6 +171,22 @@
                 <span class="pkgs">{#each r.packages as p (p)}<span class="chip mono">{p}</span>{/each}</span>
               </label>
             {/each}
+          </div>
+          <div class="pkg-edit">
+            <span class="label">Packages it starts with</span>
+            <span class="pkgs">
+              {#each chosen as p (p)}<span class="chip mono">{p}<button type="button" class="x icon" aria-label="Leave out {p}" onclick={() => (packages = chosen.filter((x) => x !== p))}><Icon name="x" /></button></span>{/each}
+              <input
+                class="mono add-pkg"
+                placeholder="+ attribute"
+                aria-label="Add a package"
+                spellcheck="false"
+                bind:value={newPkg}
+                aria-invalid={!!pkgProblem}
+                onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addPkg())} />
+              {#if packages}<button type="button" class="link small" onclick={() => (packages = null)}>Back to the preset</button>{/if}
+            </span>
+            {#if pkgProblem}<span class="error-text small">{pkgProblem}</span>{/if}
           </div>
           <p class="hint">All of it lands in <span class="mono">managed.json</span>, so you can change any of it by clicking later.</p>
         </fieldset>
@@ -486,6 +514,17 @@
     flex-wrap: wrap;
     gap: 0 1ch;
     margin-top: var(--lh);
+  }
+  .pkg-edit {
+    display: grid;
+    margin-top: var(--lh);
+  }
+  .pkg-edit .pkgs {
+    align-items: baseline;
+    margin-top: 0;
+  }
+  .add-pkg {
+    width: 16ch;
   }
   .cmd {
     display: flex;

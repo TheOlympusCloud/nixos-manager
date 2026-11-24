@@ -35,6 +35,8 @@ export function nixValue(v: unknown): string {
 const settingText = (c: SettingChange) => (c.to === undefined ? `${c.path.join('.')} reset` : `${c.path.join('.')} = ${nixValue(c.to)}`)
 /** "fail2ban turned on", "PasswordAuthentication = false": one setting, in few words. */
 function settingShort(c: SettingChange): string {
+  // A package change needs its package or user, which only the whole path names.
+  if (['removedPackages', 'packageOverrides', 'home'].includes(c.path[0])) return settingText(c)
   const last = c.path.at(-1) ?? ''
   if (last === 'enable' && c.path.length > 1 && typeof c.to === 'boolean') return `${c.path.at(-2)} turned ${c.to ? 'on' : 'off'}`
   return c.to === undefined ? `${last} reset to its default` : `${last} = ${nixValue(c.to)}`
@@ -86,6 +88,9 @@ export function impactGroups(d: Impact): ImpactGroup[] {
     { label: 'Stops', items: units('stop', 'del') },
     { label: 'Not restarted', items: units('keep', 'up', KEEP) },
     { label: '/etc', items: (d.etc ?? []).map((e) => ({ text: e.path, kind: etcKind[e.status] })) },
+    { label: 'Home packages', items: [...items(d.homePackagesAdded, 'add'), ...items(d.homePackagesRemoved, 'del')] },
+    { label: 'Home programs', items: [...items(d.homeProgramsAdded, 'add'), ...items(d.homeProgramsRemoved, 'del')] },
+    { label: 'Home files', items: (d.homeFiles ?? []).map((e) => ({ text: e.path, kind: etcKind[e.status] })) },
     { label: 'Dependencies', items: (c?.changes ?? []).map(dependency) },
     { label: 'Size', items: c ? [{ text: `${bytes(c.sizeFrom)} → ${bytes(c.sizeTo)} (${signedBytes(c.sizeTo - c.sizeFrom)})`, kind: 'up' as const }] : [] },
   ].filter((g) => g.items.length)
@@ -129,6 +134,13 @@ export function impactLine(d: Impact): string {
   }
   const etc = (d.etc ?? []).map((e) => e.path)
   if (etc.length) parts.push(`${few(etc, '/etc file')} ${etc.length === 1 ? 'changes' : 'change'}`)
+  // home-manager users, as "pablo: ripgrep": one count per kind keeps the line short.
+  const home = [...(d.homePackagesAdded ?? []), ...(d.homePackagesRemoved ?? []), ...(d.homeProgramsAdded ?? []), ...(d.homeProgramsRemoved ?? []), ...(d.homeFiles ?? []).map((f) => f.path)]
+  if (home.length) {
+    const users = [...new Set(home.map((x) => x.split(': ')[0]))].sort()
+    const who = users.length === 1 ? `${users[0]}'s home` : users.length === 2 ? `${users.join(' and ')}'s homes` : plural(users.length, 'home')
+    parts.push(`${who}: ${plural(home.length, 'change')}`)
+  }
   // The system derivation moved, but in nothing listed: a sysctl, a reload…
   if (!parts.length) parts.push(d.reboot ? 'other configuration' : 'Other configuration')
   if (d.closure && d.closure.sizeTo !== d.closure.sizeFrom) parts.push(signedBytes(d.closure.sizeTo - d.closure.sizeFrom))

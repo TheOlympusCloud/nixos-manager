@@ -34,7 +34,7 @@ An MCP server gives automation the same features.
   one only when asked; machine pages list what each machine gets, and option
   forms offer a secret where a file path goes.
 - **Machine pages**: packages (with the file that adds each one), services and
-  programs, users and SSH keys, ports and file systems, and **Essentials**:
+  programs, users and SSH keys, their homes, ports and file systems, and **Essentials**:
   time zone, locale, keyboard, garbage collection, store optimisation, zram,
   firewall, SSH, fail2ban and Tailscale, each with its real value and where it
   is set.
@@ -45,6 +45,15 @@ An MCP server gives automation the same features.
   go into the machine's `hosts/<name>/managed.json`, which `modules/managed.nix`
   applies with priority over hand-written values (but not over `mkForce`);
   hand-written Nix is never rewritten.
+- **Any package, your way**: every package of a machine, NixOS's defaults and
+  hand-written ones included, can be removed, replaced or rebuilt with other
+  arguments, attributes, version, source or patches, or with a Nix file of its
+  own; **Reset to default** puts it back. See [Customise any
+  package](#customise-any-package).
+- **home-manager**: per machine and user, turn it on, add and remove packages,
+  set any home-manager option from a search, keep dotfiles, and write a module
+  of your own, all checked, committed and deployed like the rest. See
+  [Homes with home-manager](#homes-with-home-manager).
 - **Real values**: an option's effective value on each machine and the file
   that sets it, compared across the fleet, with "copy to" other machines.
 - **New machines**: a wizard creates `hosts/<name>/` with a role preset
@@ -1174,7 +1183,9 @@ Create a token on the **Tokens** page and point the client at `/mcp`:
 
 Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `compare_option`, `search_packages`, `search_options`, `add_packages`,
-`remove_packages`, `set_option`, `unset_option`, `create_machine`. File and git
+`remove_packages`, `edit_packages` (any package removed by name, and a
+home-manager user's packages), `set_package_override`, `set_home_manager`,
+`update_managed_module`, `set_option`, `unset_option`, `create_machine`. File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `delete_path`, `format_nix`, `status`, `diff`, `stage`, `unstage`, `discard`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
@@ -1276,6 +1287,88 @@ that address (the `remote=` of the `login` lines in the log), or every proxied
 login shares one address's limit. List only proxies there, since anything in
 that list can claim any client address. The counts are kept in memory.
 
+## Customise any package
+
+On a machine's **Packages** tab, every package has three actions, whoever adds
+it: NixOS (`perl`, `rsync`, `strace`… marked Default), a flake input, a
+hand-written file, or a click here.
+
+- **Remove** takes it out of the machine by name, wherever it is added:
+  `removedPackages` in `managed.json`. The Nix that adds it stays as it is, and
+  **Restore** gives it back. A package NixOS needs for a working system (`bash`,
+  `coreutils`…) asks before it goes. What `managed.json` itself installs is
+  never taken out by a removed name, and adding a removed name back clears it.
+- **Replace** removes it the same way and installs another package you pick,
+  even one of the same name: replacing `nodejs_20` with `nodejs_24` keeps
+  `nodejs_24`.
+- **Customise** changes how it is built on the machine, by attribute, in
+  `packageOverrides`:
+  - arguments for `.override` (`withVimKeys = true`) and attributes for
+    `.overrideAttrs` (`doCheck = false`), written as `name = value` with JSON
+    values, as `managed.json` keeps them;
+  - a version with its source: a URL, or a GitHub repository at a tag or
+    commit. Leave the hash empty and the check fails with the right one in its
+    log;
+  - patches after the package's own, from a URL or a file in the machine's
+    folder;
+  - for anything else, `hosts/<name>/packages/<attribute>.nix`, opened in Code:
+    `{ pkgs, prev, lib, ... }: pkg: <package>`, where `pkg` already has the
+    changes above.
+
+  The change is an overlay (`nixpkgs.overlays`), so everything on the machine
+  that uses the package gets it, home-manager included when it shares the
+  system's packages (`home-manager.useGlobalPkgs`, as in the starter fleet).
+  Nix then builds the package, and what depends on it, instead of downloading
+  it. **Reset to default** clears it and deletes its Nix file.
+
+**Nix for \<machine\>** opens `hosts/<name>/custom.nix`, a NixOS module of the
+machine's own for anything the console does not model; it is created the
+first time.
+
+Every change is a change in the working copy: Changes shows what it does to
+each machine (a removed package as removed, a rebuilt one with its new
+version), the check builds it, and a push deploys it. History and revert work
+as for any commit. You can edit `managed.json` and these files by hand too:
+the console reads them each time and never writes over a change it has not
+seen.
+
+### Homes with home-manager
+
+The **Home** tab of a machine has one section per user, through home-manager's
+NixOS module (the starter fleet loads it on every machine, with
+`useGlobalPkgs` and `useUserPackages`).
+
+- **Turn on home-manager for \<user\>** adds the user to `managed.json`'s
+  `home`, with `home.stateVersion` at the machine's release. A user already
+  configured by hand (as `home/pablo.nix` in the starter fleet) keeps that
+  configuration; what is set here goes on top.
+- **Packages**: add from a search of the locked nixpkgs, remove (the user's own
+  ones from `managed.json`, any other by name, as for the system), restore.
+- **Options**: a search of every home-manager option, set by clicking as NixOS
+  options are; values go in `settings.home-manager.users.<user>`.
+- **Files in ~**: files in `hosts/<name>/home/<user>/files/` are linked at the
+  same path in the user's home (`home.file`; `.config/…` is where
+  `xdg.configFile` puts files). The tab creates one and opens it in Code; it
+  also lists what home-manager's modules link there. These files are copied to
+  the Nix store, which every user of the machine can read: never keep a token
+  or password there (`.netrc`, `.config/gh/hosts.yml`…); use
+  [Secrets](#secrets).
+- **Nix for \<user\>**: `hosts/<name>/home/<user>/custom.nix`, a home-manager
+  module of the user's own.
+
+Changes, checks and pushes show each home's packages, programs and files that
+move, next to the system's. **Stop managing here** removes what is set here for
+the user; the files stay until you delete them.
+
+### Upgrading a fleet's managed.nix
+
+Removing and customising packages, and homes, need the `modules/managed.nix` of
+this release (it sets `nixosManager.version = 2`). A fleet made by an earlier
+nixos-manager still has its first one: **Health** and the machine's Packages
+and Home tabs say so and offer **Update managed.nix**, which writes this
+release's file for you to review in Changes. Changes you made to that file by hand are replaced,
+so check the diff. MCP: `update_managed_module`.
+
 ## Visual editing on an existing repository
 
 The starter flake loads each machine's `managed.json`. In a repository you
@@ -1286,7 +1379,8 @@ editing on for it (the machine page shows it too):
 (import ./modules/managed.nix ./hosts/<name>/managed.json)
 ```
 
-and copy `modules/managed.nix` from `templates/fleet/modules/`.
+and create `modules/managed.nix`: **Create it** on the machine page's Turn on
+editing card writes it (or copy it from `templates/fleet/modules/`).
 
 ## Development
 

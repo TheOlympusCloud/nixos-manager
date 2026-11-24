@@ -765,6 +765,39 @@ func TestManagedEditsOverHTTP(t *testing.T) {
 	}
 }
 
+// Defaults, overrides and home-manager users are edited like the rest, in managed.json.
+func TestPackageCustomisationOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	var v core.ManagedView
+	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"exclude": []string{"perl"}, "add": []string{"htop"}}, &v); code != 200 || v.RemovedPackages[0] != "perl" {
+		t.Fatalf("exclude: %d %+v", code, v)
+	}
+	override := map[string]any{"overrideAttrs": map[string]any{"doCheck": false}, "patches": []any{map[string]any{"file": "patches/fix.patch"}}}
+	if code := e.do(t, "POST", "/api/hosts/web/package-overrides", map[string]any{"attr": "htop", "override": override, "base_hash": v.Hash}, &v); code != 200 || len(v.PackageOverrides["htop"].Patches) != 1 {
+		t.Fatalf("override: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/package-overrides", map[string]any{"attr": "htop", "override": nil, "base_hash": "stale"}, nil); code != 409 {
+		t.Fatalf("a stale reset: %d", code)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/package-overrides", map[string]any{"attr": "htop", "override": map[string]any{"src": map[string]any{"url": "file:///etc/shadow"}}}, nil); code != 400 {
+		t.Fatalf("a file:// source: %d", code)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/home", map[string]any{"user": "pablo", "enable": true, "stateVersion": "26.05"}, &v); code != 200 || v.Home["pablo"].Packages == nil {
+		t.Fatalf("home on: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"user": "pablo", "add": []string{"ripgrep"}}, &v); code != 200 || v.Home["pablo"].Packages[0] != "ripgrep" {
+		t.Fatalf("home package: %d %+v", code, v)
+	}
+	var mod struct{ Hash string }
+	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": ""}, &mod); code != 200 || mod.Hash == "" {
+		t.Fatalf("module: %d %+v", code, mod)
+	}
+	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": ""}, nil); code != 409 {
+		t.Fatalf("module written over one the caller did not see: %d", code)
+	}
+}
+
 func TestSearchOverHTTP(t *testing.T) {
 	e := fleetEnv(t)
 	e.login(t)

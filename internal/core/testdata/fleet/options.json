@@ -118,5 +118,45 @@
   "default": "\"26.05\"",
   "example": null,
   "readOnly": true
+ },
+ {
+  "name": "home-manager.users.<name>.programs.git.enable",
+  "type": "boolean",
+  "description": "Whether to enable Git.",
+  "default": "false",
+  "example": "true",
+  "readOnly": false
+ },
+ {
+  "name": "home-manager.users.<name>.programs.git.settings",
+  "type": "Git configuration",
+  "description": "Configuration written to $XDG_CONFIG_HOME/git/config.",
+  "default": "{ }",
+  "example": "{\n  user.name = \"Pablo\";\n}",
+  "readOnly": false
+ },
+ {
+  "name": "home-manager.users.<name>.programs.starship.enable",
+  "type": "boolean",
+  "description": "Whether to enable starship.",
+  "default": "false",
+  "example": "true",
+  "readOnly": false
+ },
+ {
+  "name": "home-manager.users.<name>.home.sessionVariables",
+  "type": "lazy attribute set of (string or path or signed integer or floating point number)",
+  "description": "Environment variables to always set at login.",
+  "default": "{ }",
+  "example": "{\n  EDITOR = \"emacs\";\n}",
+  "readOnly": false
+ },
+ {
+  "name": "home-manager.users.<name>.home.stateVersion",
+  "type": "one of \"25.11\", \"26.05\"",
+  "description": "The home-manager release whose defaults this configuration keeps.",
+  "default": null,
+  "example": null,
+  "readOnly": false
  }
 ]

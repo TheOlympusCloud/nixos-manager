@@ -29,7 +29,7 @@ func TestInsights(t *testing.T) {
 			{Name: "pi", ManagedFile: managed("pi"), Ports: Ports{Firewall: false},
 				Packages: []Package{{Name: "git", Files: []string{"modules/common.nix"}}},
 				Checks:   Checks{SSH: true, SSHPasswordAuthentication: bp(true), SSHPermitRootLogin: sp("yes")}},
-			{Name: "server", ManagedFile: managed("server"), Ports: Ports{Firewall: true},
+			{Name: "server", ManagedFile: managed("server"), ManagedVersion: 1, Ports: Ports{Firewall: true},
 				Packages: []Package{{Name: "git", Files: []string{"modules/common.nix"}}, {Name: "htop", Files: []string{"modules/common.nix"}}},
 				Checks:   Checks{SSH: true, SSHPasswordAuthentication: bp(false), SSHPermitRootLogin: sp("no"), Fail2ban: true, AutoGC: true, AutoOptimise: true}},
 			{Name: "laptop", Ports: Ports{Firewall: true},
@@ -58,6 +58,7 @@ func TestInsights(t *testing.T) {
 		"input-old:nixpkgs":      "warning",
 		"input-old:home-manager": "info",
 		"not-managed":            "info",
+		"managed-old":            "warning",
 		"missing-package:htop":   "info",
 	} {
 		in, ok := byID[id]
@@ -68,6 +69,10 @@ func TestInsights(t *testing.T) {
 		if in.Severity != sev {
 			t.Errorf("%s: severity %s, want %s", id, in.Severity, sev)
 		}
+	}
+	// pi reports no version (0): only a machine that says 1 has the first managed.nix.
+	if in := byID["managed-old"]; strings.Join(in.Hosts, ",") != "server" || in.Link != "#/machines/server/packages" {
+		t.Errorf("managed-old insight %+v", in)
 	}
 	if _, ok := byID["input-old:comin"]; ok {
 		t.Error("a fresh input reported as old")

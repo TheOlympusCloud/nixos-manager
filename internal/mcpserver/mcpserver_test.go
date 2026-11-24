@@ -178,6 +178,28 @@ func TestManagedTools(t *testing.T) {
 	}
 }
 
+// Defaults, overrides and homes go through the same managed.json over MCP.
+func TestCustomisationTools(t *testing.T) {
+	cs, svc := session(t)
+	var v core.ManagedView
+	call(t, cs, "edit_packages", map[string]any{"host": "web", "exclude": []string{"perl"}, "add": []string{"btop"}}, &v)
+	call(t, cs, "set_package_override", map[string]any{"host": "web", "attr": "btop", "override": map[string]any{"overrideAttrs": map[string]any{"doCheck": false}}}, &v)
+	call(t, cs, "set_home_manager", map[string]any{"host": "web", "user": "pablo", "enable": true, "stateVersion": "26.05"}, &v)
+	call(t, cs, "edit_packages", map[string]any{"host": "web", "user": "pablo", "add": []string{"ripgrep"}}, &v)
+	got, err := svc.ManagedView("web")
+	if err != nil || got.RemovedPackages[0] != "perl" || got.PackageOverrides["btop"].OverrideAttrs["doCheck"] != false || got.Home["pablo"].Packages[0] != "ripgrep" {
+		t.Fatalf("managed file after MCP edits %+v %v", got, err)
+	}
+	if res := call(t, cs, "set_package_override", map[string]any{"host": "web", "attr": "btop", "override": map[string]any{"src": map[string]any{"url": "file:///etc/shadow"}}}, nil); !res.IsError {
+		t.Fatal("a file:// source accepted over MCP")
+	}
+	var h struct{ Hash string }
+	call(t, cs, "update_managed_module", map[string]any{}, &h)
+	if h.Hash == "" {
+		t.Fatal("no modules/managed.nix written")
+	}
+}
+
 func TestEditCheckCommitFlow(t *testing.T) {
 	cs, svc := session(t)
 	var w struct{ Hash string }

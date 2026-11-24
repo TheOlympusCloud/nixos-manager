@@ -3,6 +3,7 @@
   import Icon from '../components/Icon.svelte'
   import ModelGate from '../components/ModelGate.svelte'
   import EssentialsTab from '../components/machine/EssentialsTab.svelte'
+  import HomeTab from '../components/machine/HomeTab.svelte'
   import NetworkTab from '../components/machine/NetworkTab.svelte'
   import OverviewTab from '../components/machine/OverviewTab.svelte'
   import PackagesTab from '../components/machine/PackagesTab.svelte'
@@ -34,6 +35,7 @@
           { id: 'packages', label: 'Packages', n: host.packages.length },
           { id: 'services', label: 'Services & programs', n: host.features.length },
           { id: 'users', label: 'Users', n: host.users.length },
+          { id: 'home', label: 'Home', n: host.users.filter((u) => u.home).length },
           { id: 'network', label: 'Network & storage' },
         ]
       : [],
@@ -155,6 +157,8 @@
               <ServicesTab {host} />
             {:else if tab === 'users'}
               <UsersTab {host} />
+            {:else if tab === 'home'}
+              <HomeTab {host} />
             {:else if tab === 'network'}
               <NetworkTab {host} />
             {:else}

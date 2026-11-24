@@ -3,7 +3,7 @@
   import { api, type OptionInfo } from '../lib/api'
   import { frame } from '../lib/ascii'
   import { fleet, hostByName, loadManaged, managedValue, searchIndexed, setOption } from '../lib/fleet.svelte'
-  import { fillPath, matchOption, optionSegments } from '../lib/options'
+  import { fillPath, matchOption, optionSegments, pathName } from '../lib/options'
   import { managedOptions, showValue } from '../lib/values'
   import Icon from './Icon.svelte'
   import JobLog from './JobLog.svelte'
@@ -11,7 +11,9 @@
 
   /**
    * Search a machine's NixOS options and edit one. `enable` mode lists only
-   * `….enable` switches and turns them on directly (adding a service).
+   * `….enable` switches and turns them on directly (adding a service). With
+   * `scope`, only the options under a prefix with placeholders, such as
+   * home-manager.users.<name>., filled with `names`, and shown without it.
    */
   let {
     host,
@@ -19,7 +21,13 @@
     selected = $bindable(''),
     enable = false,
     stacked = false,
-  }: { host: string; query?: string; selected?: string; enable?: boolean; stacked?: boolean } = $props()
+    scope,
+  }: { host: string; query?: string; selected?: string; enable?: boolean; stacked?: boolean; scope?: { prefix: string; names: string[] } } = $props()
+  const names = $derived(scope?.names ?? [])
+  /** The concrete path the scope stands for: home-manager.users.pablo. */
+  const scopePath = $derived(scope ? fillPath(optionSegments(scope.prefix + 'x'), scope.names).slice(0, -1) : [])
+  const short = (name: string) => (scope && name.startsWith(scope.prefix) ? name.slice(scope.prefix.length) : name)
+  const full = (name: string) => (scope ? scope.prefix + name : name)
 
   let results = $state<OptionInfo[] | null>(null)
   let indexJob = $state('')
@@ -49,9 +57,11 @@
     }
     loading = true
     try {
-      const r = await searchIndexed(() => api.searchOptions(host, q, { limit: 200 }), (job) => mine === seq && (indexJob = job), () => alive && mine === seq)
+      const sent = scope && !q.startsWith(scope.prefix) ? scope.prefix + q : q
+      const r = await searchIndexed(() => api.searchOptions(host, sent, { limit: 200 }), (job) => mine === seq && (indexJob = job), () => alive && mine === seq)
       if (mine !== seq || r === null) return
-      results = enable ? r.filter((o) => o.name.endsWith('.enable') && !o.readOnly && optionSegments(o.name).every((s) => s.kind === 'attr')) : r
+      const inScope = scope ? r.filter((o) => o.name.startsWith(scope.prefix)) : r
+      results = enable ? inScope.filter((o) => o.name.endsWith('.enable') && !o.readOnly && optionSegments(o.name).every((s) => s.kind === 'attr')) : inScope
       indexJob = ''
     } catch (e) {
       if (mine === seq) error = e instanceof Error ? e.message : String(e)
@@ -74,7 +84,7 @@
     missing = ''
     if (!name) return void ((picked = null), (pickedNames = []))
     const hit = results?.find((o) => o.name === name)
-    if (hit) return void ((picked = hit), (pickedNames = []))
+    if (hit) return void ((picked = hit), (pickedNames = names))
     if (picked?.name === name) return
     resolve(name)
   })
@@ -84,7 +94,7 @@
       const exact = await searchIndexed(() => api.searchOptions(host, name, { exact: true }), (job) => still() && (indexJob = job), still)
       if (!still() || exact === null) return
       indexJob = ''
-      if (exact[0]) return void ((picked = exact[0]), (pickedNames = []))
+      if (exact[0]) return void ((picked = exact[0]), (pickedNames = names))
       // A concrete name (users.users."pablo".shell): find the declaration with <name> placeholders.
       const path = fillPath(optionSegments(name), [])
       const r = await api.searchOptions(host, path.slice(-2).join('.'), { limit: 200 })
@@ -102,13 +112,13 @@
   }
 
   // Already set on this machine: in its managed file, or evaluated as a feature.
-  const setHere = $derived(managedOptions(fleet.managed[host]?.settings))
+  const setHere = $derived(managedOptions(fleet.managed[host]?.settings).filter((o) => scopePath.every((p, i) => o.path[i] === p)))
   const isSetHere = (o: OptionInfo) => {
-    const path = fillPath(optionSegments(o.name), [])
+    const path = fillPath(optionSegments(o.name), names)
     return setHere.some((s) => (s.path.length === path.length ? matchOption(o.name, s.path) !== null : false))
   }
 
-  const popular = [
+  const nixosPopular = [
     'time.timeZone',
     'networking.hostName',
     'i18n.defaultLocale',
@@ -122,7 +132,7 @@
     'virtualisation.docker.enable',
     'system.autoUpgrade.enable',
   ]
-  const prefixes = [
+  const nixosPrefixes = [
     ['services', 'Daemons: SSH, web servers, media, databases'],
     ['programs', 'Programs with system-wide setup: shells, Steam, git'],
     ['networking', 'Host name, firewall, NetworkManager, interfaces'],
@@ -136,19 +146,40 @@
     ['environment', 'System packages, variables, /etc files'],
     ['fonts', 'Font packages and fontconfig'],
   ] as const
+  // In a home: home-manager's options, under home-manager.users.<name>.
+  const homePopular = [
+    'programs.git.enable',
+    'programs.bash.enable',
+    'programs.zsh.enable',
+    'programs.starship.enable',
+    'programs.direnv.enable',
+    'programs.neovim.enable',
+    'home.sessionVariables',
+    'home.shellAliases',
+    'services.syncthing.enable',
+  ]
+  const homePrefixes = [
+    ['programs', 'Shells, editors, git, terminals, browsers'],
+    ['services', 'User services: syncthing, gpg-agent, dunst'],
+    ['home', 'Packages, files, variables, aliases, pointer'],
+    ['xdg', 'XDG folders, config files, MIME types'],
+    ['gtk', 'GTK theme, icons and fonts'],
+  ] as const
+  const popular = $derived(scope ? homePopular : nixosPopular)
+  const prefixes = $derived(scope ? homePrefixes : nixosPrefixes)
   const suggestions = ['jellyfin', 'immich', 'nextcloud', 'home-assistant', 'syncthing', 'vaultwarden', 'adguardhome', 'grafana', 'docker', 'caddy']
 
   /** Group by the first two segments: services.openssh, programs.steam, … */
   const groups = $derived.by(() => {
     const out = new Map<string, OptionInfo[]>()
     for (const o of results ?? []) {
-      const segs = optionSegments(o.name)
+      const segs = optionSegments(short(o.name))
       const key = segs.length > 2 ? segs.slice(0, 2).map((s) => s.text).join('.') : segs[0].text
       out.set(key, [...(out.get(key) ?? []), o])
     }
     return [...out.entries()]
   })
-  const rest = (name: string, group: string) => (name.startsWith(group + '.') ? name.slice(group.length + 1) : name)
+  const rest = (name: string, group: string) => (short(name).startsWith(group + '.') ? short(name).slice(group.length + 1) : short(name))
 
   let enabling = $state('')
   async function turnOn(o: OptionInfo) {
@@ -158,7 +189,7 @@
   }
   /** Already enabled: set in the managed file, or evaluated as a feature of the machine. */
   const isOn = (o: OptionInfo) => {
-    const path = fillPath(optionSegments(o.name), [])
+    const path = fillPath(optionSegments(o.name), names)
     const [group, ...rest] = path.slice(0, -1)
     return managedValue(host, path) === true || !!hostByName(host)?.features.some((f) => f.group === group && f.name === rest.join('.'))
   }
@@ -172,8 +203,8 @@
       <b class="prompt" aria-hidden="true">λ ›</b>
       <input
         type="search"
-        placeholder={enable ? 'Search services and programs, e.g. jellyfin' : 'Search options, e.g. services.openssh'}
-        aria-label="Search NixOS options"
+        placeholder={enable ? 'Search services and programs, e.g. jellyfin' : scope ? 'Search home-manager options, e.g. programs.git' : 'Search options, e.g. services.openssh'}
+        aria-label={scope ? 'Search home-manager options' : 'Search NixOS options'}
         spellcheck="false"
         autocomplete="off"
         data-search
@@ -204,7 +235,7 @@
                 {#each setHere as o (o.name)}
                   <li class:sel={selected === o.name}>
                     <button class="o-row bare" onclick={() => (selected = o.name)}>
-                      <span class="o-name mono">{o.name}</span>
+                      <span class="o-name mono">{pathName(o.path.slice(scopePath.length))}</span>
                       <span class="o-type mono">{showValue(o.value)}</span>
                     </button>
                   </li>
@@ -216,8 +247,8 @@
             <h4>Popular</h4>
             <ul>
               {#each popular as name (name)}
-                <li class:sel={selected === name}>
-                  <button class="o-row bare" onclick={() => (selected = name)}><span class="o-name mono">{name}</span></button>
+                <li class:sel={selected === full(name)}>
+                  <button class="o-row bare" onclick={() => (selected = full(name))}><span class="o-name mono">{name}</span></button>
                 </li>
               {/each}
             </ul>

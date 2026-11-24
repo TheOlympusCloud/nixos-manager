@@ -215,5 +215,15 @@
     "testing": "testing-pi"
    }
   ]
- }
+ },
+ "removedPackages": [],
+ "corePackages": [
+  "bash",
+  "coreutils",
+  "findutils",
+  "gnugrep",
+  "gnused",
+  "util-linux"
+ ],
+ "homeManager": false
 }

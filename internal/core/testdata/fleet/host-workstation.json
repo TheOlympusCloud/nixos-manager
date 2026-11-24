@@ -39,6 +39,7 @@
   "nix/nix.conf": "e8c3"
  },
  "managedFile": "hosts/workstation/managed.json",
+ "managedVersion": 2,
  "packages": [
   {
    "name": "git",
@@ -174,13 +175,6 @@
    ]
   },
   {
-   "name": "perl",
-   "version": "5.40.0",
-   "files": [
-    "nixos"
-   ]
-  },
-  {
    "name": "rsync",
    "version": "3.4.1",
    "files": [
@@ -190,6 +184,15 @@
   {
    "name": "strace",
    "version": "6.16",
+   "files": [
+    "nixos"
+   ]
+  }
+ ],
+ "removedPackages": [
+  {
+   "name": "perl",
+   "version": "5.40.0",
    "files": [
     "nixos"
    ]
@@ -334,6 +337,11 @@
      "starship",
      "direnv",
      "firefox"
+    ],
+    "files": [
+     ".config/git/config",
+     ".config/starship.toml",
+     ".zshrc"
     ]
    }
   }
@@ -399,5 +407,14 @@
   "obsidian": "obsidian",
   "spotify": "spotify",
   "discord": "discord"
- }
+ },
+ "corePackages": [
+  "bash",
+  "coreutils",
+  "findutils",
+  "gnugrep",
+  "gnused",
+  "util-linux"
+ ],
+ "homeManager": true
 }

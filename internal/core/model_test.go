@@ -298,3 +298,40 @@ func TestDiffModelsListsUnitsAndEtc(t *testing.T) {
 		t.Errorf("units unknown before, /etc known: %+v", d)
 	}
 }
+
+// Home-manager users show in NixOS terms too: packages, programs and the files in ~.
+func TestDiffModelsListsHomeManager(t *testing.T) {
+	user := func(name string, pkgs, progs []string) User {
+		return User{Name: name, Home: &HomeInfo{Packages: pkgs, Programs: progs}}
+	}
+	head := &Model{Hosts: []Host{{
+		Name: "pc", Toplevel: "a",
+		Users:  []User{user("pablo", []string{"htop", "git"}, []string{"git"}), {Name: "guest"}},
+		Detail: &HostDetail{HomeFiles: map[string]map[string]string{"pablo": {".bashrc": "1", ".config/git/config": "1"}}},
+	}}}
+	working := &Model{Hosts: []Host{{
+		Name: "pc", Toplevel: "b",
+		Users: []User{user("pablo", []string{"git", "ripgrep"}, []string{"git", "starship"}), user("anna", []string{"htop"}, nil)},
+		Detail: &HostDetail{HomeFiles: map[string]map[string]string{
+			"pablo": {".bashrc": "1", ".config/git/config": "2", ".config/starship.toml": "1"},
+			"anna":  {".profile": "1"},
+		}},
+	}}}
+	d := DiffModels(head, working)[0]
+	if d.Status != "changed" ||
+		!reflect.DeepEqual(d.HomePackagesAdded, []string{"anna: htop", "pablo: ripgrep"}) ||
+		!reflect.DeepEqual(d.HomePackagesRemoved, []string{"pablo: htop"}) ||
+		!reflect.DeepEqual(d.HomeProgramsAdded, []string{"pablo: starship"}) || d.HomeProgramsRemoved != nil {
+		t.Fatalf("diff %+v", d)
+	}
+	want := []EtcChange{{"anna: ~/.profile", "added"}, {"pablo: ~/.config/git/config", "changed"}, {"pablo: ~/.config/starship.toml", "added"}}
+	if !reflect.DeepEqual(d.HomeFiles, want) {
+		t.Fatalf("home files %+v", d.HomeFiles)
+	}
+	// Only a home package moving is a change even when the system derivation is the same.
+	working.Hosts[0].Toplevel = "a"
+	working.Hosts[0].Users = []User{user("pablo", []string{"htop"}, []string{"git"})}
+	if d := DiffModels(head, working)[0]; d.Status != "changed" || !reflect.DeepEqual(d.HomePackagesRemoved, []string{"pablo: git"}) {
+		t.Fatalf("diff %+v", d)
+	}
+}

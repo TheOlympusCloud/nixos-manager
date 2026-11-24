@@ -103,7 +103,9 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/branches": auth.ScopeEdit, "POST /api/switch": auth.ScopeEdit, "POST /api/revert": auth.ScopeEdit,
 	"POST /api/merge": auth.ScopeEdit, "POST /api/pull": auth.ScopeEdit, "POST /api/hosts/{host}/packages": auth.ScopeEdit,
 	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
-	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
+	"POST /api/hosts/{host}/package-overrides": auth.ScopeEdit, "POST /api/hosts/{host}/home": auth.ScopeEdit,
+	"POST /api/managed-module": auth.ScopeEdit,
+	"PUT /api/secrets":         auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
 	"POST /api/updates/discard": auth.ScopeEdit,
 
 	"POST /api/push": auth.ScopeFull, // a push is a deploy
@@ -228,16 +230,24 @@ func (s *Server) apiMux() *http.ServeMux {
 	api.HandleFunc("GET /api/hosts/{host}/managed", get(func(r *http.Request) (any, error) {
 		return s.Svc.ManagedView(r.PathValue("host"))
 	}))
-	api.HandleFunc("POST /api/hosts/{host}/packages", post(func(r *http.Request, in struct{ Add, Remove []string }) (any, error) {
-		host := r.PathValue("host")
-		v, err := s.Svc.ManagedView(host)
-		if err == nil && len(in.Add) > 0 {
-			v, err = s.Svc.AddPackages(host, in.Add)
-		}
-		if err == nil && len(in.Remove) > 0 {
-			v, err = s.Svc.RemovePackages(host, in.Remove)
-		}
-		return v, err
+	api.HandleFunc("POST /api/hosts/{host}/packages", post(func(r *http.Request, in core.PackageEdit) (any, error) {
+		return s.Svc.EditPackages(r.PathValue("host"), in)
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/package-overrides", post(func(r *http.Request, in struct {
+		Attr     string
+		Override *core.PackageOverride // null: as nixpkgs has it
+		BaseHash *string               `json:"base_hash"`
+	}) (any, error) {
+		return s.Svc.SetPackageOverride(r.PathValue("host"), in.Attr, in.Override, in.BaseHash)
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/home", post(func(r *http.Request, in core.HomeEdit) (any, error) {
+		return s.Svc.SetHome(r.PathValue("host"), in)
+	}))
+	api.HandleFunc("POST /api/managed-module", post(func(r *http.Request, in struct {
+		BaseHash string `json:"base_hash"`
+	}) (any, error) {
+		hash, err := s.Svc.UpdateManagedModule(in.BaseHash)
+		return map[string]string{"hash": hash}, err
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/settings", post(func(r *http.Request, in struct {
 		Path     []string

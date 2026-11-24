@@ -3,7 +3,7 @@
   import Bar from '../components/cell/Bar.svelte'
   import type { Insight } from '../lib/api'
   import { openPackageSearch } from '../lib/dialogs.svelte'
-  import { fleet, hostByName } from '../lib/fleet.svelte'
+  import { fleet, hostByName, updateManagedModule } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
   import { bigText, frame } from '../lib/ascii'
   import { applyFix, checkCommitFix, health, loadInsights, updateInputFix } from '../lib/health.svelte'
@@ -100,6 +100,8 @@
         <p class="fix-note">{i.hosts[0]} is Code only: add {pkg} in its configuration.</p>
       {/if}
     </div>
+  {:else if i.id === 'managed-old'}
+    <div class="fix"><button class="primary" onclick={updateManagedModule}><Icon name="refresh" /> Update managed.nix</button></div>
   {:else if i.id === 'eval-error' && i.hosts.length === 1}
     <div class="fix"><a class="btn" href={machineLink(i.hosts[0])}>Open {i.hosts[0]}</a></div>
   {:else if i.link === '#/deployments'}

@@ -102,6 +102,24 @@ describe('impact', () => {
     expect(impactLine({ host: 'x', status: 'changed', closure: { sizeFrom: 10, sizeTo: 10, changes: [] } })).toBe('Other configuration')
   })
 
+  it('lists home-manager changes per user, and counts them in the line', () => {
+    const h: HostDiff = {
+      host: 'pc',
+      status: 'changed',
+      homePackagesAdded: ['pablo: ripgrep'],
+      homePackagesRemoved: ['pablo: htop'],
+      homeProgramsAdded: ['anna: starship'],
+      homeFiles: [{ path: 'pablo: ~/.config/git/config', status: 'changed' }],
+    }
+    expect(impactLine(h)).toBe("anna and pablo's homes: 4 changes")
+    expect(impactLine({ host: 'pc', status: 'changed', homePackagesAdded: ['pablo: fd'] })).toBe("pablo's home: 1 change")
+    expect(impactGroups(h).map((g) => [g.label, g.items.map((i) => `${i.kind} ${i.text}`)])).toEqual([
+      ['Home packages', ['add pablo: ripgrep', 'del pablo: htop']],
+      ['Home programs', ['add anna: starship']],
+      ['Home files', ['up pablo: ~/.config/git/config']],
+    ])
+  })
+
   it('keeps broken and unchanged machines apart from the changes', () => {
     const s = splitImpact([{ host: 'z', status: 'unchanged' }, changed, { host: 'b', status: 'error' }, { host: 'n', status: 'added' }, { host: 'r', status: 'removed' }])
     expect(s.changed.map((d) => d.host)).toEqual(['n', 'ws', 'r'])
@@ -134,6 +152,8 @@ describe('settings set here', () => {
     const [d] = withSettings([{ host: 'ws', status: 'unchanged' }], { ws: [{ path: ['services', 'fail2ban', 'enable'], to: true }] })
     expect(d.status).toBe('changed')
     expect(impactLine(d)).toBe('fail2ban turned on')
+    const [o] = withSettings([{ host: 'ws', status: 'unchanged' }], { ws: [{ path: ['packageOverrides', 'htop', 'override', 'withVimKeys'], to: true }] })
+    expect(impactLine(o)).toBe('packageOverrides.htop.override.withVimKeys = true')
     expect(impactGroups(d)[0]).toEqual({ label: 'Settings', items: [{ text: 'services.fail2ban.enable = true', title: 'Was not set here', kind: 'up' }] })
     const [e] = withSettings([{ host: 'ws', status: 'changed' }], { ws: [{ path: ['a', 'b'], from: 1 }, { path: ['nix', 'gc', 'dates'], to: 'weekly' }] })
     expect(impactLine(e)).toBe('2 settings changed')

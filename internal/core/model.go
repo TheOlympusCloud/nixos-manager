@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -37,13 +38,24 @@ type Host struct {
 	// ManagedPackages maps each attribute in managed.json to its package name
 	// (nodejs_22 -> nodejs), so a package seen in the model can be removed by attribute.
 	ManagedPackages map[string]string `json:"managedPackages"`
-	Packages        []Package         `json:"packages"`
-	Features        []Feature         `json:"features"`
-	Users           []User            `json:"users"`
-	Ports           Ports             `json:"ports"`
-	FileSystems     []FileSystem      `json:"fileSystems"`
-	Files           []string          `json:"files"`
-	Checks          Checks            `json:"checks"`
+	// ManagedVersion is what its modules/managed.nix applies: 1 knows only
+	// packages and settings; 2 adds removed packages, package overrides,
+	// home-manager users and the Nix files next to managed.json.
+	ManagedVersion int       `json:"managedVersion"`
+	Packages       []Package `json:"packages"`
+	// RemovedPackages are defined by some module but taken out of the system by
+	// name (managed.json's removedPackages).
+	RemovedPackages []Package `json:"removedPackages"`
+	// CorePackages are NixOS's own packages for a working system (bash, coreutils…).
+	CorePackages []string `json:"corePackages"`
+	// HomeManager: home-manager's NixOS module is loaded, so users can have a home.
+	HomeManager bool         `json:"homeManager"`
+	Features    []Feature    `json:"features"`
+	Users       []User       `json:"users"`
+	Ports       Ports        `json:"ports"`
+	FileSystems []FileSystem `json:"fileSystems"`
+	Files       []string     `json:"files"`
+	Checks      Checks       `json:"checks"`
 	// Secrets are the sops-nix secrets it decrypts (never their values); nil
 	// when sops-nix is not in its configuration.
 	Secrets []HostSecret `json:"secrets"`
@@ -58,6 +70,8 @@ type HostDetail struct {
 	SystemPath string              `json:"systemPath"` // system.build.toplevel's output path
 	Units      map[string]UnitInfo `json:"units"`      // enabled systemd units by name; nil: could not be read
 	Etc        map[string]string   `json:"etc"`        // /etc entries by target: a hash of what each links to; nil: could not be read
+	// HomeFiles are each home-manager user's files in ~, by target, hashed as Etc.
+	HomeFiles map[string]map[string]string `json:"homeFiles"`
 }
 
 // UnitInfo is a systemd unit as switch-to-configuration compares it: a hash of
@@ -129,6 +143,7 @@ type User struct {
 type HomeInfo struct {
 	Packages []string `json:"packages"`
 	Programs []string `json:"programs"`
+	Files    []string `json:"files"` // what it links into ~, relative to it
 }
 
 type Ports struct {
@@ -243,6 +258,13 @@ type HostDiff struct {
 	Etc   []EtcChange  `json:"etc,omitempty"`
 	// Every dependency and the size, when this server has built both systems.
 	Closure *ClosureDiff `json:"closure,omitempty"`
+	// Home-manager users' packages and programs, as "user: name", and their
+	// files in ~, with Path as "user: target".
+	HomePackagesAdded   []string    `json:"homePackagesAdded,omitempty"`
+	HomePackagesRemoved []string    `json:"homePackagesRemoved,omitempty"`
+	HomeProgramsAdded   []string    `json:"homeProgramsAdded,omitempty"`
+	HomeProgramsRemoved []string    `json:"homeProgramsRemoved,omitempty"`
+	HomeFiles           []EtcChange `json:"homeFiles,omitempty"`
 }
 
 // UnitChange is what switching to the new system does to a unit that runs:
@@ -337,8 +359,24 @@ func DiffModels(head, working *Model) []HostDiff {
 		d.UsersAdded, d.UsersRemoved = setDiff(names(b.Users, user), names(a.Users, user))
 		d.PortsAdded, d.PortsRemoved = setDiff(portNames(b.Ports), portNames(a.Ports))
 		d.VersionsChanged = versionChanges(b.Packages, a.Packages)
+		homeItems := func(h Host, f func(HomeInfo) []string) []string {
+			out := []string{}
+			for _, u := range h.Users {
+				if u.Home != nil {
+					for _, x := range f(*u.Home) {
+						out = append(out, u.Name+": "+x)
+					}
+				}
+			}
+			return out
+		}
+		hpkgs := func(i HomeInfo) []string { return i.Packages }
+		hprogs := func(i HomeInfo) []string { return i.Programs }
+		d.HomePackagesAdded, d.HomePackagesRemoved = setDiff(homeItems(b, hpkgs), homeItems(a, hpkgs))
+		d.HomeProgramsAdded, d.HomeProgramsRemoved = setDiff(homeItems(b, hprogs), homeItems(a, hprogs))
 		if inBefore && b.Error == "" && b.Detail != nil && a.Detail != nil {
 			d.Units, d.Etc = diffUnits(b.Detail.Units, a.Detail.Units), diffEtc(b.Detail.Etc, a.Detail.Etc)
+			d.HomeFiles = diffHomeFiles(b.Detail.HomeFiles, a.Detail.HomeFiles)
 		}
 		if inBefore && b.Error == "" && a.Boot != "" { // a machine that boots its own kernel, known before and after
 			d.Reboot = a.Boot != b.Boot
@@ -353,6 +391,7 @@ func DiffModels(head, working *Model) []HostDiff {
 			d.Status = "removed"
 		case d.PackagesAdded != nil || d.PackagesRemoved != nil || d.FeaturesAdded != nil || d.FeaturesRemoved != nil ||
 			d.UsersAdded != nil || d.UsersRemoved != nil || d.PortsAdded != nil || d.PortsRemoved != nil || d.VersionsChanged != nil ||
+			d.HomePackagesAdded != nil || d.HomePackagesRemoved != nil || d.HomeProgramsAdded != nil || d.HomeProgramsRemoved != nil ||
 			a.Toplevel != b.Toplevel:
 			d.Status = "changed"
 		default:
@@ -450,20 +489,46 @@ func diffEtc(before, after map[string]string) []EtcChange {
 	if before == nil || after == nil {
 		return nil
 	}
+	return diffHashes(before, after, "/etc/")
+}
+
+// diffHashes compares files by target, each path shown as prefix+target.
+func diffHashes(before, after map[string]string, prefix string) []EtcChange {
 	var out []EtcChange
 	for target, a := range after {
 		if b, ok := before[target]; !ok {
-			out = append(out, EtcChange{Path: "/etc/" + target, Status: "added"})
+			out = append(out, EtcChange{Path: prefix + target, Status: "added"})
 		} else if b != a {
-			out = append(out, EtcChange{Path: "/etc/" + target, Status: "changed"})
+			out = append(out, EtcChange{Path: prefix + target, Status: "changed"})
 		}
 	}
 	for target := range before {
 		if _, ok := after[target]; !ok {
-			out = append(out, EtcChange{Path: "/etc/" + target, Status: "removed"})
+			out = append(out, EtcChange{Path: prefix + target, Status: "removed"})
 		}
 	}
 	slices.SortFunc(out, func(x, y EtcChange) int { return strings.Compare(x.Path, y.Path) })
+	return out
+}
+
+// diffHomeFiles compares each home-manager user's files in ~, shown as
+// "user: ~/target". A user without home-manager on one side has every file
+// added or removed.
+func diffHomeFiles(before, after map[string]map[string]string) []EtcChange {
+	if before == nil || after == nil {
+		return nil
+	}
+	var out []EtcChange
+	users := slices.Sorted(maps.Keys(before))
+	for u := range after {
+		if _, ok := before[u]; !ok {
+			users = append(users, u)
+		}
+	}
+	slices.Sort(users)
+	for _, u := range users {
+		out = append(out, diffHashes(before[u], after[u], u+": ~/")...)
+	}
 	return out
 }
 

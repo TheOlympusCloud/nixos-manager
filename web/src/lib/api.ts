@@ -64,7 +64,8 @@ export type Token = { id: string; name: string; scope: TokenScope; created: stri
 export type FeatureGroup = 'services' | 'programs' | 'virtualisation' | 'hardware'
 export type Package = { name: string; version: string; files: string[] }
 export type Feature = { group: FeatureGroup; name: string; files: string[]; description: string }
-export type User = { name: string; description: string; groups: string[]; home: { packages: string[]; programs: string[] } | null }
+/** home: the user's home-manager configuration; files are what it links into ~, relative to it. */
+export type User = { name: string; description: string; groups: string[]; home: { packages: string[]; programs: string[]; files?: string[] } | null }
 export type Host = {
   name: string
   hostName: string
@@ -77,7 +78,15 @@ export type Host = {
   managedFile: string | null
   /** managed.json attribute -> package name (nodejs_22 -> nodejs), to remove a model package by attribute. */
   managedPackages?: Record<string, string>
+  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager. */
+  managedVersion?: number
   packages: Package[]
+  /** Packages some module adds but managed.json's removedPackages takes out. */
+  removedPackages?: Package[]
+  /** NixOS's own packages for a working system (bash, coreutils…). */
+  corePackages?: string[]
+  /** home-manager's NixOS module is loaded, so users can have a home. */
+  homeManager?: boolean
   features: Feature[]
   users: User[]
   ports: { tcp: number[]; udp: number[]; firewall: boolean }
@@ -131,6 +140,12 @@ export type HostDiff = {
   etc?: EtcChange[]
   /** Only when the server has built both systems. */
   closure?: ClosureDiff
+  /** home-manager users' packages and programs as "user: name", and files with path "user: ~/target". */
+  homePackagesAdded?: string[]
+  homePackagesRemoved?: string[]
+  homeProgramsAdded?: string[]
+  homeProgramsRemoved?: string[]
+  homeFiles?: EtcChange[]
 }
 export type VersionChange = { name: string; from: string; to: string }
 /** keep: changed, but switching leaves it running the old version until it is restarted or the machine reboots. */
@@ -185,6 +200,8 @@ export type MachineSpec = {
   platform?: MachinePlatform
   disk?: MachineDisk
   device?: string
+  /** The packages managed.json starts with instead of the role's (an empty list: none). */
+  packages?: string[]
 }
 /** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. inputSnippet: the disko input flake.nix lacks. */
 export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string; inputSnippet?: string }
@@ -192,7 +209,28 @@ export type MachineCreated = { name: string; files: string[]; registered: boolea
 export type HostKey = { key: string; fingerprint: string }
 
 /** The machine's app-owned file (hosts/<host>/managed.json). */
-export type Managed = { host?: string; path: string; exists: boolean; hash: string; packages: string[]; settings: Record<string, unknown> }
+export type Managed = {
+  host?: string
+  path: string
+  exists: boolean
+  hash: string
+  packages: string[]
+  /** Package names taken out of the system wherever they are added. */
+  removedPackages?: string[]
+  /** How packages are changed, by attribute, for everything on the machine. */
+  packageOverrides?: Record<string, PackageOverride>
+  /** The home-manager users this file manages. */
+  home?: Record<string, { packages: string[]; removedPackages: string[] }>
+  settings: Record<string, unknown>
+}
+/** A source to build instead: a URL, or a GitHub repository (owner/repo) at a revision. An empty hash: the check prints the right one. */
+export type PackageSource = { url?: string; github?: string; rev?: string; hash?: string }
+/** A patch from a URL, or a file in the machine's folder (patches/fix.patch). */
+export type PackagePatch = { url?: string; hash?: string; file?: string }
+/** .override with override, then .overrideAttrs with overrideAttrs, version, src, and patches after the package's own. */
+export type PackageOverride = { override?: Record<string, unknown>; overrideAttrs?: Record<string, unknown>; version?: string; src?: PackageSource; patches?: PackagePatch[] }
+/** user: a home-manager user's home.packages. exclude/restore: package names, wherever they are added. */
+export type PackageEdit = { user?: string; add?: string[]; remove?: string[]; exclude?: string[]; restore?: string[] }
 /** base_hash: the managed file the edit was based on; the server answers 409 if it changed since. */
 export type SettingEdit = ({ path: string[]; value: unknown } | { path: string[]; unset: true }) & { base_hash?: string }
 
@@ -324,7 +362,14 @@ export const api = {
   merge: (branch: string) => post<{ message: string }>('/api/merge', { branch }).then((r) => r.message),
   refreshModel: () => post<{ job: string }>('/api/model/refresh').then((r) => r.job),
   managed: (host: string) => get<Managed>(`/api/hosts/${encodeURIComponent(host)}/managed`),
-  editPackages: (host: string, edit: { add?: string[]; remove?: string[] }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/packages`, edit),
+  editPackages: (host: string, edit: PackageEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/packages`, edit),
+  /** override null: the package as nixpkgs has it. 409 when the file changed since base_hash. */
+  setPackageOverride: (host: string, attr: string, override: PackageOverride | null, base_hash: string) =>
+    post<Managed>(`/api/hosts/${encodeURIComponent(host)}/package-overrides`, { attr, override, base_hash }),
+  /** stateVersion only when turning it on for a user without home-manager. */
+  editHome: (host: string, edit: { user: string; enable: boolean; stateVersion?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home`, edit),
+  /** Writes this server's modules/managed.nix over the repository's (base_hash '' when it has none). */
+  updateManagedModule: (base_hash: string) => post<{ hash: string }>('/api/managed-module', { base_hash }),
   editSetting: (host: string, edit: SettingEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/settings`, edit),
   searchPackages: (q: string, limit = 50) => get<SearchReply<PackageHit>>('/api/search/packages', { q, limit }),
   searchOptions: (host: string, q: string, opts: { limit?: number; exact?: boolean } = {}) =>

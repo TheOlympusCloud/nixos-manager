@@ -33,10 +33,14 @@ export async function managedSettings(
   /** Files known to be absent on one side (new or deleted), so they are not asked for. */
   absent: { before?: string[]; after?: string[] } = {},
 ): Promise<Record<string, SettingChange[]>> {
-  // null: unknown (unreadable or not JSON).
+  // null: unknown (unreadable or not JSON). The package keys read as settings too
+  // (removedPackages, packageOverrides.htop.version…): a change that only rebuilds a
+  // package is then named before the evaluation, not shown as "Other configuration".
   const settingsOf = (text: string | null) => {
     try {
-      return text === null ? null : ((JSON.parse(text) as { settings?: unknown }).settings ?? {})
+      if (text === null) return null
+      const { settings, removedPackages, packageOverrides, home } = JSON.parse(text) as Record<string, unknown>
+      return { ...(settings ?? {}), ...Object.fromEntries(Object.entries({ removedPackages, packageOverrides, home }).filter(([, v]) => v !== undefined)) }
     } catch {
       return null
     }

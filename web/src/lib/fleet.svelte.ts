@@ -1,9 +1,9 @@
 // The evaluated fleet (stale while a new evaluation runs) and editing by clicking.
-import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type SearchReply } from './api'
+import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
 import { fillPath, optionSegments, pathName } from './options'
-import { go } from './router.svelte'
+import { codeLink, go } from './router.svelte'
 import { refresh, refreshStatus } from './state.svelte'
-import { report, toast, type ToastAction } from './ui.svelte'
+import { confirmBox, report, toast, type ToastAction } from './ui.svelte'
 
 export const fleet = $state({
   model: null as import('./api').Model | null,
@@ -146,7 +146,14 @@ async function writeNow(host: string, fn: () => Promise<Managed>, done: string, 
   return true
 }
 
-export const addPackages = (host: string, attrs: string[]) => write(host, () => api.editPackages(host, { add: attrs }), `Added ${list(attrs)} to ${host}`)
+/** Adding a removed name clears its removal (EditPackages), so its other copies come back: say so. */
+function added(host: string, attrs: string[], user?: string) {
+  const removed = user ? fleet.managed[host]?.home?.[user]?.removedPackages : fleet.managed[host]?.removedPackages
+  const back = attrs.filter((a) => removed?.includes(a))
+  const whose = user ? `${user}'s home on ${host}` : host
+  return `Added ${list(attrs)} to ${whose}` + (back.length ? `. ${list(back)} ${back.length > 1 ? 'are' : 'is'} no longer removed by name, so what else adds ${back.length > 1 ? 'them' : 'it'} comes back too` : '')
+}
+export const addPackages = (host: string, attrs: string[]) => write(host, () => api.editPackages(host, { add: attrs }), added(host, attrs))
 /** Removing is one click, so the toast offers to put the packages back. */
 export const removePackages = (host: string, attrs: string[]) =>
   write(host, () => api.editPackages(host, { remove: attrs }), `Removed ${list(attrs)} from ${host}`, { label: 'Undo', run: () => addPackages(host, attrs) })
@@ -164,6 +171,83 @@ export async function removePackageByName(host: string, name: string) {
   if (!attr) return toast(`${name} is not in ${host}'s managed packages any more.`, 'error'), false
   return removePackages(host, [attr])
 }
+/** Where a package edit lands: the machine, or a home-manager user on it. */
+const where = (host: string, user?: string) => (user ? `${user}'s home on ${host}` : host)
+/** One write for any package edit; done is the toast. */
+export const editPackages = (host: string, edit: PackageEdit, done: string, action?: ToastAction) => write(host, () => api.editPackages(host, edit), done, action)
+/** Takes packages (by name) out of the machine, or a user's home, wherever they are added. */
+export const excludePackages = (host: string, names: string[], user?: string): Promise<boolean> =>
+  editPackages(host, { user, exclude: names }, `Removed ${list(names)} from ${where(host, user)}`, { label: 'Undo', run: () => restorePackages(host, names, user) })
+/** Gives back packages taken out by name: what NixOS or the Nix files add comes back. */
+export const restorePackages = (host: string, names: string[], user?: string): Promise<boolean> =>
+  editPackages(host, { user, restore: names }, `Put ${list(names)} back on ${where(host, user)}`)
+export const addHomePackages = (host: string, user: string, attrs: string[]) => editPackages(host, { user, add: attrs }, added(host, attrs, user))
+export const removeHomePackages = (host: string, user: string, attrs: string[]) =>
+  editPackages(host, { user, remove: attrs }, `Removed ${list(attrs)} from ${where(host, user)}`, { label: 'Undo', run: () => addHomePackages(host, user, attrs) })
+/** How a package is changed on the machine; null puts it back as nixpkgs has it. */
+export const setPackageOverride = (host: string, attr: string, o: PackageOverride | null) =>
+  write(host, async () => api.setPackageOverride(host, attr, o, await seenHash(host)), o ? `Changed how ${attr} is built on ${host}` : `${attr} is back to nixpkgs' own on ${host}`)
+/** Turns home-manager on (stateVersion for a user without it yet) or off for a user. */
+export const setHome = (host: string, user: string, enable: boolean, stateVersion?: string) =>
+  write(host, () => api.editHome(host, { user, enable, stateVersion }), enable ? `home-manager is on for ${user} on ${host}` : `${user}'s home on ${host} is no longer set here`)
+
+/**
+ * Opens a file next to the machine's managed.json in Code, written from
+ * `template` first when it does not exist yet. Resolves false when it could not.
+ */
+export async function openOrCreate(path: string, template: string): Promise<boolean> {
+  try {
+    await api.file(path)
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 404)) return report(e, `Could not open ${path}`), false
+    try {
+      await api.saveFile(path, template, '')
+    } catch (e) {
+      return report(e, `Could not create ${path}`), false
+    }
+    await refresh()
+    toast(`Created ${path}`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
+  }
+  go(codeLink(path))
+  return true
+}
+
+/**
+ * Writes this server's modules/managed.nix over the repository's (an older one lacks
+ * features), or creates it, once confirmed.
+ */
+export async function updateManagedModule(): Promise<boolean> {
+  const path = 'modules/managed.nix'
+  let base: string
+  try {
+    base = await api.file(path).then(
+      (f) => f.hash,
+      (e) => (e instanceof ApiError && e.status === 404 ? '' : Promise.reject(e)),
+    )
+  } catch (e) {
+    return report(e, `Could not read ${path}`), false
+  }
+  const ok = await confirmBox(
+    base
+      ? {
+          title: `Update ${path}?`,
+          message:
+            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users and the Nix files next to managed.json. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
+          ok: 'Update it',
+        }
+      : { title: `Create ${path}?`, message: "It is this nixos-manager's module that applies each machine's managed.json. Review it in Changes before you commit.", ok: 'Create it' },
+  )
+  if (!ok) return false
+  try {
+    await api.updateManagedModule(base)
+  } catch (e) {
+    return report(e, `Could not write ${path}`), false
+  }
+  toast(`${base ? 'Updated' : 'Created'} ${path}: review it in Changes`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
+  await refresh()
+  return true
+}
+
 /** The hash of the managed file this tab last saw, so a stale form cannot overwrite a newer edit. */
 async function seenHash(host: string): Promise<string> {
   if (!fleet.managed[host]) await loadManaged(host)

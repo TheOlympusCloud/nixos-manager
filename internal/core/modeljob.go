@@ -413,6 +413,7 @@ func orEmpty[T any](s []T) []T {
 // normalizeHost gives the UI arrays instead of nulls and a stable order.
 func normalizeHost(h Host) Host {
 	h.Packages, h.Features, h.Users = orEmpty(h.Packages), orEmpty(h.Features), orEmpty(h.Users)
+	h.RemovedPackages, h.CorePackages = orEmpty(h.RemovedPackages), orEmpty(h.CorePackages)
 	h.FileSystems, h.Files = orEmpty(h.FileSystems), orEmpty(h.Files)
 	h.Ports.TCP, h.Ports.UDP = orEmpty(h.Ports.TCP), orEmpty(h.Ports.UDP)
 	if h.ManagedPackages == nil {
@@ -425,6 +426,9 @@ func normalizeHost(h Host) Host {
 	slices.SortFunc(h.Users, func(a, b User) int { return strings.Compare(a.Name, b.Name) })
 	for i := range h.Users {
 		h.Users[i].Groups = orEmpty(h.Users[i].Groups)
+		if hm := h.Users[i].Home; hm != nil {
+			hm.Packages, hm.Programs, hm.Files = orEmpty(hm.Packages), orEmpty(hm.Programs), orEmpty(hm.Files)
+		}
 	}
 	return h
 }
