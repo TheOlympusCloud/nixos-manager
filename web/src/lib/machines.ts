@@ -1,5 +1,5 @@
 // The new-machine wizard: names, role presets and a preview of the files it writes.
-import type { MachineDisk, MachinePlatform, MachineRole, MachineSpec } from './api'
+import type { MachineBoot, MachineDisk, MachinePlatform, MachineRole, MachineSpec } from './api'
 
 /** Problem with a new machine name ('' when fine). It becomes networking.hostName, so it must be a valid host name. */
 export function machineNameProblem(name: string, existing: string[]): string {
@@ -22,14 +22,14 @@ export const platforms: { platform: MachinePlatform; label: string; note: string
 ]
 
 // shortcut: verbatim copies of the default.nix templates in internal/core/machines.go (a test compares them);
-// %[1]q is the quoted name, %[2]q the quoted system and %[3]s the import of disk-config.nix.
+// %[1]q is the quoted name, %[2]q the quoted system, %[3]s the import of disk-config.nix and %[4]s the boot loader.
 const defaultNixTemplates: Record<MachinePlatform, string> = {
   hardware: `{ ... }:
 {
   imports = [
     ./hardware-configuration.nix%[3]s
   ];
-
+%[4]s
   networking.hostName = %[1]q;
 
   # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
@@ -59,7 +59,7 @@ const defaultNixTemplates: Record<MachinePlatform, string> = {
     ./hardware-configuration.nix%[3]s
     (modulesPath + "/profiles/qemu-guest.nix")
   ];
-
+%[4]s
   # Lets Proxmox show the VM's address and shut it down cleanly
   # (turn on "QEMU Guest Agent" in the VM's Options).
   services.qemuGuest.enable = true;
@@ -71,6 +71,23 @@ const defaultNixTemplates: Record<MachinePlatform, string> = {
 }
 `,
 }
+
+export const bootLoaders: { boot: MachineBoot; label: string; note: string }[] = [
+  { boot: 'uefi', label: 'UEFI', note: 'systemd-boot, as the installer sets up a UEFI machine (boot.loader.systemd-boot).' },
+  { boot: 'bios', label: 'BIOS', note: 'GRUB on a disk (boot.loader.grub.device). A Proxmox VM boots BIOS unless set to OVMF.' },
+]
+
+// shortcut: verbatim copies of the boot loaders in internal/core/machines.go (a test compares them).
+const bootUEFI = `
+  # systemd-boot on UEFI, as the NixOS installer sets it up.
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+`
+
+const bootBIOS = `
+  # GRUB on BIOS, installed on this disk.
+  boot.loader.grub.device = %q;
+`
 
 export const disks: { disk: MachineDisk; label: string; note: string }[] = [
   { disk: 'ext4', label: 'ext4', note: 'One ext4 file system for everything: simple and robust.' },
@@ -257,11 +274,13 @@ export function previewFiles(spec: MachineSpec): { path: string; content: string
   const preset = roles.find((r) => r.role === spec.role) ?? roles[2]
   const platform = spec.platform ?? 'hardware'
   const disk = platform !== 'proxmox-lxc' ? spec.disk : undefined
+  // The server's default for a machine installed by hand is UEFI.
+  const boot = platform === 'proxmox-lxc' || disk ? '' : spec.boot === 'bios' ? bootBIOS.replace('%q', JSON.stringify(spec.device || '/dev/<disk>')) : bootUEFI
   const hardware = disk
     ? diskoHardwarePlaceholder.replace('%q', JSON.stringify(spec.system))
     : spec.hardware?.trim()
       ? spec.hardware
-      : `# Placeholder: replace with the output of nixos-generate-config --show-hardware-config\n# on the machine itself.\n{ lib, ... }:\n{\n  nixpkgs.hostPlatform = lib.mkDefault "${spec.system}";\n  boot.loader.grub.device = "nodev";\n  fileSystems."/" = {\n    device = "/dev/disk/by-label/nixos";\n    fsType = "ext4";\n  };\n}\n`
+      : `# Placeholder: replace with the output of nixos-generate-config --show-hardware-config\n# on the machine itself.\n{ lib, ... }:\n{\n  nixpkgs.hostPlatform = lib.mkDefault "${spec.system}";\n  fileSystems."/" = {\n    device = "/dev/disk/by-label/nixos";\n    fsType = "ext4";\n  };\n}\n`
   return [
     {
       path: `${dir}/default.nix`,
@@ -269,7 +288,8 @@ export function previewFiles(spec: MachineSpec): { path: string; content: string
       content: defaultNixTemplates[platform]
         .replaceAll('%[1]q', JSON.stringify(spec.name))
         .replaceAll('%[2]q', JSON.stringify(spec.system))
-        .replaceAll('%[3]s', disk ? '\n    ./disk-config.nix' : ''),
+        .replaceAll('%[3]s', disk ? '\n    ./disk-config.nix' : '')
+        .replaceAll('%[4]s', boot),
     },
     ...(platform === 'proxmox-lxc'
       ? []
@@ -283,10 +303,26 @@ export function previewFiles(spec: MachineSpec): { path: string; content: string
     ...(disk ? [{ path: `${dir}/disk-config.nix`, note: `The ${disk} layout disko makes when nixos-anywhere installs: it erases the disk.`, content: diskConfig(spec, disk) }] : []),
     {
       path: `${dir}/managed.json`,
-      note: `The ${preset.label.toLowerCase()} preset${spec.packages ? ', with your packages' : ''}: what you change by clicking.`,
-      content: JSON.stringify({ packages: spec.packages ? [...new Set(spec.packages)].sort() : preset.packages, settings: preset.settings }, null, 2) + '\n',
+      note: `The ${preset.label.toLowerCase()} preset${spec.packages ? ', with your packages' : ''}${spec.user ? ` and ${spec.user.name}` : ''}: what you change by clicking.`,
+      content: JSON.stringify(managedPreview(spec, preset.packages, preset.settings), null, 2) + '\n',
     },
   ]
+}
+
+// shortcut: mirrors newStateVersion in internal/core/machines.go (a test compares them).
+const newStateVersion = '26.05'
+
+/** managed.json as CreateMachine writes it: the preset, the packages chosen and the first user (as Users → Add user and the Home tab would). */
+function managedPreview(spec: MachineSpec, presetPackages: string[], presetSettings: Record<string, unknown>) {
+  const packages = spec.packages ? [...new Set(spec.packages)].sort() : presetPackages
+  const u = spec.user
+  if (!u) return { packages, settings: presetSettings }
+  const user: Record<string, unknown> = { isNormalUser: true, extraGroups: u.wheel ? ['wheel'] : [] }
+  if (u.keys?.length) user.openssh = { authorizedKeys: { keys: u.keys } }
+  const settings: Record<string, unknown> = { ...presetSettings, users: { users: { [u.name]: user } } }
+  if (!u.home) return { packages, settings }
+  settings['home-manager'] = { users: { [u.name]: { home: { stateVersion: newStateVersion } } } }
+  return { home: { [u.name]: { packages: [], removedPackages: [] } }, packages, settings }
 }
 
 /** Light checks of a pasted hardware-configuration.nix: errors block, warnings inform. */

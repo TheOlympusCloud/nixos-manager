@@ -2,7 +2,7 @@
   import { SvelteSet } from 'svelte/reactivity'
   import type { OptionInfo } from '../lib/api'
   import { frame } from '../lib/ascii'
-  import { fleet, healthy, hostByName, managedValue, setOption, unsetOption, useValues, valueOf } from '../lib/fleet.svelte'
+  import { fleet, healthy, homeByTarget, hostByName, managedValue, setOption, targetName, unsetOption, useValues, valueOf } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
   import { controlFor, docsHTML, fillPath, optionSegments, parseNix, pathName, type Scalar } from '../lib/options'
   import { forUsers, secretPath, takesSecretFile } from '../lib/secrets'
@@ -24,7 +24,10 @@
   const path = $derived(fillPath(segs, names))
   const pathReady = $derived(placeholders.every((_, i) => names[i]?.trim()))
   const control = $derived(controlFor(option.type))
-  const managedFile = $derived(hostByName(host)?.managedFile ?? null)
+  // host may be a standalone home (home:<name>): its own options, not the machines'.
+  const home = $derived(homeByTarget(host))
+  const targetLabel = $derived(targetName(host))
+  const managedFile = $derived((home ?? hostByName(host))?.managedFile ?? null)
   const managed = $derived(!!managedFile)
   const editable = $derived(managed && !option.readOnly && !inList && !!fleet.managed[host])
   const current = $derived(pathReady ? managedValue(host, path) : undefined)
@@ -46,8 +49,8 @@
     const t = setTimeout(() => (asked = name), 450)
     return () => clearTimeout(t)
   })
-  const vals = useValues(() => (asked ? { names: [asked] } : null))
-  const machines = $derived(healthy())
+  const vals = useValues(() => (asked ? { names: [asked], hosts: home ? [host] : undefined } : null))
+  const machines = $derived(home ? [] : healthy())
   const eff = $derived(asked ? effective(valueOf(vals.values, asked, host), current, managedFile, !!fleet.managed[host]) : null)
   const rows = $derived(
     machines.map((h) => ({
@@ -143,7 +146,7 @@
     busy = true
     const n = forUsersSecret
     const needed = n && value === secretPath(n, true) && secrets.find((s) => s.name === n)?.path !== value
-    if (!needed || (await setOption(host, ['sops', 'secrets', n, 'neededForUsers'], true, `Set ${n} to be decrypted before users are made on ${host}`))) {
+    if (!needed || (await setOption(host, ['sops', 'secrets', n, 'neededForUsers'], true, `Set ${n} to be decrypted before users are made on ${targetLabel}`))) {
       if (await setOption(host, path, value)) {
         touched = false
         forUsersSecret = ''
@@ -214,7 +217,7 @@
     {:else if inList}
       <p class="note"><Icon name="info" /> This option sits inside a list of submodules, which a settings path cannot address. Set it in Code.</p>
     {:else if !managed}
-      <p class="note"><Icon name="info" /> {host} is Code only: change options in its Nix files, or <a href={machineLink(host)}>turn on editing</a> to set them here.</p>
+      <p class="note"><Icon name="info" /> {targetLabel} is Code only: change options in its Nix files, or <a href={machineLink(host)}>turn on editing</a> to set them here.</p>
     {:else if !fleet.managed[host]}
       <span class="skel" style:width="40ch"></span>
     {/if}
@@ -242,13 +245,13 @@
 
     {#if asked}
       <div class="now" aria-live="polite">
-        <span class="label">On {host}</span>
+        <span class="label">On {targetLabel}</span>
         {#if vals.error}
           <span class="error-text small">{vals.error}</span>
         {:else if !eff}
-          <span class="skel" style:width="20ch"></span>{#if vals.job}<span class="muted small">Evaluating {host}…</span>{/if}
+          <span class="skel" style:width="20ch"></span>{#if vals.job}<span class="muted small">Evaluating {targetLabel}…</span>{/if}
         {:else if eff.state === 'missing'}
-          <span class="muted">{placeholders.length ? `Nothing is set for ${names.filter(Boolean).map((n) => `“${n}”`).join(', ')} on ${host} yet.` : `${host} has no such option: none of its modules declares it.`}</span>
+          <span class="muted">{placeholders.length ? `Nothing is set for ${names.filter(Boolean).map((n) => `“${n}”`).join(', ')} on ${targetLabel} yet.` : `${targetLabel} has no such option: none of its modules declares it.`}</span>
         {:else if eff.state === 'error'}
           <span class="error-text small">Could not evaluate it: {eff.error.split('\n')[0]}</span>
         {:else}
@@ -259,7 +262,7 @@
       {#if eff?.state === 'value' && !eff.pending && !option.readOnly && !inList}
         <p class="why">
           {#if eff.source.kind === 'here'}
-            Set here, so it is {host}'s final value: a value set here wins over hand-written Nix (only <span class="mono">lib.mkForce</span> beats it).
+            Set here, so it is {targetLabel}'s final value: a value set here wins over hand-written Nix (only <span class="mono">lib.mkForce</span> beats it).
           {:else if eff.source.kind === 'code' && editable}
             Written by hand. Saving a value here overrides it: values set here win over hand-written Nix.
           {:else if eff.source.kind === 'code'}
@@ -356,7 +359,7 @@
 
       <div class="buttons">
         <button class="primary" disabled={!changed || !!problem || busy || waiting} onclick={save}>{busy ? 'Saving…' : 'Save'}</button>
-        {#if waiting}<span class="muted small wait">{eff ? `Reset here: wait for ${host}'s next evaluation` : 'Reading the value that applies now'}; this value is saved whole, starting from it.</span>{/if}
+        {#if waiting}<span class="muted small wait">{eff ? `Reset here: wait for ${targetLabel}'s next evaluation` : 'Reading the value that applies now'}; this value is saved whole, starting from it.</span>{/if}
         {#if current !== undefined}
           <button disabled={busy} onclick={reset} title="Remove it from {fleet.managed[host]?.path}; the default or the hand-written value applies again">Reset</button>
         {/if}

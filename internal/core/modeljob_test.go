@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -101,7 +102,8 @@ func TestModelOfAFleet(t *testing.T) {
 	if ws.ManagedPackages["vscode"] != "vscode" || m.Hosts[2].ManagedPackages == nil {
 		t.Fatalf("managed package names %+v / %+v", ws.ManagedPackages, m.Hosts[2].ManagedPackages)
 	}
-	if len(m.Homes) != 1 || m.Homes[0].Name != "pablo@laptop" {
+	if len(m.Homes) != 1 || m.Homes[0].Name != "pablo@laptop" || m.Homes[0].ManagedFile == nil || *m.Homes[0].ManagedFile != "homes/pablo@laptop/managed.json" ||
+		m.Homes[0].ManagedPackages["bat"] != "bat" || len(m.Homes[0].Files) != 2 {
 		t.Fatalf("homes %+v", m.Homes)
 	}
 	if len(m.Inputs) != 3 || m.Inputs[2].Name != "nixpkgs" || m.Inputs[2].URL != "github:NixOS/nixpkgs/nixos-26.05" {
@@ -440,6 +442,8 @@ func TestHostCannotReadServerFilesWithRealNix(t *testing.T) {
 
 // A standalone home-manager configuration with real Nix. Its programs include removed
 // options, which throw when read (programs.octant): they must not hide the rest.
+// It loads modules/managed-home.nix, so it is edited as home:pablo, whose options
+// and values come from the home, not from a machine.
 func TestHomeModelWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
@@ -461,6 +465,7 @@ func TestHomeModelWithRealNix(t *testing.T) {
       homeConfigurations.pablo = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         modules = [
+          (import ./modules/managed-home.nix ./homes/pablo/managed.json)
           {
             home.username = "pablo";
             home.homeDirectory = "/home/pablo";
@@ -473,6 +478,12 @@ func TestHomeModelWithRealNix(t *testing.T) {
     };
 }
 `)
+	module, err := fs.ReadFile(templates.Fleet, "modules/managed-home.nix")
+	ok(t, err)
+	write(t, s.Repo, "modules/managed-home.nix", string(module))
+	write(t, s.Repo, "homes/pablo/files/.config/nixmgr.txt", "from files/\n")
+	must[ManagedView](t)(s.EditPackages(HomePrefix+"pablo", PackageEdit{Add: []string{"jq"}}))
+	must[ManagedView](t)(s.SetOption(HomePrefix+"pablo", []string{"home", "sessionVariables", "NIXMGR"}, "managed", nil))
 	// Pure evaluation fetches only the inputs flake.lock pins.
 	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
 	if info := wait40(t, lock); info.State != "passed" {
@@ -493,6 +504,43 @@ func TestHomeModelWithRealNix(t *testing.T) {
 	h := m.Homes[0]
 	if h.Error != "" || !slices.Contains(h.Packages, "hello") || !slices.Contains(h.Programs, "git") {
 		t.Fatalf("home: %+v", h)
+	}
+	if h.ManagedFile == nil || *h.ManagedFile != "homes/pablo/managed.json" || !slices.Contains(h.Packages, "jq") ||
+		h.ManagedPackages["jq"] != "jq" || !slices.Contains(h.Files, ".config/nixmgr.txt") {
+		t.Fatalf("managed home: %+v", h)
+	}
+
+	opt, oj, err := s.Jobs.Option(ctx, HomePrefix+"pablo", "programs.git.enable")
+	ok(t, err)
+	if opt == nil {
+		if info := wait40(t, oj); info.State != "passed" {
+			t.Fatalf("options of home:pablo: %s", info.Output)
+		}
+		opt, _, err = s.Jobs.Option(ctx, HomePrefix+"pablo", "programs.git.enable")
+		ok(t, err)
+	}
+	if opt == nil || opt.Type != "boolean" {
+		t.Fatalf("home:pablo's programs.git.enable: %+v", opt)
+	}
+	names := []string{"home.sessionVariables", "programs.git.enable"}
+	res, vj, err := s.Jobs.OptionValues(ctx, names, []string{HomePrefix + "pablo"})
+	ok(t, err)
+	if res == nil {
+		if info := wait40(t, vj); info.State != "passed" {
+			t.Fatalf("values of home:pablo: %s", info.Output)
+		}
+		res, _, err = s.Jobs.OptionValues(ctx, names, []string{HomePrefix + "pablo"})
+		ok(t, err)
+	}
+	if len(res) != 2 || len(res[0].Hosts) != 1 || len(res[1].Hosts) != 1 {
+		t.Fatalf("values: %+v", res)
+	}
+	v := res[0].Hosts[0]
+	if vars, _ := v.Value.(map[string]any); vars["NIXMGR"] != "managed" || !slices.Contains(v.Files, "homes/pablo/managed.json") {
+		t.Fatalf("home:pablo's home.sessionVariables: %+v", v)
+	}
+	if v := res[1].Hosts[0]; v.Value != true || !v.Exists {
+		t.Fatalf("home:pablo's programs.git.enable: %+v", v)
 	}
 }
 

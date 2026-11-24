@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { link, parseHash } from './router.svelte'
+import { homeLink, link, parseHash } from './router.svelte'
 
 describe('routes', () => {
   it('parses views, parts and the query', () => {
@@ -14,5 +14,8 @@ describe('routes', () => {
     const h = link('code', ['hosts', 'a b', 'x#y.nix'], { q: 'a&b', empty: '' })
     expect(h).toBe('#/code/hosts/a%20b/x%23y.nix?q=a%26b')
     expect(parseHash(h)).toEqual({ view: 'code', parts: ['hosts', 'a b', 'x#y.nix'], query: { q: 'a&b' } })
+  })
+  it('opens a standalone home among the machines, by its edit target', () => {
+    expect(parseHash(homeLink('pablo@laptop'))).toEqual({ view: 'machines', parts: ['home:pablo@laptop'], query: {} })
   })
 })

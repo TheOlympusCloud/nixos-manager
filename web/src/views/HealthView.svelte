@@ -101,7 +101,7 @@
       {/if}
     </div>
   {:else if i.id === 'managed-old'}
-    <div class="fix"><button class="primary" onclick={updateManagedModule}><Icon name="refresh" /> Update managed.nix</button></div>
+    <div class="fix"><button class="primary" onclick={() => updateManagedModule()}><Icon name="refresh" /> Update managed.nix</button></div>
   {:else if i.id === 'eval-error' && i.hosts.length === 1}
     <div class="fix"><a class="btn" href={machineLink(i.hosts[0])}>Open {i.hosts[0]}</a></div>
   {:else if i.link === '#/deployments'}

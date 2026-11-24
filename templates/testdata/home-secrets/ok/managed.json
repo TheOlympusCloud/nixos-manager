@@ -1,0 +1,5 @@
+{
+  "packages": [],
+  "home": { "pablo": { "packages": [], "removedPackages": [], "secrets": { ".netrc": "netrc" } } },
+  "settings": { "home-manager": { "users": { "pablo": { "home": { "stateVersion": "26.05" } } } } }
+}

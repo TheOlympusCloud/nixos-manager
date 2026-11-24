@@ -1,5 +1,7 @@
 // Hash routes, so reload and back work: #/fleet, #/machines/pi/packages, #/code/hosts/pi/default.nix, ...
 
+import { HOME } from './packages'
+
 export const views = ['fleet', 'machines', 'packages', 'services', 'options', 'health', 'deployments', 'inputs', 'changes', 'history', 'code', 'settings', 'intro'] as const
 export type View = (typeof views)[number]
 export type Route = { view: View; parts: string[]; query: Record<string, string> }
@@ -40,3 +42,5 @@ export function replace(hash: string) {
 
 export const codeLink = (path: string) => link('code', path.split('/'))
 export const machineLink = (host: string, tab?: string) => link('machines', tab ? [host, tab] : [host])
+/** A standalone home's page, among the machines: #/machines/home:pablo@laptop. */
+export const homeLink = (name: string) => link('machines', [HOME + name])

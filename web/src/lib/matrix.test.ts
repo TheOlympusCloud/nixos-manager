@@ -20,6 +20,11 @@ describe('packageMatrix', () => {
     expect(rows.find((r) => r.name === 'vscode')?.cells[0]?.managed).toBe(true)
     expect(rows.find((r) => r.name === 'git')?.cells[0]?.managed).toBe(false)
   })
+
+  it('marks packages set for every machine', () => {
+    const shared = { ...a, packages: [{ name: 'jq', version: '1.8', files: ['modules/managed.json'] }] }
+    expect(packageMatrix([shared])[0].cells[0]).toMatchObject({ shared: true, managed: false })
+  })
 })
 
 describe('featureMatrix', () => {

@@ -1,8 +1,10 @@
 // Fleet matrices: packages × machines and features × machines.
 import type { Feature, FeatureGroup, Host } from './api'
 import { isRepoFile } from './graph'
+import { SHARED_FILE } from './packages'
 
-export type PkgCell = { version: string; files: string[]; managed: boolean }
+/** managed: set in the machine's managed.json; shared: in modules/managed.json, for every machine. */
+export type PkgCell = { version: string; files: string[]; managed: boolean; shared: boolean }
 export type PkgRow = { name: string; cells: (PkgCell | null)[]; count: number; nixos: boolean }
 
 /** One row per package name, one cell per machine (in the order given). */
@@ -12,7 +14,7 @@ export function packageMatrix(hosts: Host[]): PkgRow[] {
     for (const p of h.packages) {
       let row = rows.get(p.name)
       if (!row) rows.set(p.name, (row = { name: p.name, cells: hosts.map(() => null), count: 0, nixos: true }))
-      row.cells[i] = { version: p.version, files: p.files, managed: !!h.managedFile && p.files.includes(h.managedFile) }
+      row.cells[i] = { version: p.version, files: p.files, managed: !!h.managedFile && p.files.includes(h.managedFile), shared: p.files.includes(SHARED_FILE) }
       row.count++
       if (p.files.some(isRepoFile)) row.nixos = false
     }

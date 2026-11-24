@@ -37,21 +37,27 @@ case "$*" in
     fi ;;
   *"nixmgr:home"*) cat "$dir/home-$host.json" ;;
   *"nixmgr:values"*)
-    if [ ! -f "$dir/host-$host.json" ]; then
-      printf 'error: infinite recursion encountered\n' >&2
-      exit 1
-    fi
-    python3 -I - "$dir/values.json" "$host" "$flake" "$all" <<'PY'
+    # home:<name> is a standalone home, whose managed.json is homes/<name>/managed.json.
+    case $host in
+      home:*) managed_file="homes/${host#home:}/managed.json" ;;
+      *)
+        if [ ! -f "$dir/host-$host.json" ]; then
+          printf 'error: infinite recursion encountered\n' >&2
+          exit 1
+        fi
+        managed_file="hosts/$host/managed.json" ;;
+    esac
+    python3 -I - "$dir/values.json" "$host" "$flake" "$all" "$managed_file" <<'PY'
 import json, os, re, sys
 data = json.load(open(sys.argv[1]))
-host, flake = sys.argv[2], sys.argv[3]
+host, flake, managed_file = sys.argv[2], sys.argv[3], sys.argv[5]
 # pathsJSON = "<JSON, as a Nix string>";
 quoted = re.search(r' pathsJSON = "((?:[^"\\]|\\.)*)";', sys.argv[4]).group(1)
 paths = json.loads(re.sub(r"\\(.)", r"\1", quoted))
 # Settings in the host's managed.json win, as modules/managed.nix makes them do, and
 # are reported as defined in that file (the module sets _file).
 try:
-    managed = json.load(open(os.path.join(flake, "hosts", host, "managed.json"))).get("settings") or {}
+    managed = json.load(open(os.path.join(flake, managed_file))).get("settings") or {}
 except (OSError, ValueError):
     managed = {}
 out = {}
@@ -61,7 +67,7 @@ for path in paths:
     for seg in path:
         node = node.get(seg) if isinstance(node, dict) else None
     if node is not None and not isinstance(node, dict):
-        got.update(exists=True, value=node, files=["hosts/%s/managed.json" % host])
+        got.update(exists=True, value=node, files=[managed_file])
         got.setdefault("type", "unspecified")
     out[json.dumps(path, separators=(",", ":"))] = got
 print(json.dumps(out))

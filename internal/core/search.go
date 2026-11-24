@@ -178,8 +178,8 @@ func (js *Jobs) indexKey(ctx context.Context, kind, host string) string {
 // index returns a ready index, or the job building it, or the error that
 // stopped the last build (until RefreshIndex).
 func (js *Jobs) index(ctx context.Context, kind, host string) (any, *Job, error) {
-	if kind == "options" && !hostName.MatchString(host) {
-		return nil, nil, errorf(ErrInvalid, "invalid machine name %q", host)
+	if kind == "options" && !validTarget(host) {
+		return nil, nil, errorf(ErrInvalid, "invalid machine or home name %q", host)
 	}
 	key := js.indexKey(ctx, kind, host)
 	js.mu.Lock()
@@ -257,8 +257,8 @@ func (js *Jobs) RefreshIndex(ctx context.Context, kind, host string) (*Job, erro
 	if kind != "packages" && kind != "options" {
 		return nil, errorf(ErrInvalid, "unknown index %q (want packages or options)", kind)
 	}
-	if kind == "options" && !hostName.MatchString(host) {
-		return nil, errorf(ErrInvalid, "invalid machine name %q", host)
+	if kind == "options" && !validTarget(host) {
+		return nil, errorf(ErrInvalid, "invalid machine or home name %q", host)
 	}
 	key := js.indexKey(ctx, kind, host)
 	js.mu.Lock()

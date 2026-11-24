@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import { frame, typed } from '../lib/ascii'
-  import { fleet, healthy } from '../lib/fleet.svelte'
+  import { fleet, healthy, targetName } from '../lib/fleet.svelte'
   import { link, machineLink, route } from '../lib/router.svelte'
   import { mergeBranch, noRemote, pullOrPush, repo } from '../lib/repo.svelte'
   import { app, fileTabs, logout, refresh, syncOpenTabs } from '../lib/state.svelte'
@@ -31,7 +31,7 @@
     code: 'Code',
     settings: 'Settings',
   }
-  const crumb = $derived(route.view === 'machines' && route.parts[0] ? route.parts[0] : route.view === 'options' && route.parts[0] ? route.parts[0] : '')
+  const crumb = $derived(route.view === 'machines' && route.parts[0] ? targetName(route.parts[0]) : route.view === 'options' && route.parts[0] ? route.parts[0] : '')
   // The title is typed into the bar as you arrive: λ Machines › workstation.
   const where = $derived((titles[route.view] ?? '') + (crumb ? ' › ' + crumb : ''))
 

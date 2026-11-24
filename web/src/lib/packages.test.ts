@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Managed } from './api'
-import { cleanOverride, formatArgs, homeRows, homeStateVersion, overriddenAttrs, overrideSummary, packageFile, parseArgs, systemRows } from './packages'
+import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeDir, homeEditable, homeEditingLine, homeNameOk, homePathProblem, homeRows, homeStateVersion, linksSecrets, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, secretTemplatesDir, standaloneRows, systemRows, takesFromInputs } from './packages'
 import { host } from './testmodel'
 
 const mf = 'hosts/pc/managed.json'
@@ -47,6 +47,66 @@ describe('systemRows', () => {
   })
 })
 
+describe('rows with modules/managed.json', () => {
+  const shared = (over: Partial<Managed>): Managed => ({ path: SHARED_FILE, exists: true, hash: 's', packages: [], settings: {}, ...over })
+  const pc = host('pc', {
+    managedVersion: 3,
+    managedPackages: { nodejs_22: 'nodejs', jq: 'jq', hello: 'hello', ripgrep: 'ripgrep', fd: 'fd' },
+    packages: [
+      { name: 'jq', version: '1.8', files: [SHARED_FILE] },
+      { name: 'nodejs', version: '22.1', files: [mf] },
+      { name: 'htop', version: '3.4.1', files: ['modules/common.nix'] },
+      { name: 'bash', version: '5.3', files: ['nixos'] },
+    ],
+    removedPackages: [
+      { name: 'hello', version: '2.12', files: [SHARED_FILE] },
+      { name: 'perl', version: '5.40', files: ['nixos'] },
+    ],
+    users: [
+      { name: 'pablo', description: '', groups: [], home: { packages: ['cowsay', 'git'], programs: [] } },
+      { name: 'anna', description: '', groups: [], home: { packages: ['git'], programs: [] } },
+    ],
+  })
+  const m = managed({
+    packages: ['nodejs_22'],
+    removedPackages: ['hello', 'fd'],
+    packageOverrides: { bash: { overrideAttrs: { a: 1 } } },
+    home: { pablo: { packages: [], removedPackages: ['git'] } },
+  })
+  const s = shared({
+    packages: ['jq', 'hello', 'ripgrep', 'fd'],
+    removedPackages: ['perl', 'nodejs', 'gone'],
+    packageOverrides: { htop: { version: '3.5' }, bash: { version: '5.4' } },
+    home: { pablo: { packages: ['cowsay'], removedPackages: [] }, anna: { packages: ['cowsay'], removedPackages: [] } },
+  })
+  it('tells the shared packages, removals and changes from the machine’s own', () => {
+    const by = Object.fromEntries(systemRows(pc, m, [], s).map((r) => [r.name, r]))
+    expect(Object.keys(by).sort()).toEqual(['bash', 'fd', 'gone', 'hello', 'htop', 'jq', 'nodejs', 'perl', 'ripgrep'])
+    expect(by.jq).toMatchObject({ sharedAttr: 'jq', attr: undefined, removed: false })
+    expect(by.hello).toMatchObject({ sharedAttr: 'hello', removed: true, removedShared: false }) // the machine takes it out
+    expect(by.perl).toMatchObject({ removed: true, removedShared: true })
+    expect(by.nodejs).toMatchObject({ attr: 'nodejs_22', removed: false }) // added here: a shared removal leaves it
+    expect(by.ripgrep).toMatchObject({ pending: true, sharedAttr: 'ripgrep', files: [SHARED_FILE] })
+    expect(by.fd).toMatchObject({ removed: true, removedShared: false }) // shared, but removed here: not pending
+    expect(by.fd.pending).toBeFalsy()
+    expect(by.gone).toMatchObject({ removed: true, removedShared: true })
+    expect(by.htop).toMatchObject({ overridden: 'htop', sharedOverride: 'htop' })
+    expect(by.bash).toMatchObject({ overridden: 'bash', sharedOverride: undefined }) // its own change wins whole
+  })
+  it('ignores the shared file when not given (managed.nix older than 3)', () => {
+    const rows = systemRows(pc, m, [])
+    expect(rows.find((r) => r.name === 'jq')).toMatchObject({ sharedAttr: undefined, removed: false })
+    expect(rows.some((r) => r.name === 'ripgrep' || r.name === 'gone')).toBe(false)
+  })
+  it('joins a user’s shared home only where managed.json has that home', () => {
+    expect(homeRows(pc, 'pablo', m, s).map((r) => [r.name, r.sharedAttr ?? '', !!r.removed])).toEqual([
+      ['cowsay', 'cowsay', false],
+      ['git', '', true],
+    ])
+    expect(homeRows(pc, 'anna', m, s).map((r) => [r.name, r.sharedAttr ?? ''])).toEqual([['git', '']])
+  })
+})
+
 describe('homeRows', () => {
   const pc = host('pc', {
     managedPackages: { ripgrep: 'ripgrep' },
@@ -83,5 +143,110 @@ describe('override text', () => {
       src: { github: 'a/b', rev: 'v1' },
       patches: [{ file: 'p.patch' }, { url: 'https://x' }],
     })
+  })
+  it('keeps the nixpkgs a package comes from, first as managed.json writes it', () => {
+    expect(overrideSummary({ from: 'nixpkgs-unstable', patches: [{ url: 'u' }] }, false)).toBe('from nixpkgs-unstable · 1 patch')
+    expect(JSON.stringify(cleanOverride({ version: '2', from: ' nixpkgs-unstable ' }))).toBe('{"from":"nixpkgs-unstable","version":"2"}')
+    expect(cleanOverride({ from: ' ' })).toBeNull()
+  })
+})
+
+describe('another nixpkgs', () => {
+  const input = (name: string, url: string) => ({ name, type: 'github', url, rev: '', lastModified: 0 })
+  it('offers the locked inputs that are a nixpkgs, other than the machine’s own', () => {
+    const inputs = [
+      input('nixpkgs', 'github:NixOS/nixpkgs/nixos-26.05'),
+      input('nixpkgs-unstable', 'github:nixos/nixpkgs/nixos-unstable'),
+      input('home-manager', 'github:nix-community/home-manager/release-26.05'),
+      input('fork', 'github:pablo/nixpkgs'),
+      input('nixpkgs-wayland', 'github:nix-community/nixpkgs-wayland'),
+    ]
+    expect(otherNixpkgs(inputs)).toEqual(['nixpkgs-unstable', 'fork'])
+  })
+  it('writes the line flake.nix needs', () => {
+    expect(nixpkgsInputLine('nixpkgs-unstable', 'nixos-unstable')).toBe('nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";')
+    // A name starting with a digit is not a Nix identifier, so it is quoted.
+    expect(nixpkgsInputLine('9p', 'nixos-unstable')).toBe('"9p".url = "github:NixOS/nixpkgs/nixos-unstable";')
+  })
+  it('needs managed.nix 4', () => {
+    expect([3, 4].map((v) => takesFromInputs(host('pc', { managedVersion: v })))).toEqual([false, true])
+    expect(takesFromInputs(host('code', { managedFile: null, managedVersion: 4 }))).toBe(false)
+  })
+})
+
+describe('secrets in homes', () => {
+  it('needs managed.nix 5', () => {
+    expect([4, 5].map((v) => linksSecrets(host('pc', { managedVersion: v })))).toEqual([false, true])
+    expect(linksSecrets(host('code', { managedFile: null, managedVersion: 5 }))).toBe(false)
+  })
+  it('keeps files with secrets next to the machine\'s managed.json', () => {
+    expect(secretTemplatesDir(host('pc', { managedFile: 'machines/pc/managed.json' }), 'pablo')).toBe('machines/pc/home/pablo/templates/')
+  })
+  it('takes a new path inside ~ that nothing else sets', () => {
+    const taken = ['.netrc', '.config/gh/hosts.yml']
+    expect(['', ' .config/rclone/rclone.conf '].map((p) => homePathProblem(p, taken))).toEqual(['', ''])
+    for (const bad of ['/etc/passwd', '~/.netrc', '../x', 'a//b', './a', 'a/']) expect(homePathProblem(bad, taken)).toMatch(/inside the home folder/)
+    expect(homePathProblem('.git/config', taken)).toMatch(/\.git/)
+    expect(homePathProblem('.netrc', taken)).toBe('That file is already here.')
+  })
+})
+
+describe('copy to other machines', () => {
+  const pablo = { name: 'pablo', description: '', groups: [], home: null }
+  const hosts = [
+    host('pc', { managedVersion: 3, homeManager: true, users: [pablo] }),
+    host('laptop', { managedVersion: 2, homeManager: true, users: [pablo] }),
+    host('old', { managedVersion: 1, homeManager: true, users: [pablo] }),
+    host('code', { managedFile: null, managedVersion: 3, homeManager: true, users: [pablo] }),
+    host('nohm', { managedVersion: 3, users: [pablo] }),
+    host('nouser', { managedVersion: 3, homeManager: true }),
+  ]
+  it('offers machines whose managed.nix applies customisations, and for a home those with the user and home-manager', () => {
+    expect(copyTargets(hosts, 'pc').map((h) => h.name)).toEqual(['laptop', 'nohm', 'nouser'])
+    expect(copyTargets(hosts, 'pc', 'pablo').map((h) => h.name)).toEqual(['laptop'])
+  })
+  it('says where it went, where it was already, and why a machine refused', () => {
+    expect(copySummary('htop', [{ host: 'a', changed: true }, { host: 'b', changed: true }])).toEqual({ text: 'Copied htop to a, b.', ok: true })
+    expect(
+      copySummary('htop', [
+        { host: 'a', changed: true },
+        { host: 'b', changed: false },
+        { host: 'c', changed: false, conflicts: ['packageOverrides.htop', 'hosts/c/packages/htop.nix'] },
+        { host: 'd', changed: false, error: 'hosts/d/managed.json is not valid JSON' },
+      ]),
+    ).toEqual({
+      text: 'Copied htop to a. b already has it. Not copied to c, which has another value for packageOverrides.htop, hosts/c/packages/htop.nix. Not copied to d: hosts/d/managed.json is not valid JSON.',
+      ok: false,
+    })
+    expect(copySummary('htop', [{ host: 'a', changed: false }, { host: 'b', changed: false }]).text).toBe('a, b already have it.')
+    expect(copySummary('htop', [{ host: 'a', changed: true, error: 'hosts/a/managed.json changed since it was loaded' }])).toEqual({ text: 'Not copied to a: hosts/a/managed.json changed since it was loaded.', ok: false })
+  })
+})
+
+describe('standalone homes', () => {
+  it('give the line for flake.nix, with a string where a Nix path cannot hold the name', () => {
+    expect(homeEditingLine('pablo')).toBe('(import ./modules/managed-home.nix ./homes/pablo/managed.json)')
+    expect(homeEditingLine('pablo@laptop')).toBe('(import ./modules/managed-home.nix (./homes + "/pablo@laptop/managed.json"))')
+  })
+  it('are editable only where they load the managed.json edits go to', () => {
+    const home = { name: 'pablo@laptop', packages: [], programs: [], files: [], managedFile: null }
+    expect(homeDir(home.name)).toBe('homes/pablo@laptop')
+    expect(homeEditable(home)).toBe(false)
+    expect(homeEditable({ ...home, managedFile: 'homes/pablo@laptop/managed.json' })).toBe(true)
+    // Loaded from another folder: edits would go to a file nothing reads.
+    expect(homeEditable({ ...home, managedFile: 'home/pablo/managed.json' })).toBe(false)
+    // A name the server refuses, even with the file it would be.
+    expect(homeNameOk('pablo laptop')).toBe(false)
+    expect(homeEditable({ ...home, name: 'pablo laptop', managedFile: 'homes/pablo laptop/managed.json' })).toBe(false)
+  })
+  it('list packages as the evaluation has them and as managed.json changes them', () => {
+    const home = { name: 'laptop', packages: ['bat', 'nodejs'], programs: [], files: [], managedFile: 'homes/laptop/managed.json', managedPackages: { nodejs_22: 'nodejs' } }
+    const m = managed({ path: 'homes/laptop/managed.json', packages: ['nodejs_22', 'jq'], removedPackages: ['nano'] })
+    expect(standaloneRows(home, m).map((r) => [r.name, r.attr ?? '', !!r.pending, !!r.removed])).toEqual([
+      ['bat', '', false, false],
+      ['jq', 'jq', true, false],
+      ['nano', '', false, true],
+      ['nodejs', 'nodejs_22', false, false],
+    ])
   })
 })

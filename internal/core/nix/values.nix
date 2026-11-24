@@ -1,9 +1,15 @@
-# nixmgr:values - the effective value of some options on one machine (host),
-# for the option paths in pathsJSON (a JSON list of lists), keyed by their JSON.
+# nixmgr:values - the effective value of some options on one machine (host), or
+# on a standalone home-manager configuration (host "home:<name>"), for the
+# option paths in pathsJSON (a JSON list of lists), keyed by their JSON.
 { flakeRef, host, pathsJSON }:
 let
   flake = builtins.getFlake flakeRef;
-  machine = flake.nixosConfigurations.${host};
+  isHome = builtins.substring 0 5 host == "home:";
+  machine =
+    if isHome then
+      flake.homeConfigurations.${builtins.substring 5 (builtins.stringLength host) host}
+    else
+      flake.nixosConfigurations.${host};
   inherit (machine) config options;
   lib = machine.pkgs.lib;
   paths = builtins.fromJSON pathsJSON;

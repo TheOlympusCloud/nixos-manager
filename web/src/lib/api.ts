@@ -78,7 +78,7 @@ export type Host = {
   managedFile: string | null
   /** managed.json attribute -> package name (nodejs_22 -> nodejs), to remove a model package by attribute. */
   managedPackages?: Record<string, string>
-  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager. */
+  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager; 3 adds modules/managed.json; 4 packages from another nixpkgs. */
   managedVersion?: number
   packages: Package[]
   /** Packages some module adds but managed.json's removedPackages takes out. */
@@ -112,7 +112,19 @@ export type Checks = {
   autoOptimise: boolean
   zram: boolean
 }
-export type Home = { name: string; packages: string[]; programs: string[]; error?: string | null }
+/** A standalone home-manager configuration (homeConfigurations.<name>). */
+export type Home = {
+  name: string
+  packages: string[]
+  programs: string[]
+  /** What it links into ~, relative to it. */
+  files: string[]
+  /** "homes/<name>/managed.json" when it loads modules/managed-home.nix, else null (Code only); edited as home:<name>. */
+  managedFile: string | null
+  /** managed.json attribute -> package name. */
+  managedPackages?: Record<string, string>
+  error?: string | null
+}
 export type Input = { name: string; type: string; url: string; rev: string; lastModified: number }
 export type Model = { tree: string; hosts: Host[]; homes: Home[]; inputs: Input[]; error?: string }
 export type ModelReply = { state: 'ready'; model: Model } | { state: 'computing'; job: string }
@@ -191,7 +203,9 @@ export type MachineRole = 'minimal' | 'server' | 'desktop'
 export type MachinePlatform = 'hardware' | 'proxmox-lxc' | 'proxmox-vm'
 /** A disko disk layout, for a machine nixos-anywhere installs. */
 export type MachineDisk = 'ext4' | 'btrfs'
-/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). */
+/** The boot loader of a machine installed by hand: systemd-boot on UEFI, or GRUB on BIOS (x86_64 only, on device). */
+export type MachineBoot = 'uefi' | 'bios'
+/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). With boot bios, device is GRUB's disk. */
 export type MachineSpec = {
   name: string
   system: 'x86_64-linux' | 'aarch64-linux'
@@ -202,7 +216,12 @@ export type MachineSpec = {
   device?: string
   /** The packages managed.json starts with instead of the role's (an empty list: none). */
   packages?: string[]
+  /** The first user, written to managed.json: no role creates one. */
+  user?: MachineUser
+  boot?: MachineBoot
 }
+/** keys: authorized_keys lines; wheel: an administrator (sudo); home: home-manager on for them. */
+export type MachineUser = { name: string; keys?: string[]; wheel?: boolean; home?: boolean }
 /** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. inputSnippet: the disko input flake.nix lacks. */
 export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string; inputSnippet?: string }
 /** An SSH ed25519 host key and its SHA256 fingerprint. */
@@ -219,8 +238,8 @@ export type Managed = {
   removedPackages?: string[]
   /** How packages are changed, by attribute, for everything on the machine. */
   packageOverrides?: Record<string, PackageOverride>
-  /** The home-manager users this file manages. */
-  home?: Record<string, { packages: string[]; removedPackages: string[] }>
+  /** The home-manager users this file manages; secrets links a secret of the machine at a path in ~ (managed.nix 5). */
+  home?: Record<string, { packages: string[]; removedPackages: string[]; secrets?: Record<string, string> }>
   settings: Record<string, unknown>
 }
 /** A source to build instead: a URL, or a GitHub repository (owner/repo) at a revision. An empty hash: the check prints the right one. */
@@ -228,7 +247,10 @@ export type PackageSource = { url?: string; github?: string; rev?: string; hash?
 /** A patch from a URL, or a file in the machine's folder (patches/fix.patch). */
 export type PackagePatch = { url?: string; hash?: string; file?: string }
 /** .override with override, then .overrideAttrs with overrideAttrs, version, src, and patches after the package's own. */
-export type PackageOverride = { override?: Record<string, unknown>; overrideAttrs?: Record<string, unknown>; version?: string; src?: PackageSource; patches?: PackagePatch[] }
+/** from: a flake input, another nixpkgs, to take the package from (managed.nix 4). */
+export type PackageOverride = { from?: string; override?: Record<string, unknown>; overrideAttrs?: Record<string, unknown>; version?: string; src?: PackageSource; patches?: PackagePatch[] }
+/** What a copy did on one machine. conflicts: what it already has with another value, so nothing was written there. */
+export type CopyResult = { host: string; changed: boolean; conflicts?: string[]; error?: string }
 /** user: a home-manager user's home.packages. exclude/restore: package names, wherever they are added. */
 export type PackageEdit = { user?: string; add?: string[]; remove?: string[]; exclude?: string[]; restore?: string[] }
 /** base_hash: the managed file the edit was based on; the server answers 409 if it changed since. */
@@ -368,8 +390,12 @@ export const api = {
     post<Managed>(`/api/hosts/${encodeURIComponent(host)}/package-overrides`, { attr, override, base_hash }),
   /** stateVersion only when turning it on for a user without home-manager. */
   editHome: (host: string, edit: { user: string; enable: boolean; stateVersion?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home`, edit),
-  /** Writes this server's modules/managed.nix over the repository's (base_hash '' when it has none). */
-  updateManagedModule: (base_hash: string) => post<{ hash: string }>('/api/managed-module', { base_hash }),
+  /** Links a secret as the file at path in the user's home; without secret, the link goes. */
+  linkHomeSecret: (host: string, edit: { user: string; path: string; secret?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home-secrets`, edit),
+  /** Copies how a package is changed (packageOverride) or a user's home from the machine to others, never overwriting. */
+  copy: (host: string, req: { packageOverride?: string; home?: string; to: string[] }) => post<CopyResult[]>(`/api/hosts/${encodeURIComponent(host)}/copy`, req),
+  /** Writes this server's modules/managed.nix (home: modules/managed-home.nix) over the repository's (base_hash '' when it has none). */
+  updateManagedModule: (base_hash: string, home = false) => post<{ hash: string }>('/api/managed-module', { base_hash, home }),
   editSetting: (host: string, edit: SettingEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/settings`, edit),
   searchPackages: (q: string, limit = 50) => get<SearchReply<PackageHit>>('/api/search/packages', { q, limit }),
   searchOptions: (host: string, q: string, opts: { limit?: number; exact?: boolean } = {}) =>

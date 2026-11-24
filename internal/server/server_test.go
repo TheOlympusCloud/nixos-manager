@@ -789,12 +789,35 @@ func TestPackageCustomisationOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"user": "pablo", "add": []string{"ripgrep"}}, &v); code != 200 || v.Home["pablo"].Packages[0] != "ripgrep" {
 		t.Fatalf("home package: %d %+v", code, v)
 	}
+	// Copied to another machine, which reports what it got.
+	e.do(t, "POST", "/api/hosts/laptop/packages", map[string]any{"add": []string{"git"}}, nil)
+	var copied []core.CopyResult
+	if code := e.do(t, "POST", "/api/hosts/web/copy", map[string]any{"home": "pablo", "to": []string{"laptop"}}, &copied); code != 200 || len(copied) != 1 || !copied[0].Changed {
+		t.Fatalf("copy: %d %+v", code, copied)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/copy", map[string]any{"home": "pablo", "to": []string{"*"}}, nil); code != 400 {
+		t.Fatalf("copy to every machine: %d", code)
+	}
+	// * is modules/managed.json, for every machine, as the web client sends it (unescaped).
+	if code := e.do(t, "POST", "/api/hosts/*/packages", map[string]any{"exclude": []string{"perl"}}, &v); code != 200 || v.Path != "modules/managed.json" || v.RemovedPackages[0] != "perl" {
+		t.Fatalf("every machine: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/*/home", map[string]any{"user": "pablo", "enable": true}, nil); code != 400 {
+		t.Fatalf("home-manager turned on for every machine: %d", code)
+	}
 	var mod struct{ Hash string }
 	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": ""}, &mod); code != 200 || mod.Hash == "" {
 		t.Fatalf("module: %d %+v", code, mod)
 	}
 	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": ""}, nil); code != 409 {
 		t.Fatalf("module written over one the caller did not see: %d", code)
+	}
+	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": "", "home": true}, &mod); code != 200 || mod.Hash == "" {
+		t.Fatalf("home module: %d %+v", code, mod)
+	}
+	// A standalone home, escaped as the web client sends it.
+	if code := e.do(t, "POST", "/api/hosts/home%3Apablo%40laptop/packages", map[string]any{"add": []string{"jq"}}, &v); code != 200 || v.Path != "homes/pablo@laptop/managed.json" || v.Packages[0] != "jq" {
+		t.Fatalf("standalone home: %d %+v", code, v)
 	}
 }
 
@@ -957,6 +980,13 @@ func TestCreateMachineOverHTTP(t *testing.T) {
 	spec := map[string]any{"name": "pc", "system": "x86_64-linux", "role": "minimal", "disk": "btrfs", "device": "/dev/nvme0n1"}
 	if code := e.do(t, "POST", "/api/machines", spec, &res); code != 200 || len(res.Files) != 4 || res.Files[2] != "hosts/pc/disk-config.nix" {
 		t.Fatalf("create with a disk layout: %d %+v", code, res)
+	}
+	spec = map[string]any{"name": "old", "system": "x86_64-linux", "role": "minimal", "boot": "bios", "device": "/dev/sda"}
+	if code := e.do(t, "POST", "/api/machines", spec, &res); code != 200 {
+		t.Fatalf("create with GRUB on BIOS: %d %+v", code, res)
+	}
+	if def, _, _ := e.svc.Read("hosts/old/default.nix"); !strings.Contains(def, `boot.loader.grub.device = "/dev/sda";`) {
+		t.Fatalf("default.nix:\n%s", def)
 	}
 	var er struct{ Error string }
 	if code := e.do(t, "POST", "/api/hostkey", map[string]string{"address": "pc; reboot"}, &er); code != 400 || !strings.Contains(er.Error, "address") {

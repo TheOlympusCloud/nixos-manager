@@ -2,7 +2,8 @@
   import { onMount } from 'svelte'
   import { api, type OptionInfo } from '../lib/api'
   import { frame } from '../lib/ascii'
-  import { fleet, hostByName, loadManaged, managedValue, searchIndexed, setOption } from '../lib/fleet.svelte'
+  import { fleet, hostByName, loadManaged, managedValue, searchIndexed, setOption, targetName } from '../lib/fleet.svelte'
+  import { HOME } from '../lib/packages'
   import { fillPath, matchOption, optionSegments, pathName } from '../lib/options'
   import { managedOptions, showValue } from '../lib/values'
   import Icon from './Icon.svelte'
@@ -165,8 +166,11 @@
     ['xdg', 'XDG folders, config files, MIME types'],
     ['gtk', 'GTK theme, icons and fonts'],
   ] as const
-  const popular = $derived(scope ? homePopular : nixosPopular)
-  const prefixes = $derived(scope ? homePrefixes : nixosPrefixes)
+  // A standalone home (home:<name>) has home-manager's options at the top.
+  const inHome = $derived(!!scope || host.startsWith(HOME))
+  const targetLabel = $derived(targetName(host))
+  const popular = $derived(inHome ? homePopular : nixosPopular)
+  const prefixes = $derived(inHome ? homePrefixes : nixosPrefixes)
   const suggestions = ['jellyfin', 'immich', 'nextcloud', 'home-assistant', 'syncthing', 'vaultwarden', 'adguardhome', 'grafana', 'docker', 'caddy']
 
   /** Group by the first two segments: services.openssh, programs.steam, … */
@@ -184,7 +188,7 @@
   let enabling = $state('')
   async function turnOn(o: OptionInfo) {
     enabling = o.name
-    await setOption(host, fillPath(optionSegments(o.name), []), true, `Enabled ${o.name.slice(0, -'.enable'.length).split('.').slice(1).join('.')} on ${host}`)
+    await setOption(host, fillPath(optionSegments(o.name), []), true, `Enabled ${o.name.slice(0, -'.enable'.length).split('.').slice(1).join('.')} on ${targetLabel}`)
     enabling = ''
   }
   /** Already enabled: set in the managed file, or evaluated as a feature of the machine. */
@@ -216,21 +220,21 @@
         <p class="error-text pad" role="alert">{error}</p>
       {:else if indexJob}
         <div class="pad indexing" role="status">
-          <p><span class="dot busy"></span> <strong>Indexing the options of {host}…</strong> This reads every option of the machine once; with real Nix it takes a minute or two.</p>
+          <p><span class="dot busy"></span> <strong>Indexing the options of {targetLabel}…</strong> This reads every option of the machine once; with real Nix it takes a minute or two.</p>
           <div class="log" use:frame={'square'}>{#key indexJob}<JobLog jobId={indexJob} compact />{/key}</div>
         </div>
       {:else if loading && !results}
         <div class="pad skels">{#each [0, 1, 2, 3, 4] as i (i)}<span class="skel" style:width="{16 + ((i * 7) % 20)}ch"></span>{/each}</div>
       {:else if results === null && enable}
         <div class="pad landing">
-          <p class="muted">Search the services and programs {host} can turn on, by name or by what they do.</p>
+          <p class="muted">Search the services and programs {targetLabel} can turn on, by name or by what they do.</p>
           <div class="chips">{#each suggestions as q (q)}<button class="chip g-services" onclick={() => (query = q)}>{q}</button>{/each}</div>
         </div>
       {:else if results === null}
         <div class="landing">
           {#if setHere.length}
             <section>
-              <h4>Set here on {host} <span class="num">{setHere.length}</span></h4>
+              <h4>Set here on {targetLabel} <span class="num">{setHere.length}</span></h4>
               <ul>
                 {#each setHere as o (o.name)}
                   <li class:sel={selected === o.name}>
@@ -314,12 +318,12 @@
       {:else if missing}
         <div class="empty-form muted" role="status" use:frame={'dash'}>
           <Icon name="search" />
-          <p>{host} has no option called <span class="mono">{missing}</span>. A module it does not import may declare it.</p>
+          <p>{targetLabel} has no option called <span class="mono">{missing}</span>. A module it does not import may declare it.</p>
         </div>
       {:else}
         <div class="empty-form muted" use:frame={'dash'}>
           <Icon name="sliders" />
-          <p>Pick an option to read its documentation and set it on {host}.</p>
+          <p>Pick an option to read its documentation and set it on {targetLabel}.</p>
         </div>
       {/if}
     </div>

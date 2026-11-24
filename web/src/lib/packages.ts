@@ -1,6 +1,29 @@
 // Customising packages: the rows of a machine's (or a home's) packages, and
 // the text forms of a package override.
-import type { Host, Managed, Package, PackageOverride } from './api'
+import type { CopyResult, Home, Host, Input, Managed, Package, PackageOverride } from './api'
+
+/** Edits take this in place of a machine name to change modules/managed.json, set for every machine. */
+export const SHARED = '*'
+export const SHARED_FILE = 'modules/managed.json'
+/** Edits take this and a homeConfigurations name in place of a machine name to change a standalone home: home:pablo@laptop. */
+export const HOME = 'home:'
+export const HOME_MODULE = 'modules/managed-home.nix'
+/** The line a standalone home's modules need for its managed.json; a name a Nix path cannot hold goes in a string. */
+export const homeEditingLine = (name: string) =>
+  `(import ./${HOME_MODULE} ${/^[A-Za-z0-9._+-]+$/.test(name) ? `./homes/${name}/managed.json` : `(./homes + ${JSON.stringify(`/${name}/managed.json`)})`})`
+/** A homeConfigurations name that can be edited here, as the server accepts it: a folder name in homes/. */
+export const homeNameOk = (name: string) => /^[A-Za-z0-9_][A-Za-z0-9_.@+-]{0,99}$/.test(name)
+/** Where a standalone home's own files go: homes/pablo@laptop. */
+export const homeDir = (name: string) => `homes/${name}`
+/** Whether edits here reach the home: they go to homes/<name>/managed.json, so it must load that file. */
+export const homeEditable = (home: Home) => homeNameOk(home.name) && home.managedFile === `${homeDir(home.name)}/managed.json`
+
+/** Whether the machine's modules/managed.nix applies modules/managed.json (version 3). */
+export const appliesShared = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 3
+/** Whether the machine's modules/managed.nix takes a package from another nixpkgs (version 4). */
+export const takesFromInputs = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 4
+/** Whether the machine's modules/managed.nix puts secrets in homes (version 5). */
+export const linksSecrets = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 5
 
 /** One row of a packages table. */
 export type PackageRow = {
@@ -15,6 +38,12 @@ export type PackageRow = {
   pending?: boolean
   /** Taken out by name: removedPackages, in the evaluation or not yet. */
   removed?: boolean
+  /** In modules/managed.json's list (every machine), by this attribute. */
+  sharedAttr?: string
+  /** Taken out by name in modules/managed.json, for every machine. */
+  removedShared?: boolean
+  /** Changed by modules/managed.json, by this attribute, and not by the machine's own. */
+  sharedOverride?: string
   /** NixOS's own package for a working system. */
   core?: boolean
 }
@@ -25,9 +54,20 @@ export const packageFile = (host: Host, attr: string) => `${machineDir(host)}/pa
 export const hostNixFile = (host: Host) => `${machineDir(host)}/custom.nix`
 export const homeNixFile = (host: Host, user: string) => `${machineDir(host)}/home/${user}/custom.nix`
 export const dotfilesDir = (host: Host, user: string) => `${machineDir(host)}/home/${user}/files/`
+/** Files with secrets: each @secret:<name>@ in them is filled in on the machine. */
+export const secretTemplatesDir = (host: Host, user: string) => `${machineDir(host)}/home/${user}/templates/`
+
+/** Why path cannot be a new file in ~ ('' when it can, or is empty): it stays inside the home and is none of taken. */
+export function homePathProblem(path: string, taken: string[]): string {
+  const f = path.trim()
+  if (!f) return ''
+  if (f.startsWith('/') || f.startsWith('~') || f.split('/').some((s) => s === '..' || s === '' || s === '.')) return 'A path inside the home folder, such as .config/starship.toml.'
+  if (f.split('/').some((s) => s.toLowerCase() === '.git')) return 'A .git folder cannot be kept in the repository.'
+  return taken.includes(f) ? 'That file is already here.' : ''
+}
 
 /** The attribute of a package name in managed.json's lists or overrides: nodejs → nodejs_22. */
-export function attrOf(host: Host, name: string, attrs: string[]): string | undefined {
+export function attrOf(host: Pick<Host, 'managedPackages'>, name: string, attrs: string[]): string | undefined {
   const pname = (a: string) => host.managedPackages?.[a]
   return attrs.find((a) => a === name) ?? attrs.find((a) => pname(a) === name) ?? attrs.find((a) => a.split('.').pop() === name)
 }
@@ -39,55 +79,100 @@ export function overriddenAttrs(host: Host, managed: Managed | undefined, paths:
   return [...new Set([...Object.keys(managed?.packageOverrides ?? {}), ...files])].sort()
 }
 
+/** The two files' lists of one kind (the system's or a user's home), as managed.nix joins them. */
+type Lists = { attrs: string[]; removed: Set<string>; sharedAttrs: string[]; removedShared: Set<string> }
+
 /**
- * The machine's packages: installed ones (the evaluation's), ones added since
- * (pending), and ones taken out by name, whether the evaluation shows it yet.
+ * Rows for what is installed and what the evaluation lists as removed, plus what
+ * the files add or take out that it does not show yet. ownFile: the machine's
+ * managed.json for the system's packages, whose files say where each comes from;
+ * null for a home's, whose packages come without files.
  */
-export function systemRows(host: Host, managed: Managed | undefined, paths: string[]): PackageRow[] {
-  const attrs = managed?.packages ?? []
-  const changed = overriddenAttrs(host, managed, paths)
-  const removedNames = new Set(managed?.removedPackages ?? [])
-  const core = new Set(host.corePackages ?? [])
-  const known = new Set([...host.packages, ...(host.removedPackages ?? [])].map((p) => p.name))
-  const row = (p: Package, extra: Partial<PackageRow> = {}): PackageRow => {
-    const attr = host.managedFile && p.files.includes(host.managedFile) ? attrOf(host, p.name, attrs) : undefined
-    // A name removed here still installs what managed.json adds (nodejs_20 replaced by nodejs_24).
-    return { ...p, attr, overridden: attrOf(host, p.name, changed), core: core.has(p.name), removed: removedNames.has(p.name) && !attr, ...extra }
-  }
+function rowsOf(host: Pick<Host, 'managedPackages'>, l: Lists, installed: Package[], removedEval: Package[], ownFile: string | null, extra: (name: string) => Partial<PackageRow>): PackageRow[] {
+  const known = new Set([...installed, ...removedEval].map((p) => p.name))
   const pname = (a: string) => host.managedPackages?.[a]
-  const pending = attrs
-    .filter((a) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? ''))
-    .map((a) => ({ name: a, version: '', files: host.managedFile ? [host.managedFile] : [], attr: a, pending: true, overridden: attrOf(host, a, changed) }))
-  const rows = [
-    ...host.packages.map((p) => row(p)),
-    ...(host.removedPackages ?? []).map((p) => row(p, { removed: true })),
-    ...pending,
-  ]
+  const unknown = (a: string) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? '')
+  const from = (p: Package, file: string) => ownFile === null || p.files.includes(file)
+  const row = (p: Package, evalRemoved: boolean): PackageRow => {
+    const attr = from(p, ownFile ?? '') ? attrOf(host, p.name, l.attrs) : undefined
+    const sharedAttr = from(p, SHARED_FILE) ? attrOf(host, p.name, l.sharedAttrs) : undefined
+    // What either file adds stays whatever the shared file removes (nodejs_20 replaced by
+    // nodejs_24); a name the machine removes takes out what the shared file adds.
+    const removedShared = l.removedShared.has(p.name) && !attr && !sharedAttr
+    return { ...p, attr, sharedAttr, removedShared, removed: evalRemoved || (l.removed.has(p.name) && !attr) || removedShared, ...extra(p.name) }
+  }
+  const rows = [...installed.map((p) => row(p, false)), ...removedEval.map((p) => row(p, true))]
+  for (const a of l.attrs.filter(unknown)) rows.push({ name: a, version: '', files: ownFile ? [ownFile] : [], attr: a, pending: true, ...extra(a) })
+  for (const a of l.sharedAttrs.filter((a) => unknown(a) && !l.attrs.includes(a) && !l.removed.has(pname(a) ?? a)))
+    rows.push({ name: a, version: '', files: ownFile === null ? [] : [SHARED_FILE], sharedAttr: a, pending: true, ...extra(a) })
   // Removed by name, but the evaluation does not know the package: still listed, to give it back.
-  for (const n of removedNames) if (!known.has(n)) rows.push({ name: n, version: '', files: [], removed: true })
+  for (const n of new Set([...l.removed, ...l.removedShared])) if (!known.has(n)) rows.push({ name: n, version: '', files: [], removed: true, removedShared: l.removedShared.has(n) && !l.removed.has(n) })
   return rows.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** A home-manager user's packages, as the evaluation lists them and as managed.json changes them. */
-export function homeRows(host: Host, user: string, managed: Managed | undefined): PackageRow[] {
+/**
+ * The machine's packages: installed ones (the evaluation's), ones added since
+ * (pending), and ones taken out by name, whether the evaluation shows it yet.
+ * shared is modules/managed.json, given when the machine applies it.
+ */
+export function systemRows(host: Host, managed: Managed | undefined, paths: string[], shared?: Managed): PackageRow[] {
+  const changed = overriddenAttrs(host, managed, paths)
+  const sharedChanged = Object.keys(shared?.packageOverrides ?? {})
+  const core = new Set(host.corePackages ?? [])
+  const l: Lists = { attrs: managed?.packages ?? [], removed: new Set(managed?.removedPackages ?? []), sharedAttrs: shared?.packages ?? [], removedShared: new Set(shared?.removedPackages ?? []) }
+  // A Code-only machine has no managed.json: '' matches no file.
+  return rowsOf(host, l, host.packages, host.removedPackages ?? [], host.managedFile ?? '', (n) => {
+    const mine = attrOf(host, n, changed)
+    const theirs = mine ? undefined : attrOf(host, n, sharedChanged)
+    return { overridden: mine ?? theirs, sharedOverride: theirs, core: core.has(n) }
+  })
+}
+
+/**
+ * A user's home-manager packages, as the evaluation lists them and as managed.json changes
+ * them; shared (modules/managed.json) counts only where managed.json has the user's home.
+ */
+export function homeRows(host: Host, user: string, managed: Managed | undefined, shared?: Managed): PackageRow[] {
   const u = host.users.find((x) => x.name === user)
   const mine = managed?.home?.[user]
-  const attrs = mine?.packages ?? []
-  const removedNames = new Set(mine?.removedPackages ?? [])
-  const names = u?.home?.packages ?? []
-  const rows: PackageRow[] = names.map((n) => {
-    const attr = attrOf(host, n, attrs)
-    return { name: n, version: '', files: [], attr, removed: removedNames.has(n) && !attr }
-  })
-  const known = new Set(names)
-  const pname = (a: string) => host.managedPackages?.[a]
-  for (const a of attrs) if (!known.has(a) && !known.has(pname(a) ?? '') && !known.has(a.split('.').pop()!)) rows.push({ name: a, version: '', files: [], attr: a, pending: true })
-  for (const n of removedNames) if (!known.has(n)) rows.push({ name: n, version: '', files: [], removed: true })
-  return rows.sort((a, b) => a.name.localeCompare(b.name))
+  const theirs = mine ? shared?.home?.[user] : undefined
+  const l: Lists = { attrs: mine?.packages ?? [], removed: new Set(mine?.removedPackages ?? []), sharedAttrs: theirs?.packages ?? [], removedShared: new Set(theirs?.removedPackages ?? []) }
+  return rowsOf(host, l, (u?.home?.packages ?? []).map((n) => ({ name: n, version: '', files: [] })), [], null, () => ({}))
+}
+
+/** A standalone home's packages, as the evaluation lists them and as its managed.json changes them. */
+export function standaloneRows(home: Home, managed: Managed | undefined): PackageRow[] {
+  const l: Lists = { attrs: managed?.packages ?? [], removed: new Set(managed?.removedPackages ?? []), sharedAttrs: [], removedShared: new Set() }
+  return rowsOf(home, l, home.packages.map((n) => ({ name: n, version: '', files: [] })), [], null, () => ({}))
 }
 
 /** The release a new home starts at (home.stateVersion): the machine's NixOS release, 26.05. */
 export const homeStateVersion = (host: Host) => /^\d{2}\.\d{2}/.exec(host.release)?.[0] ?? host.stateVersion
+
+// ---- copying a customisation or a home to other machines ----
+
+/**
+ * The machines a package's customisation can be copied to from `from`: editable, with a
+ * managed.nix that applies it (version 2). For a user's home, also with the user and home-manager.
+ */
+export const copyTargets = (hosts: Host[], from: string, user?: string) =>
+  hosts.filter((h) => h.name !== from && !!h.managedFile && (h.managedVersion ?? 1) >= 2 && (!user || (!!h.homeManager && h.users.some((u) => u.name === user))))
+
+/** One sentence per outcome of a copy; ok is false when a machine did not get it. */
+export function copySummary(what: string, results: CopyResult[]): { text: string; ok: boolean } {
+  const names = (rs: CopyResult[]) => rs.map((r) => r.host).join(', ')
+  // A machine whose files were written before its managed.json failed counts as not copied.
+  const copied = results.filter((r) => r.changed && !r.error)
+  const same = results.filter((r) => !r.changed && !r.conflicts?.length && !r.error)
+  const parts: string[] = []
+  if (copied.length) parts.push(`Copied ${what} to ${names(copied)}.`)
+  if (same.length) parts.push(`${names(same)} already ${same.length > 1 ? 'have' : 'has'} it.`)
+  for (const r of results) {
+    if (r.conflicts?.length) parts.push(`Not copied to ${r.host}, which has another value for ${r.conflicts.join(', ')}.`)
+    else if (r.error) parts.push(`Not copied to ${r.host}: ${r.error}.`)
+  }
+  return { text: parts.join(' '), ok: results.every((r) => !r.conflicts?.length && !r.error) }
+}
 
 // ---- override arguments as text: one `name = <JSON value>` per line ----
 
@@ -121,6 +206,7 @@ export function parseArgs(text: string): { args: Record<string, unknown> } | { p
 export function overrideSummary(o: PackageOverride | undefined, rawFile: boolean): string {
   const parts: string[] = []
   const n = (x: object | undefined) => Object.keys(x ?? {}).length
+  if (o?.from) parts.push(`from ${o.from}`)
   if (n(o?.override)) parts.push(`${n(o?.override)} argument${n(o?.override) > 1 ? 's' : ''}`)
   if (n(o?.overrideAttrs)) parts.push(`${n(o?.overrideAttrs)} attribute${n(o?.overrideAttrs) > 1 ? 's' : ''}`)
   if (o?.version) parts.push(`version ${o.version}`)
@@ -132,7 +218,9 @@ export function overrideSummary(o: PackageOverride | undefined, rawFile: boolean
 
 /** Drops empty parts, so an override with nothing left puts the package back. */
 export function cleanOverride(o: PackageOverride): PackageOverride | null {
+  // In managed.json's order, so a saved override compares equal to the form's.
   const out: PackageOverride = {}
+  if (o.from?.trim()) out.from = o.from.trim()
   if (Object.keys(o.override ?? {}).length) out.override = o.override
   if (Object.keys(o.overrideAttrs ?? {}).length) out.overrideAttrs = o.overrideAttrs
   if (o.version?.trim()) out.version = o.version.trim()
@@ -145,6 +233,14 @@ export function cleanOverride(o: PackageOverride): PackageOverride | null {
   if (patches.length) out.patches = patches
   return Object.keys(out).length ? out : null
 }
+
+// ---- another nixpkgs to take a package from ----
+
+/** The locked flake inputs that are a nixpkgs (a fork too), less the one named nixpkgs: the machines' own. */
+export const otherNixpkgs = (inputs: Input[]) => inputs.filter((i) => i.name !== 'nixpkgs' && /^github:[^/]+\/nixpkgs(\/|$)/i.test(i.url)).map((i) => i.name)
+
+/** The line that adds a branch of NixOS/nixpkgs to flake.nix's inputs; a name not starting with a letter or _ is quoted. */
+export const nixpkgsInputLine = (name: string, branch: string) => `${/^[A-Za-z_]/.test(name) ? name : JSON.stringify(name)}.url = "github:NixOS/nixpkgs/${branch}";`
 
 // ---- starters for the files next to managed.json ----
 
@@ -166,6 +262,12 @@ export const hostNixTemplate = (host: string) => `# ${host}'s own NixOS settings
 }
 `
 
+export const standaloneNixTemplate = (name: string) => `# ${name}'s own home-manager settings, next to what is set by clicking.
+# Anything home-manager can do goes here; modules/managed-home.nix imports this file.
+{ config, lib, pkgs, ... }:
+{
+}
+`
 export const homeNixTemplate = (user: string, host: string) => `# ${user}'s home-manager settings on ${host}, next to what is set by clicking.
 # Anything home-manager can do goes here; modules/managed.nix imports this file.
 { config, lib, pkgs, ... }:

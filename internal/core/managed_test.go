@@ -182,6 +182,44 @@ func TestManagedHomeManager(t *testing.T) {
 	}
 }
 
+// A secret linked into a home survives other edits, an empty map leaves the file,
+// and only a path inside ~ and a secret name are taken.
+func TestManagedHomeSecrets(t *testing.T) {
+	s := newService(t)
+	edit := must[ManagedView](t)
+	edit(s.SetHome("web", HomeEdit{User: "pablo", Enable: true, StateVersion: "26.05"}))
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"}))
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".config/rclone/rclone.conf", Secret: "rclone"}))
+	v := edit(s.EditPackages("web", PackageEdit{User: "pablo", Add: []string{"ripgrep"}}))
+	if want := map[string]string{".netrc": "netrc", ".config/rclone/rclone.conf": "rclone"}; !reflect.DeepEqual(v.Home["pablo"].Secrets, want) {
+		t.Fatalf("secrets after a package edit %+v", v.Home["pablo"])
+	}
+	if c, _, _ := s.Read("hosts/web/managed.json"); !strings.Contains(c, `".netrc": "netrc"`) {
+		t.Fatalf("file:\n%s", c)
+	}
+	// Every machine: modules/managed.json gets the user's entry with the first link.
+	if v := edit(s.LinkHomeSecret(SharedHost, HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"})); v.Home["pablo"].Secrets[".netrc"] != "netrc" {
+		t.Fatalf("shared %+v", v.Home)
+	}
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".netrc"}))
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".config/rclone/rclone.conf"}))
+	if c, _, _ := s.Read("hosts/web/managed.json"); strings.Contains(c, "secrets") || !strings.Contains(c, "ripgrep") {
+		t.Fatalf("after unlinking both:\n%s", c)
+	}
+	for _, bad := range []HomeSecretEdit{
+		{User: "pablo", Path: "/etc/passwd", Secret: "x"}, {User: "pablo", Path: "../x", Secret: "x"}, {User: "pablo", Path: "a//b", Secret: "x"},
+		{User: "pablo", Path: "", Secret: "x"}, {User: "pablo", Path: ".netrc", Secret: "a b"}, {User: "pablo", Path: "a\nb", Secret: "x"},
+		{User: "Pablo", Path: ".netrc", Secret: "x"},
+	} {
+		_, err := s.LinkHomeSecret("web", bad)
+		isErr(t, err, ErrInvalid)
+	}
+	// Written by hand, a bad link is refused when read, as any other value.
+	write(t, s.Repo, "hosts/db/managed.json", `{"home": {"pablo": {"packages": [], "removedPackages": [], "secrets": {"../x": "netrc"}}}}`)
+	_, err := s.ManagedView("db")
+	isErr(t, err, ErrInvalid)
+}
+
 func TestPackageOverrides(t *testing.T) {
 	s := newService(t)
 	o := PackageOverride{
@@ -211,6 +249,8 @@ func TestPackageOverrides(t *testing.T) {
 		{Patches: []PackagePatch{{}}},
 		{Override: map[string]any{"": 1}},
 		{Version: "1\n2"},
+		{From: "nixpkgs unstable"},
+		{From: "../nixpkgs"},
 	}
 	for _, b := range bad {
 		_, err := s.SetPackageOverride("web", "htop", &b, nil)
@@ -227,6 +267,13 @@ func TestPackageOverrides(t *testing.T) {
 	v = must[ManagedView](t)(s.SetPackageOverride("web", "btop", &PackageOverride{}, nil))
 	if c, _, _ := s.Read("hosts/web/managed.json"); len(v.PackageOverrides) != 0 || strings.Contains(c, "packageOverrides") {
 		t.Fatalf("an empty override stays:\n%s", c)
+	}
+	// Another nixpkgs alone is a change: the package comes from that flake input.
+	must[ManagedView](t)(s.SetPackageOverride("web", "firefox", &PackageOverride{From: "nixpkgs-unstable"}, nil))
+	if c, _, _ := s.Read("hosts/web/managed.json"); !strings.Contains(c, `"firefox": {
+      "from": "nixpkgs-unstable"
+    }`) {
+		t.Fatalf("file:\n%s", c)
 	}
 }
 
@@ -250,18 +297,104 @@ func TestManagedRefusesUnknownOverrideFields(t *testing.T) {
 	}
 }
 
+// SharedHost edits modules/managed.json with the same calls, and a machine's
+// own file stays untouched; home-manager is still turned on per machine.
+func TestManagedSharedByEveryMachine(t *testing.T) {
+	s := newService(t)
+	v := must[ManagedView](t)(s.ManagedView(SharedHost))
+	if v.Exists || v.Path != "modules/managed.json" || v.Host != SharedHost {
+		t.Fatalf("view of a missing shared file %+v", v)
+	}
+	edit := must[ManagedView](t)
+	edit(s.EditPackages(SharedHost, PackageEdit{Add: []string{"htop"}, Exclude: []string{"perl"}}))
+	edit(s.EditPackages(SharedHost, PackageEdit{User: "pablo", Add: []string{"ripgrep"}}))
+	edit(s.SetPackageOverride(SharedHost, "htop", &PackageOverride{Patches: []PackagePatch{{File: "patches/htop.patch"}}}, nil))
+	v = edit(s.SetOption(SharedHost, []string{"home-manager", "users", "pablo", "programs", "git", "enable"}, true, nil))
+	if !reflect.DeepEqual(v.Packages, []string{"htop"}) || !reflect.DeepEqual(v.RemovedPackages, []string{"perl"}) ||
+		!reflect.DeepEqual(v.Home["pablo"].Packages, []string{"ripgrep"}) || v.PackageOverrides["htop"].Patches[0].File != "patches/htop.patch" {
+		t.Fatalf("shared view %+v", v)
+	}
+	if c, _, err := s.Read("modules/managed.json"); err != nil || !strings.Contains(c, `"perl"`) || !strings.Contains(c, `"ripgrep"`) {
+		t.Fatalf("modules/managed.json %q %v", c, err)
+	}
+	if _, _, err := s.Read("hosts/web/managed.json"); err == nil {
+		t.Fatal("a shared edit wrote a machine's managed.json")
+	}
+	_, err := s.SetHome(SharedHost, HomeEdit{User: "pablo", Enable: true, StateVersion: "26.05"})
+	isErr(t, err, ErrInvalid)
+	// The name stands only for the shared file: no folder of that name is read or written.
+	_, err = s.ManagedView("**")
+	isErr(t, err, ErrInvalid)
+}
+
 func TestUpdateManagedModule(t *testing.T) {
 	s := newService(t)
-	must[string](t)(s.UpdateManagedModule("")) // a repository without one gets it
+	must[string](t)(s.UpdateManagedModule("", false)) // a repository without one gets it
 	write(t, s.Repo, "modules/managed.nix", "# an older one\nfile: { ... }: { }\n")
-	_, err := s.UpdateManagedModule("")
+	_, err := s.UpdateManagedModule("", false)
 	isErr(t, err, ErrExists)
-	_, err = s.UpdateManagedModule("stale")
+	_, err = s.UpdateManagedModule("stale", false)
 	isErr(t, err, ErrConflict)
 	_, cur, _ := s.Read("modules/managed.nix")
-	must[string](t)(s.UpdateManagedModule(cur))
+	must[string](t)(s.UpdateManagedModule(cur, false))
 	want, _ := fs.ReadFile(templates.Fleet, "modules/managed.nix")
 	if c, _, _ := s.Read("modules/managed.nix"); c != string(want) || !strings.Contains(c, "nixosManager.version") {
 		t.Fatalf("not the template:\n%s", c)
+	}
+}
+
+// A standalone home is edited as home:<name>, in homes/<name>/managed.json: its own
+// packages, removed packages and home-manager options at the top, as a machine's.
+func TestManagedStandaloneHome(t *testing.T) {
+	s := newService(t)
+	const h = HomePrefix + "pablo@laptop"
+	v := must[ManagedView](t)(s.EditPackages(h, PackageEdit{Add: []string{"ripgrep"}, Exclude: []string{"nano"}}))
+	if v.Path != "homes/pablo@laptop/managed.json" || !reflect.DeepEqual(v.Packages, []string{"ripgrep"}) || !reflect.DeepEqual(v.RemovedPackages, []string{"nano"}) {
+		t.Fatalf("view %+v", v)
+	}
+	must[ManagedView](t)(s.SetOption(h, []string{"programs", "git", "enable"}, true, nil))
+	content, _, _ := s.Read("homes/pablo@laptop/managed.json")
+	want := "{\n  \"packages\": [\n    \"ripgrep\"\n  ],\n  \"removedPackages\": [\n    \"nano\"\n  ],\n  \"settings\": {\n    \"programs\": {\n      \"git\": {\n        \"enable\": true\n      }\n    }\n  }\n}\n"
+	if content != want {
+		t.Fatalf("file content\n%s\nwant\n%s", content, want)
+	}
+
+	// Users, secrets and package overrides are a NixOS machine's.
+	_, err := s.EditPackages(h, PackageEdit{User: "pablo", Add: []string{"jq"}})
+	isErr(t, err, ErrInvalid)
+	_, err = s.SetHome(h, HomeEdit{User: "pablo", Enable: true})
+	isErr(t, err, ErrInvalid)
+	_, err = s.LinkHomeSecret(h, HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"})
+	isErr(t, err, ErrInvalid)
+	_, err = s.SetPackageOverride(h, "htop", &PackageOverride{Version: "1"}, nil)
+	isErr(t, err, ErrInvalid)
+	_, err = s.Copy("workstation", CopyRequest{Home: "pablo", To: []string{h}})
+	isErr(t, err, ErrInvalid)
+	write(t, s.Repo, "homes/pablo@laptop/managed.json", `{"packages": [], "home": {"pablo": {"packages": []}}}`)
+	_, err = s.ManagedView(h)
+	isErr(t, err, ErrInvalid)
+
+	for _, bad := range []string{HomePrefix, HomePrefix + "../x", HomePrefix + "a/b", HomePrefix + ".hidden", "pablo@laptop"} {
+		if _, err := s.ManagedView(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+		if validTarget(bad) {
+			t.Errorf("validTarget(%q)", bad)
+		}
+	}
+	if !validTarget(h) || !validTarget("workstation") {
+		t.Fatal("validTarget refuses a home or a machine")
+	}
+}
+
+func TestUpdateManagedHomeModule(t *testing.T) {
+	s := newService(t)
+	must[string](t)(s.UpdateManagedModule("", true))
+	want, _ := fs.ReadFile(templates.Fleet, "modules/managed-home.nix")
+	if c, _, _ := s.Read("modules/managed-home.nix"); c != string(want) || !strings.Contains(c, "nixosManager.managedFile") {
+		t.Fatalf("not the template:\n%s", c)
+	}
+	if _, _, err := s.Read("modules/managed.nix"); err == nil {
+		t.Fatal("managed.nix was written too")
 	}
 }

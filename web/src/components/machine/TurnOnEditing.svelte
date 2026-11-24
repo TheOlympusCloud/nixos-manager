@@ -3,20 +3,27 @@
   import { api } from '../../lib/api'
   import { codeLink } from '../../lib/router.svelte'
   import { updateManagedModule } from '../../lib/fleet.svelte'
+  import { HOME_MODULE, homeEditingLine } from '../../lib/packages'
   import { app } from '../../lib/state.svelte'
   import { copyText } from '../../lib/util'
   import { editingPreview } from '../../lib/values'
   import { frame } from '../../lib/ascii'
   import Icon from '../Icon.svelte'
 
-  /** How to make a Code only machine Editable here: one line in flake.nix, previewed where it goes. */
-  let { host, onclose }: { host: string; onclose: () => void } = $props()
+  /**
+   * How to make a Code only machine Editable here: one line in flake.nix, previewed where it goes.
+   * With home, host is a standalone home (homeConfigurations.<host>), whose line has no fixed place.
+   */
+  let { host, onclose, home = false }: { host: string; onclose: () => void; home?: boolean } = $props()
 
-  const line = $derived(`(import ./modules/managed.nix ./hosts/${host}/managed.json)`)
+  const line = $derived(home ? homeEditingLine(host) : `(import ./modules/managed.nix ./hosts/${host}/managed.json)`)
+  const file = $derived(home ? `homes/${host}/managed.json` : `hosts/${host}/managed.json`)
+  const module = $derived(home ? HOME_MODULE : 'modules/managed.nix')
   let preview = $state<ReturnType<typeof editingPreview>>(null)
   let loaded = $state(false)
-  const hasModule = $derived(app.entries.some((e) => e.path === 'modules/managed.nix'))
+  const hasModule = $derived(app.entries.some((e) => e.path === module))
   onMount(() => {
+    if (home) return
     api.file('flake.nix').then(
       (f) => ((preview = editingPreview(f.content, host)), (loaded = true)),
       () => (loaded = true),
@@ -36,14 +43,18 @@
     <button class="icon" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
   </header>
   <p class="lead">
-    Editing here keeps the packages and options you set by clicking in <span class="mono">hosts/{host}/managed.json</span>. Your hand-written Nix stays as it is; a value set here wins over it.
+    Editing here keeps the packages and options you set by clicking in <span class="mono">{file}</span>. Your hand-written Nix stays as it is; a value set here wins over it.
   </p>
 
   <ol class="steps">
     <li>
       <span class="n">1</span>
       <div class="step">
-        <p>Add this line to {host}'s <span class="mono">modules</span> in <span class="mono">flake.nix</span>:</p>
+        {#if home}
+          <p>Add this line to the <span class="mono">modules</span> of <span class="mono">homeConfigurations."{host}"</span> in <span class="mono">flake.nix</span>, the list its <span class="mono">homeManagerConfiguration</span> gets:</p>
+        {:else}
+          <p>Add this line to {host}'s <span class="mono">modules</span> in <span class="mono">flake.nix</span>:</p>
+        {/if}
         <div class="line">
           <code>{line}</code>
           <button class="small" onclick={copy}><Icon name={copied ? 'tick' : 'copy'} /> {copied ? 'Copied' : 'Copy'}</button>
@@ -59,8 +70,8 @@
         {/if}
         {#if !hasModule}
           <p class="warn small">
-            <Icon name="alert" /> This repository has no <span class="mono">modules/managed.nix</span> yet.
-            <button class="link small" onclick={updateManagedModule}>Create it</button>
+            <Icon name="alert" /> This repository has no <span class="mono">{module}</span> yet.
+            <button class="link small" onclick={() => updateManagedModule(home)}>Create it</button>
           </p>
         {/if}
       </div>

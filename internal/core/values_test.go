@@ -66,6 +66,26 @@ func TestOptionValuesAcrossTheFleet(t *testing.T) {
 	isErr(t, err, ErrInvalid)
 }
 
+// A standalone home's values are asked for as home:<name>, from the home itself.
+func TestOptionValuesOfAStandaloneHome(t *testing.T) {
+	ctx := context.Background()
+	s := fleetService(t, "testdata/fleet")
+	write(t, s.Repo, "homes/pablo@laptop/managed.json", `{"settings": {"programs": {"git": {"enable": true}}}}`)
+	names, hosts := []string{"programs.git.enable"}, []string{HomePrefix + "pablo@laptop"}
+	res, job, err := s.Jobs.OptionValues(ctx, names, hosts)
+	if res == nil && err == nil {
+		wait(t, job)
+		res, _, err = s.Jobs.OptionValues(ctx, names, hosts)
+	}
+	ok(t, err)
+	if len(res) != 1 || len(res[0].Hosts) != 1 {
+		t.Fatalf("values: %+v", res)
+	}
+	if v := res[0].Hosts[0]; v.Host != hosts[0] || v.Value != true || !reflect.DeepEqual(v.Files, []string{"homes/pablo@laptop/managed.json"}) {
+		t.Fatalf("home:pablo@laptop's programs.git.enable: %+v", v)
+	}
+}
+
 // A failed read is reported once; asking again retries, so a passing cause (no network) does not stick.
 func TestOptionValuesRetryAfterAFailure(t *testing.T) {
 	ctx := context.Background()

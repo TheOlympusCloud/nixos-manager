@@ -1,22 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type MachineDisk, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
+  import { api, type MachineBoot, type MachineDisk, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
   import { bigText, frame } from '../lib/ascii'
   import { createMachine, fleet } from '../lib/fleet.svelte'
+  import { plural } from '../lib/format'
   import { installCommand } from '../lib/install'
-  import { architectures, deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
+  import { architectures, bootLoaders, deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
   import { go, machineLink } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { toast } from '../lib/ui.svelte'
+  import { parseSSHKeys, userNameProblem } from '../lib/users'
   import { copyText } from '../lib/util'
   import Dither from './cell/Dither.svelte'
   import Icon from './Icon.svelte'
 
-  /** The new-machine wizard: name, architecture, role, platform and hardware or disk layout, then a preview of the files. */
+  /** The new-machine wizard: name, architecture, role, first user, platform and boot loader and hardware or disk layout, then a preview of the files. */
   let { onclose }: { onclose: () => void } = $props()
 
   let el: HTMLDialogElement
-  const steps = ['Name', 'Role', 'Platform', 'Review'] as const
+  const steps = ['Name', 'Role', 'User', 'Platform', 'Review'] as const
   let step = $state(0)
   let name = $state('')
   let system = $state<MachineSpec['system']>('x86_64-linux')
@@ -32,12 +34,25 @@
     if (!chosen.includes(p)) packages = [...chosen, p]
     newPkg = ''
   }
+  // The first user, as Users → Add user makes one; none while the name is empty.
+  let userName = $state('')
+  let userKeys = $state('')
+  let wheel = $state(true)
+  let home = $state(false)
+  const uName = $derived(userName.trim())
+  const parsedKeys = $derived(parseSSHKeys(userKeys))
+  const keyCount = $derived('keys' in parsedKeys ? parsedKeys.keys.length : 0)
+  const keysProblem = $derived(userKeys.trim() && 'problem' in parsedKeys ? parsedKeys.problem : '')
+  const userProblem = $derived(userNameProblem(uName, []) || (!uName && userKeys.trim() ? 'Give the keys a user name, or clear them.' : ''))
   let platform = $state<MachinePlatform>('hardware')
   let hardware = $state('')
   // nixos-anywhere installs it on a disko layout, instead of NixOS installed by hand.
   let anywhere = $state(false)
+  let boot = $state<MachineBoot>('uefi')
   let disk = $state<MachineDisk>('ext4')
   let device = $state('')
+  // Its own state: a disk typed for GRUB must never pre-fill the disk nixos-anywhere erases.
+  let grubDevice = $state('')
   let creating = $state(false)
   let flakeText = $state<string | null>(null)
   const autoFlake = $derived(flakeText === null ? null : flakeText.includes('readDir ./hosts'))
@@ -52,20 +67,38 @@
   const lxc = $derived(platform === 'proxmox-lxc')
   const hw = $derived(lxc || anywhere ? {} : hardwareCheck(hardware))
   const layout = $derived(!lxc && anywhere)
+  // Installed by hand on BIOS: GRUB goes on a disk. GRUB's BIOS target is x86 only.
+  const grubBIOS = $derived(!lxc && !anywhere && system === 'x86_64-linux' && boot === 'bios')
   const devProblem = $derived(deviceProblem(device.trim()))
+  const grubProblem = $derived(deviceProblem(grubDevice.trim()))
   const spec = $derived<MachineSpec>({
     name: name.trim(),
     system,
     role,
     platform,
     ...(packages ? { packages } : {}),
-    ...(layout ? { disk, device: device.trim() } : !lxc && hardware.trim() ? { hardware } : {}),
+    ...(uName ? { user: { name: uName, keys: 'keys' in parsedKeys ? parsedKeys.keys : [], wheel, home } } : {}),
+    ...(layout
+      ? { disk, device: device.trim() }
+      : lxc
+        ? {}
+        : { boot: grubBIOS ? 'bios' : 'uefi', ...(grubBIOS ? { device: grubDevice.trim() } : {}), ...(hardware.trim() ? { hardware } : {}) }),
   })
   const noDiskoInput = $derived(layout && flakeText !== null && !hasDiskoInput(flakeText))
+  // shortcut: any mention counts; a flake without home-manager's module fails to evaluate the machine, which says so.
+  const noHomeManager = $derived(!!uName && home && flakeText !== null && !flakeText.includes('home-manager'))
   const files = $derived(previewFiles(spec))
   let openName = $state('managed.json')
   const shown = $derived(files.find((f) => f.path.endsWith('/' + openName)) ?? files[files.length - 1])
-  const canNext = $derived(step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !hw.error && (!layout || (!!device.trim() && !devProblem)) : true)
+  const canNext = $derived(
+    step === 0
+      ? !!name.trim() && !nameProblem
+      : step === 2
+        ? !userProblem && !keysProblem
+        : step === 3
+          ? !hw.error && (!layout || (!!device.trim() && !devProblem)) && (!grubBIOS || (!!grubDevice.trim() && !grubProblem))
+          : true,
+  )
 
   onMount(() => {
     el.showModal()
@@ -117,7 +150,7 @@
   <div class="modal" use:frame={{ kind: 'double', shadow: true, animate: true, title: 'New machine', tag: `${step + 1} / ${steps.length}` }}>
     <header>
       <h2 id="nm-title" class="sr-only">New machine</h2>
-      <!-- ✓ Name ──── Role ──── Platform ──── Review -->
+      <!-- ✓ Name ──── Role ──── User ──── Platform ──── Review -->
       <ol class="steps" aria-label="Steps">
         {#each steps as s, i (s)}
           <li class:done={i < step} class:now={i === step} aria-current={i === step ? 'step' : undefined}>
@@ -125,7 +158,7 @@
           </li>
         {/each}
       </ol>
-      <!-- On the top line, left of the step count: ═ × ═ 2 / 4 ═╗ -->
+      <!-- On the top line, left of the step count: ═ × ═ 2 / 5 ═╗ -->
       <button class="icon close" aria-label="Close" onclick={() => el.close()}><Icon name="x" /></button>
     </header>
 
@@ -191,6 +224,39 @@
           <p class="hint">All of it lands in <span class="mono">managed.json</span>, so you can change any of it by clicking later.</p>
         </fieldset>
       {:else if step === 2}
+        <label class="field">
+          <span class="label">First user <span class="faint">(optional)</span></span>
+          <input class="mono" bind:value={userName} placeholder="alice" spellcheck="false" autocomplete="off" aria-invalid={!!userProblem} aria-describedby="user-hint" />
+          {#if userProblem}
+            <span class="problem" id="user-hint">{userProblem}</span>
+          {:else}
+            <span class="hint" id="user-hint">
+              No role creates a user. Leave it empty when users come from hand-written Nix, or add them in Users later. Its password is set on the machine
+              (<span class="mono">passwd</span>, or when the installer ISO offers to).
+            </span>
+          {/if}
+        </label>
+        <label class="field">
+          <span class="label">Authorized SSH keys <span class="faint">(one per line)</span></span>
+          <textarea class="mono keys" rows="4" bind:value={userKeys} placeholder="ssh-ed25519 AAAA… {uName || 'alice'}@laptop" spellcheck="false" aria-invalid={!!keysProblem}></textarea>
+          {#if keysProblem}
+            <span class="problem">{keysProblem}</span>
+          {:else if keyCount}
+            <span class="hint">{plural(keyCount, 'key')}</span>
+          {:else if uName && role === 'server'}
+            <span class="warn"><Icon name="key" /> The server preset allows SSH keys only: without a key, {uName} cannot log in over SSH.</span>
+          {:else}
+            <span class="hint">The contents of <span class="mono">~/.ssh/id_ed25519.pub</span> on the computer you log in from.</span>
+          {/if}
+        </label>
+        <div class="field">
+          <label class="toggle"><input type="checkbox" bind:checked={wheel} /><strong>Administrator</strong><span class="hint">in the wheel group: can use sudo</span></label>
+          <label class="toggle"><input type="checkbox" bind:checked={home} /><strong>home-manager</strong><span class="hint">their own packages, settings and dotfiles, in the Home tab</span></label>
+          {#if noHomeManager}
+            <span class="warn"><Icon name="alert" /> flake.nix does not mention home-manager: add its input and NixOS module, as the starter flake has, or {name.trim()} will not evaluate.</span>
+          {/if}
+        </div>
+      {:else if step === 3}
         <fieldset class="field">
           <legend class="label">Where does {name.trim()} run?</legend>
           <div class="choices three">
@@ -229,7 +295,7 @@
               <label class="choice lift" class:on={!anywhere} use:frame={{ kind: !anywhere ? 'heavy' : 'round', lift: true }}>
                 <input type="radio" name="install" value={false} bind:group={anywhere} />
                 <span class="c-title"><Icon name="terminal" /> Installed by hand</span>
-                <span class="c-note">From the NixOS installer, as usual. Its hardware configuration goes below.</span>
+                <span class="c-note">From the NixOS installer, as usual. Its boot loader and hardware configuration go below.</span>
               </label>
               <label class="choice lift" class:on={anywhere} use:frame={{ kind: anywhere ? 'heavy' : 'round', lift: true }}>
                 <input type="radio" name="install" value={true} bind:group={anywhere} />
@@ -267,6 +333,37 @@
             {/if}
           </label>
         {:else if !lxc}
+          {#if system === 'x86_64-linux'}
+            <fieldset class="field">
+              <legend class="label">Boot loader</legend>
+              <div class="choices two">
+                {#each bootLoaders as b (b.boot)}
+                  <label class="choice lift" class:on={boot === b.boot} use:frame={{ kind: boot === b.boot ? 'heavy' : 'round', lift: true }}>
+                    <input type="radio" name="boot" value={b.boot} bind:group={boot} />
+                    <span class="c-title"><Icon name="disk" /> {b.label}</span>
+                    <span class="c-note">{b.note}</span>
+                  </label>
+                {/each}
+              </div>
+              <span class="hint">As the installer set it up: <span class="mono">grep boot.loader /etc/nixos/configuration.nix</span> on the machine tells.</span>
+            </fieldset>
+            {#if grubBIOS}
+              <label class="field">
+                <span class="label">Disk GRUB is on</span>
+                <input class="mono" bind:value={grubDevice} placeholder="/dev/sda" spellcheck="false" autocomplete="off" aria-invalid={!!grubProblem} aria-describedby="grub-hint" />
+                {#if grubProblem}
+                  <span class="problem" id="grub-hint">{grubProblem}</span>
+                {:else}
+                  <span class="hint" id="grub-hint">The installer's <span class="mono">boot.loader.grub.device</span>: a whole disk such as <span class="mono">/dev/sda</span>, not a partition.</span>
+                {/if}
+              </label>
+            {/if}
+          {:else}
+            <div class="field">
+              <span class="label">Boot loader</span>
+              <span class="hint">systemd-boot, on UEFI: GRUB's BIOS target is x86_64 only.</span>
+            </div>
+          {/if}
           <div class="field">
             <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
             <p class="lead">
@@ -301,8 +398,10 @@
             {:else if autoFlake === false}
               <span class="warn"><Icon name="info" /> flake.nix lists its machines by hand: you will get the line to add.</span>
             {/if}
-            {#if role === 'server'}
+            {#if role === 'server' && !spec.user}
               <span class="warn"><Icon name="key" /> The server preset allows SSH keys only and creates no user: add yours with a key in Users before deploying, or nobody can log in over SSH.</span>
+            {:else if role === 'server' && !spec.user?.keys?.length}
+              <span class="warn"><Icon name="key" /> The server preset allows SSH keys only, and {spec.user?.name} has no key: add one in Users before deploying, or {spec.user?.name} cannot log in over SSH.</span>
             {/if}
             {#if noDiskoInput}
               <span class="warn"><Icon name="alert" /> flake.nix has no disko input, which disk-config.nix needs: add it to its inputs, then Lock.</span>
@@ -455,6 +554,13 @@
     display: block;
     color: var(--green);
   }
+  .toggle {
+    display: flex;
+    gap: 1ch;
+    width: max-content;
+    max-width: 100%;
+    cursor: pointer;
+  }
   .review {
     display: grid;
     gap: var(--lh);
@@ -551,6 +657,9 @@
   }
   textarea {
     height: calc(var(--lh) * 7);
+  }
+  textarea.keys {
+    height: calc(var(--lh) * 4);
   }
   .install {
     display: grid;

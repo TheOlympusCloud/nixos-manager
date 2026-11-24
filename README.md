@@ -46,19 +46,27 @@ An MCP server gives automation the same features.
   applies with priority over hand-written values (but not over `mkForce`);
   hand-written Nix is never rewritten.
 - **Any package, your way**: every package of a machine, NixOS's defaults and
-  hand-written ones included, can be removed, replaced or rebuilt with other
-  arguments, attributes, version, source or patches, or with a Nix file of its
-  own; **Reset to default** puts it back. See [Customise any
-  package](#customise-any-package).
+  hand-written ones included, can be removed, replaced, taken from another
+  nixpkgs (`nixos-unstable`, say) or rebuilt with other arguments, attributes,
+  version, source or patches, or with a Nix file of its own; **Reset to
+  default** puts it back, and **Copy to…** makes the same
+  change on other machines. See [Customise any package](#customise-any-package).
+- **Every machine at once**: add, remove, replace or customise a package, and
+  a user's home packages, for every machine in one click, in
+  `modules/managed.json`; each machine's own `managed.json` still wins. See
+  [Every machine at once](#every-machine-at-once).
 - **home-manager**: per machine and user, turn it on, add and remove packages,
-  set any home-manager option from a search, keep dotfiles, and write a module
-  of your own, all checked, committed and deployed like the rest. See
-  [Homes with home-manager](#homes-with-home-manager).
+  set any home-manager option from a search, keep dotfiles, put secrets in
+  `~` (`.netrc`, a token in `gh`'s or `rclone`'s config) without them reaching
+  the Nix store, and write a module of your own, all checked, committed and
+  deployed like the rest, and copy a home to other machines. See [Homes with
+  home-manager](#homes-with-home-manager).
 - **Real values**: an option's effective value on each machine and the file
   that sets it, compared across the fleet, with "copy to" other machines.
 - **New machines**: a wizard creates `hosts/<name>/` with a role preset
-  (server, desktop or minimal) and the hardware configuration; the starter
-  flake picks up every folder in `hosts/`. A physical machine or VM can get a
+  (server, desktop or minimal), its first user (SSH keys, sudo, home-manager)
+  and the hardware configuration; the starter flake picks up every folder in
+  `hosts/`. A physical machine or VM can get a
   disk layout instead (ext4 or Btrfs, with disko): its page then fetches the
   installer's SSH host key for its secrets and gives the `nixos-anywhere`
   command that installs it. Or build an **installer ISO** for it: a USB stick
@@ -302,7 +310,8 @@ like every other machine:
 
 1. In nixos-manager, **New machine**: name it `nixos-manager` (its host name),
    pick a role and the **Proxmox LXC** platform. The server role allows SSH keys
-   only and no root login: add your user and key under **Users** first.
+   only and no root login: give your user and key in the wizard's **User**
+   step.
 2. Add the app to the fleet's flake inputs and run **Lock**:
 
    ```nix
@@ -630,14 +639,25 @@ update a restart interrupts during its check is checked again.
 **New machine** in Machines writes `hosts/<name>/`: `default.nix` for the
 platform (a physical machine, a Proxmox VM or a Proxmox LXC), `managed.json`
 with the role's preset, and the hardware configuration. Nothing is committed
-until you review it in Changes. A physical machine or a VM gets NixOS in one of
-two ways:
+until you review it in Changes.
+
+No role creates a user, and **Server** allows SSH keys only, so the wizard's
+**User** step asks for the first one: a name, the SSH public keys it logs in
+with, whether it is an administrator (`wheel`, for sudo) and whether
+home-manager is on for it. It goes into `managed.json` as **Users → Add user**
+and the **Home** tab would write it, so it stays editable there. home-manager
+needs its NixOS module in the flake, as the starter flake has. Leave the name
+empty when users come from hand-written Nix. Its password is set on the
+machine (`passwd`); the installer ISO offers to.
+
+A physical machine or a VM gets NixOS in one of two ways:
 
 - **Installed by hand**: install NixOS from the installer as usual and paste
   the output of `nixos-generate-config --show-hardware-config` (or leave it
   empty and replace the placeholder before the first deploy). That output has
-  no boot loader: copy it from the machine's `/etc/nixos/configuration.nix`
-  into `default.nix`. Then switch it once from a checkout, `nixos-rebuild
+  no boot loader, so pick the one the installer set up: **UEFI** (systemd-boot)
+  or, on x86_64, **BIOS** (GRUB on the disk you give); `default.nix` gets it.
+  Then switch it once from a checkout, `nixos-rebuild
   switch --flake .#<name>`; comin keeps it up to date from then on. Step by
   step: [A new machine from the NixOS ISO](docs/new-machine-from-iso.md).
 - **nixos-anywhere**: pick a disk layout and the disk to erase, and
@@ -1185,7 +1205,9 @@ Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `compare_option`, `search_packages`, `search_options`, `add_packages`,
 `remove_packages`, `edit_packages` (any package removed by name, and a
 home-manager user's packages), `set_package_override`, `set_home_manager`,
-`update_managed_module`, `set_option`, `unset_option`, `create_machine`. File and git
+`link_home_secret`, `copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
+package and option tools take host `*` for every machine
+(`modules/managed.json`). File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `delete_path`, `format_nix`, `status`, `diff`, `stage`, `unstage`, `discard`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
@@ -1303,6 +1325,22 @@ hand-written file, or a click here.
   `nodejs_24`.
 - **Customise** changes how it is built on the machine, by attribute, in
   `packageOverrides`:
+  - **From another nixpkgs**: a flake input that is another nixpkgs, such as
+    `nixpkgs-unstable` for a newer version than the machine's release. The
+    drawer offers the locked inputs that are a nixpkgs. **Another input…**
+    shows the line to add to the `inputs` in `flake.nix`
+    (`nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";`), then
+    **Lock**: the console never edits `flake.nix` itself. `managed.json` keeps
+    the input's name in `from`. `modules/managed.nix` imports that nixpkgs once
+    per machine, for the machine's platform and with its `nixpkgs.config` (so
+    `allowUnfree` applies), without its overlays, and takes the package from
+    it. The changes below apply on top. This needs `inputs` in the
+    `specialArgs` of `nixosSystem`, as the starter fleet has. An input that
+    follows another (`x.follows = "…"`) is not listed in `flake.lock` as an
+    input of its own, so the drawer shows the line to add for it; it works
+    as it is. It suits
+    applications best: a library from another nixpkgs may not fit what the
+    machine builds against it;
   - arguments for `.override` (`withVimKeys = true`) and attributes for
     `.overrideAttrs` (`doCheck = false`), written as `name = value` with JSON
     values, as `managed.json` keeps them;
@@ -1332,6 +1370,36 @@ as for any commit. You can edit `managed.json` and these files by hand too:
 the console reads them each time and never writes over a change it has not
 seen.
 
+### Every machine at once
+
+The Packages tab, and a user's packages on the Home tab, switch between the
+machine and **Every machine**. With Every machine, the same actions (add,
+remove, restore, replace, customise) write `modules/managed.json`, which
+`modules/managed.nix` applies to every machine that loads it, as it applies a
+machine's own `managed.json`. **Add packages** offers Every machine too. Where
+both files set something, the machine's own wins:
+
+- Packages and removed packages are joined. A name a machine removes takes a
+  shared package out of that machine; a name removed for every machine never
+  takes out what either file adds, so adding it on one machine keeps it there.
+  A machine cannot restore a shared removal or reset a shared change on its
+  own: it adds the package, or sets a change of its own, which then wins.
+- A machine's own change to a package replaces the shared one whole. A shared
+  patch file is a path in `modules/`.
+- A user's shared home packages reach the machines whose `managed.json` has that
+  user's home (turned on in the Home tab): never a machine without the user.
+- Options in `settings` apply at priority 95: they still win over hand-written
+  values, and a machine's own (90) wins over them. There is no form for shared
+  options yet: set them with MCP's `set_option` and host `*`, or in Code.
+  `settings.home-manager.users.<user>` applies as home packages do.
+
+The Packages tab and the Packages matrix show what comes from
+`modules/managed.json` (⇉ Every machine) and what a machine sets itself
+(✎ Set here). Files next to `modules/managed.json` (`custom.nix`, `packages/`,
+`home/`) are not read: those stay per machine. MCP's `add_packages`,
+`remove_packages`, `edit_packages`, `set_package_override`, `set_option` and
+`unset_option` take host `*` for the same file.
+
 ### Homes with home-manager
 
 The **Home** tab of a machine has one section per user, through home-manager's
@@ -1351,8 +1419,28 @@ NixOS module (the starter fleet loads it on every machine, with
   `xdg.configFile` puts files). The tab creates one and opens it in Code; it
   also lists what home-manager's modules link there. These files are copied to
   the Nix store, which every user of the machine can read: never keep a token
-  or password there (`.netrc`, `.config/gh/hosts.yml`…); use
-  [Secrets](#secrets).
+  or password there (`.netrc`, `.config/gh/hosts.yml`…); use Secrets in ~.
+- **Secrets in ~**: a machine's [secrets](#secrets), decrypted on the machine
+  by sops-nix with its SSH host key as any other, put in the user's home. No
+  value reaches the Nix store or is kept unencrypted in the repository:
+  - **a whole file**: pick a path in `~` and one of the machine's secrets
+    (`~/.netrc` = the secret `netrc`). `managed.json` keeps it in
+    `home.<user>.secrets`. The secret becomes the user's (`owner`), and
+    `~/.netrc` a link to `/run/secrets/netrc`. A secret has one owner, so one
+    linked for two users, or owned by a service in hand-written Nix, fails the
+    check: use a file with secrets for the second;
+  - **a file with secrets**: text in `hosts/<name>/home/<user>/templates/<path>`,
+    opened in Code, where each `@secret:<name>@` stands for that secret
+    (`oauth_token: @secret:gh-token@`). sops-nix fills it in on the machine
+    (`sops.templates`), as a file only the user can read, which `~/<path>`
+    links to. The text itself is not secret: it goes to the store.
+
+  The machine must get the secret (common to every machine, or its own): one
+  it lacks, removed in Settings or not encrypted for it, fails its check with
+  a message that names it. A secret's file is read-only, so a program that
+  rewrites it (`gh auth refresh`) cannot. A link for every machine,
+  in `modules/managed.json` (MCP's `link_home_secret` with host `*`), reaches
+  the machines with the user's home, as shared home packages do.
 - **Nix for \<user\>**: `hosts/<name>/home/<user>/custom.nix`, a home-manager
   module of the user's own.
 
@@ -1360,12 +1448,79 @@ Changes, checks and pushes show each home's packages, programs and files that
 move, next to the system's. **Stop managing here** removes what is set here for
 the user; the files stay until you delete them.
 
+### Standalone homes
+
+A standalone home-manager configuration (`homeConfigurations.<name>`, for a
+machine that is not NixOS or not managed here) has its own page: its card
+under **Machines** → Home configurations, or the fleet graph's inspector,
+opens it. It has the Home tab's **Packages**, **Options** (home-manager's
+options at the top: `programs.git.enable`), **Files in ~** and **Nix**, kept
+in `homes/<name>/`:
+
+- `managed.json`: `packages`, `removedPackages` and `settings`, as a machine's
+  has them for its system;
+- `files/<path>`: linked at `~/<path>`, copied to the Nix store as on a
+  machine: never a token or password;
+- `custom.nix`: a home-manager module of the home's own.
+
+`modules/managed-home.nix` applies them. A home is editable once its modules in
+`flake.nix` load its `homes/<name>/managed.json` (one loaded from another
+folder stays Code only, as does a name with characters other than letters,
+digits and `_ . @ + -`); **Turn on editing** on its page gives the line and
+creates the module:
+
+```nix
+homeConfigurations."pablo@laptop" = home-manager.lib.homeManagerConfiguration {
+  inherit pkgs;
+  modules = [
+    ./home/pablo.nix
+    (import ./modules/managed-home.nix (./homes + "/pablo@laptop/managed.json"))
+  ];
+};
+```
+
+A name a Nix path can hold needs no string: `./homes/pablo/managed.json`. A
+home has no secrets (it has no host key), package customisation or Copy to…,
+and `modules/managed.json` does not reach it. A check does not build it unless
+you tick it among the other configurations. A home is deployed as before, with
+`home-manager switch --flake .#<name>` on its machine. MCP: the tools that
+take a machine take `home:<name>` too (`edit_packages`, `set_option`,
+`unset_option`, `search_options`, `compare_option`), and
+`update_managed_module` with `home` writes the module.
+
+### Copy to other machines
+
+**Copy to…**, in a package's **Customise** drawer and on the **Home** tab,
+writes what this machine has to the machines you pick, each in its own
+`managed.json` and folder:
+
+- a package's change: its `packageOverrides` entry, the patch files it names
+  and `packages/<attribute>.nix`;
+- a user's home: the packages, removed packages and linked secrets in
+  `home.<user>` (joined with the machine's own), the options in
+  `settings.home-manager.users.<user>` except `home.stateVersion`,
+  `home/<user>/custom.nix` and the files in `home/<user>/files/` and
+  `home/<user>/templates/`. Only machines with the user and home-manager are
+  offered, and for a home with secrets, those on managed.nix 5. A machine
+  without one of those secrets fails its check until it gets it. Where the user has no home yet, home-manager is turned on there at
+  that machine's release, as **Turn on** does.
+
+A copy never overwrites. A machine that already has another value for anything
+copied (another change to the package, an option set differently, a file with
+other content or executable bit, a package the home adds that it removes) is
+left untouched, and the result names what differs. What a machine already has
+the same is skipped. A symbolic link is copied as the file it points to.
+Home-manager configuration written by hand outside the machine's folder is not
+copied. To change something on every machine for good, use
+[Every machine](#every-machine-at-once) instead. MCP: `copy_to_machines`.
+
 ### Upgrading a fleet's managed.nix
 
-Removing and customising packages, and homes, need the `modules/managed.nix` of
-this release (it sets `nixosManager.version = 2`). A fleet made by an earlier
-nixos-manager still has its first one: **Health** and the machine's Packages
-and Home tabs say so and offer **Update managed.nix**, which writes this
+Removing and customising packages, and homes, need a `modules/managed.nix` with
+`nixosManager.version = 2`, Every machine needs 3, a package from another
+nixpkgs 4, and secrets in homes this release's (5). A fleet
+made by an earlier nixos-manager still has an older one: **Health** and the
+machine's Packages and Home tabs say so and offer **Update managed.nix**, which writes this
 release's file for you to review in Changes. Changes you made to that file by hand are replaced,
 so check the diff. MCP: `update_managed_module`.
 
@@ -1380,7 +1535,9 @@ editing on for it (the machine page shows it too):
 ```
 
 and create `modules/managed.nix`: **Create it** on the machine page's Turn on
-editing card writes it (or copy it from `templates/fleet/modules/`).
+editing card writes it (or copy it from `templates/fleet/modules/`). A
+[standalone home](#standalone-homes) loads `modules/managed-home.nix` the same
+way.
 
 ## Development
 
@@ -1408,20 +1565,39 @@ from `PATH`; `E2E_STUB_NIX=1` stubs Nix out. `go test ./internal/core` runs
 
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking win
-without dropping the hand-written users and SSH settings around them, the
+without dropping the hand-written users and SSH settings around them, a secret
+linked into a home and a file with secrets become the user's and are linked
+from `/run/secrets`, while a secret the machine lacks fails with its name, the
 deployment reporter wires into comin, the binary cache module adds the fleet's
-cache next to cache.nixos.org, new LXC and VM machines evaluate, a sysctl shows
+cache next to cache.nixos.org, new LXC and VM machines evaluate (one with a
+first user and home-manager), a sysctl shows
 as a change and kernel parameters as a reboot while a container never needs
 one, a check builds the one machine an edit changes and fails on a system that
 does not build, a commit pushed from elsewhere is built against the last
 checked commit before it, the starter fleet's Forgejo Actions check passes on
 the starter fleet and fails on a machine that does not build, a standalone
-home-manager configuration shows its packages and programs, the installer
+home-manager configuration shows its packages and programs, and the packages,
+options, files and Nix its managed.json and managed-home.nix give it, the installer
 ISO of a machine with a disk layout evaluates and its `fleet-install` builds
 (with ShellCheck), and the flake
 builds the package and passes `nix flake check`, which also makes and keeps a
 binary cache key with the module's script, and an update of a local input is
 locked on `flake-update`, checked and merged.
+
+`NIXMGR_VM_TESTS=1 go test -v -timeout 80m -run InVMWithRealNix ./internal/core`
+installs a machine as on a real computer, in QEMU (KVM, a few GB of downloads
+and about a quarter of an hour; `internal/core/testdata/install-vm.nix`). A
+machine made in New machine with a disk layout and a home-manager user, then
+customised as by clicking (packages added, a NixOS default removed, a package
+built differently, the user's own package and a file in their `~`), has its
+installer ISO booted; `fleet-install --yes --offline` installs it on an empty
+disk; the disk boots, and the user logs in on the console with those packages
+on the `PATH` and that file in `~`. The VM has no network, so the test gives the
+machine a QEMU hardware configuration instead of the placeholder (which
+`fleet-install` would replace, so the VM would have to build the system) and
+puts the system's closure and the flake inputs on the ISO. CI
+(`.github/workflows/vm-tests.yml`) runs it nightly on `main`, on demand (Run
+workflow), and on a push that changes the test itself.
 
 `scripts/dev/fake-nix` stands in for Nix on machines without it: it answers
 the app's evaluations with a fixture fleet of four machines

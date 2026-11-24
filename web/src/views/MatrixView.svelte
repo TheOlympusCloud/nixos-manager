@@ -55,8 +55,16 @@
     pending[key] = to
     if ((await fn()) === false) delete pending[key]
   }
-  const source = (c: PkgCell | FeatCell) => (c.managed ? 'managed' : c.files.some(isRepoFile) ? 'repo' : 'default')
-  const sourceTitle = (c: PkgCell | FeatCell) => (c.managed ? 'Set here (managed.json)' : c.files.some(isRepoFile) ? `In code · ${c.files.filter(isRepoFile).join(', ')}` : 'Default (NixOS or a flake input)')
+  const isShared = (c: PkgCell | FeatCell) => 'shared' in c && c.shared
+  const source = (c: PkgCell | FeatCell) => (c.managed ? 'managed' : isShared(c) ? 'shared' : c.files.some(isRepoFile) ? 'repo' : 'default')
+  const sourceTitle = (c: PkgCell | FeatCell) =>
+    c.managed
+      ? 'Set here (managed.json)'
+      : isShared(c)
+        ? 'Set for every machine (modules/managed.json)'
+        : c.files.some(isRepoFile)
+          ? `In code · ${c.files.filter(isRepoFile).join(', ')}`
+          : 'Default (NixOS or a flake input)'
 </script>
 
 <div class="page">
@@ -83,6 +91,7 @@
 
       <div class="legend muted">
         <span class="lg managed"><span class="sw"></span>Set here</span>
+        {#if kind === 'packages'}<span class="lg shared"><span class="sw"></span>Every machine</span>{/if}
         <span class="lg repo"><span class="sw"></span>In code</span>
         {#if kind === 'packages'}<span class="lg default"><span class="sw"></span>Default</span>{/if}
       </div>
@@ -219,6 +228,9 @@
   }
   .managed {
     color: var(--green);
+  }
+  .shared {
+    color: var(--accent);
   }
   .repo {
     color: var(--fg-muted);

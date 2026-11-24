@@ -31,6 +31,11 @@ type pathsIn struct {
 	Paths []string `json:"paths,omitempty" jsonschema:"repository-relative paths; empty means all changes"`
 }
 
+// copyOut wraps copy_to_machines' results: a tool's output is an object.
+type copyOut struct {
+	Results []core.CopyResult `json:"results"`
+}
+
 type jobOut struct {
 	ID      string             `json:"id"`
 	State   string             `json:"state" jsonschema:"queued, running, passed or failed"`
@@ -53,7 +58,8 @@ var toolScope = map[string]auth.Scope{
 	"revert_commit": auth.ScopeEdit, "merge_branch": auth.ScopeEdit, "pull": auth.ScopeEdit,
 	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
-	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit,
+	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit, "link_home_secret": auth.ScopeEdit,
+	"copy_to_machines":      auth.ScopeEdit,
 	"update_managed_module": auth.ScopeEdit,
 	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
 
@@ -309,14 +315,14 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		m, _, _ := svc.Jobs.Model(ctx, "working") // the machines and their comin branches, when an evaluation is at hand
 		return svc.Deploys.Overview(ctx, m, time.Now())
 	})
-	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
+	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones, where home:<name> is a standalone home and its home-manager options), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
 		Names []string `json:"names"`
 		Hosts []string `json:"hosts,omitempty"`
 	}) (map[string][]core.OptionValues, error) {
 		res, err := ready(ctx, func() ([]core.OptionValues, *core.Job, error) { return svc.Jobs.OptionValues(ctx, in.Names, in.Hosts) })
 		return map[string][]core.OptionValues{"values": res}, err
 	})
-	tool(s, "create_machine", "Add a machine: hosts/<name>/ with default.nix for its platform, hardware-configuration.nix (the pasted nixos-generate-config output, or a placeholder; none for a Proxmox LXC) and a managed.json preset for the role. With a disk layout, also disk-config.nix for disko, and nixos-anywhere writes the hardware file when a person installs the machine from its page (this tool installs nothing). Says whether the flake picks it up by itself or which line to add, and the disko input when flake.nix lacks it.", func(ctx context.Context, in core.MachineSpec) (core.MachineCreated, error) {
+	tool(s, "create_machine", "Add a machine: hosts/<name>/ with default.nix for its platform (and, for a machine installed by hand, its boot loader), hardware-configuration.nix (the pasted nixos-generate-config output, or a placeholder; none for a Proxmox LXC) and a managed.json preset for the role, with the first user when given (the server role allows SSH keys only, so give it a key). With a disk layout, also disk-config.nix for disko, and nixos-anywhere writes the hardware file when a person installs the machine from its page (this tool installs nothing). Says whether the flake picks it up by itself or which line to add, and the disko input when flake.nix lacks it.", func(ctx context.Context, in core.MachineSpec) (core.MachineCreated, error) {
 		return svc.CreateMachine(in)
 	})
 	tool(s, "host_details", "Everything the fleet model knows about one machine: packages with the files that add them, enabled features, users and home-manager, ports, file systems, files, and whether it has a managed.json.", func(ctx context.Context, in struct {
@@ -355,8 +361,8 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		})
 		return map[string][]core.PackageResult{"results": res}, err
 	})
-	tool(s, "search_options", "Search the documented NixOS options of a machine (name, type, description, default, example). A prefix such as services.openssh lists that module's options, enable first.", func(ctx context.Context, in struct {
-		Host  string `json:"host"`
+	tool(s, "search_options", "Search the documented NixOS options of a machine (name, type, description, default, example), or with host home:<name> the home-manager options of a standalone home (homeConfigurations.<name>). A prefix such as services.openssh lists that module's options, enable first.", func(ctx context.Context, in struct {
+		Host  string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or home:<name> for a standalone home"`
 		Query string `json:"query"`
 		Limit int    `json:"limit,omitempty"`
 	}) (map[string][]core.OptionDoc, error) {
@@ -367,11 +373,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	})
 
 	type hostPackages struct {
-		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		Packages []string `json:"packages" jsonschema:"nixpkgs attribute names, e.g. htop or python3Packages.requests"`
 	}
 	type hostPath struct {
-		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		Path []string `json:"path" jsonschema:"option path as separate parts, e.g. [\"services\", \"openssh\", \"enable\"]"`
 	}
 	tool(s, "add_packages", "Install nixpkgs packages on a machine, through its managed.json (hosts/<host>/managed.json).", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
@@ -380,33 +386,47 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	tool(s, "remove_packages", "Remove packages from a machine's managed.json. Packages added in hand-written Nix files must be edited there.", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
 		return svc.RemovePackages(in.Host, in.Packages)
 	})
-	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
-		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. With host *, for every machine: a name a machine excludes takes a shared package out of it, a shared exclusion never takes out what either file adds, and a user's shared home packages apply where that machine's managed.json has the user's home. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		core.PackageEdit
 	}) (core.ManagedView, error) {
 		return svc.EditPackages(in.Host, in.PackageEdit)
 	})
-	tool(s, "set_package_override", "Change how a package (by nixpkgs attribute) is built on a machine, for everything there that uses it: arguments for .override, attributes for .overrideAttrs, a version with its source (a URL or a GitHub repository at a revision), and patches (a URL or a file in the machine's folder). An empty hash makes run_check fail and print the right one. Without override, the package is put back as nixpkgs has it. For anything else, write hosts/<host>/packages/<attribute>.nix with write_file: { pkgs, prev, lib, ... }: pkg: <package>.", func(ctx context.Context, in struct {
-		Host     string                `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+	tool(s, "set_package_override", "Change how a package (by nixpkgs attribute) is built on a machine, for everything there that uses it: from, a flake input that is another nixpkgs (e.g. nixpkgs-unstable, added to flake.nix's inputs and locked with flake_lock) to take it from instead, arguments for .override, attributes for .overrideAttrs, a version with its source (a URL or a GitHub repository at a revision), and patches (a URL or a file in the machine's folder). An empty hash makes run_check fail and print the right one. Without override, the package is put back as nixpkgs has it. For anything else, write hosts/<host>/packages/<attribute>.nix with write_file: { pkgs, prev, lib, ... }: pkg: <package>.", func(ctx context.Context, in struct {
+		Host     string                `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		Attr     string                `json:"attr" jsonschema:"nixpkgs attribute, e.g. htop"`
 		Override *core.PackageOverride `json:"override,omitempty"`
 	}) (core.ManagedView, error) {
 		return svc.SetPackageOverride(in.Host, in.Attr, in.Override, nil)
 	})
-	tool(s, "set_home_manager", "Turn home-manager on (with stateVersion for a user without it yet, e.g. the machine's release 26.05) or off for a user of a machine, through its managed.json. Then edit_packages with user, and set_option on home-manager.users.<user>.… (search_options with that prefix). Dotfiles are files in hosts/<host>/home/<user>/files/ (linked at ~/), and hosts/<host>/home/<user>/custom.nix is a home-manager module of your own. Needs home-manager's NixOS module in the machine's flake modules.", func(ctx context.Context, in struct {
+	tool(s, "set_home_manager", "Turn home-manager on (with stateVersion for a user without it yet, e.g. the machine's release 26.05) or off for a user of a machine, through its managed.json. Then edit_packages with user, and set_option on home-manager.users.<user>.… (search_options with that prefix). Dotfiles are files in hosts/<host>/home/<user>/files/ (linked at ~/, copied to the Nix store: never a secret; see link_home_secret), and hosts/<host>/home/<user>/custom.nix is a home-manager module of your own. Needs home-manager's NixOS module in the machine's flake modules.", func(ctx context.Context, in struct {
 		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
 		core.HomeEdit
 	}) (core.ManagedView, error) {
 		return svc.SetHome(in.Host, in.HomeEdit)
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 2 needs for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "link_home_secret", "Link a secret the machine gets (host_details' secrets, from set_secret or Nix by hand) as a whole file in a user's home, e.g. ~/.netrc, through managed.json's home.<user>.secrets: the secret becomes the user's, and the file a link into /run/secrets, so its value never reaches the Nix store. Without secret, the link at path goes. For a file mixing text and secrets, write hosts/<host>/home/<user>/templates/<path> with write_file: it is linked at ~/<path>, with every @secret:<name>@ in it replaced by that secret on the machine. Both need managed.nix 5 (update_managed_module) and sops-nix (modules/secrets.nix).", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine whose managed.json has the user's home (modules/managed.json)"`
+		core.HomeSecretEdit
+	}) (core.ManagedView, error) {
+		return svc.LinkHomeSecret(in.Host, in.HomeSecretEdit)
+	})
+	tool(s, "copy_to_machines", "Copy, from one machine to others, how a package is changed (packageOverride) or a user's home (home), as that machine's managed.json and folder have it. A machine that already has another value for something copied is refused whole and listed with its conflicts; nothing is overwritten. Home package lists are joined; home.stateVersion is not copied, so a machine where the user has no home yet also needs set_home_manager with its stateVersion.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"the machine to copy from"`
+		core.CopyRequest
+	}) (copyOut, error) {
+		r, err := svc.Copy(in.Host, in.CopyRequest)
+		return copyOut{r}, err
+	})
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 5 needs for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. With home, write modules/managed-home.nix instead, which applies a standalone home's homes/<name>/managed.json (host home:<name>; packages, removed packages and settings, plus custom.nix and files/<path> linked at ~/<path> next to it) once the home's modules in flake.nix have (import ./modules/managed-home.nix ./homes/<name>/managed.json), or (./homes + \"/<name>/managed.json\") for a name a Nix path cannot hold such as pablo@laptop; fleet_overview's homes show managedFile once it does. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
+		Home     bool   `json:"home,omitempty" jsonschema:"write modules/managed-home.nix, for standalone homes"`
 	}) (map[string]string, error) {
-		h, err := svc.UpdateManagedModule(in.BaseHash)
+		h, err := svc.UpdateManagedModule(in.BaseHash, in.Home)
 		return map[string]string{"hash": h}, err
 	})
 	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types.", func(ctx context.Context, in struct {
-		Host  string   `json:"host"`
+		Host  string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		Path  []string `json:"path"`
 		Value any      `json:"value" jsonschema:"the JSON value: boolean, number, string, list or object"`
 	}) (core.ManagedView, error) {

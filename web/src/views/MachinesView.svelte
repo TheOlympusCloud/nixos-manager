@@ -7,7 +7,8 @@
   import { fleet } from '../lib/fleet.svelte'
   import { age, arch, plural } from '../lib/format'
   import { bigText, frame } from '../lib/ascii'
-  import { machineLink, replace, route } from '../lib/router.svelte'
+  import { homeEditable } from '../lib/packages'
+  import { homeLink, machineLink, replace, route } from '../lib/router.svelte'
   import { app, startJob } from '../lib/state.svelte'
 
   let filter = $state('')
@@ -66,15 +67,22 @@
           <p class="muted intro">Standalone home-manager configurations (<span class="mono">homeConfigurations</span>), for machines that are not NixOS or not managed here.</p>
           <div class="homes">
             {#each m.homes as home (home.name)}
-              <div class="card home" class:err={!!home.error} data-tone={home.error ? 'err' : undefined} use:frame={{ title: home.name, animate: true }}>
+              <a
+                class="card lift home"
+                class:err={!!home.error}
+                href={homeLink(home.name)}
+                aria-label="Open {home.name}"
+                data-tone={home.error ? 'err' : undefined}
+                use:frame={{ title: home.name, lift: true, animate: true }}>
                 <strong class="sr-only">{home.name}</strong>
                 {#if home.error}
                   <p class="error-text mono">{home.error.split('\n')[0]}</p>
                 {:else}
                   <p><Icon name="user" /> {plural(home.packages.length, 'package')} · {plural(home.programs.length, 'program')}</p>
                   <div class="chips">{#each home.programs as p (p)}<span class="chip g-programs">{p}</span>{/each}</div>
+                  <p class="state" class:here={homeEditable(home)}>{homeEditable(home) ? '✎ Editable here' : 'λ Code only'}</p>
                 {/if}
-              </div>
+              </a>
             {/each}
           </div>
         </section>
@@ -128,8 +136,18 @@
     height: calc(var(--lh) * 6);
     color: inherit;
   }
+  .home {
+    color: inherit;
+  }
+  .home .state {
+    color: var(--fg-muted);
+  }
+  .home .state.here {
+    color: var(--green);
+  }
   /* The card is the link: its frame shows hover and focus, not a reverse-video block. */
-  .machine:focus-visible {
+  .machine:focus-visible,
+  .home:focus-visible {
     color: inherit;
     background: none;
   }

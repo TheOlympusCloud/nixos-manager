@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -186,8 +187,10 @@ func TestCustomisationTools(t *testing.T) {
 	call(t, cs, "set_package_override", map[string]any{"host": "web", "attr": "btop", "override": map[string]any{"overrideAttrs": map[string]any{"doCheck": false}}}, &v)
 	call(t, cs, "set_home_manager", map[string]any{"host": "web", "user": "pablo", "enable": true, "stateVersion": "26.05"}, &v)
 	call(t, cs, "edit_packages", map[string]any{"host": "web", "user": "pablo", "add": []string{"ripgrep"}}, &v)
+	call(t, cs, "link_home_secret", map[string]any{"host": "web", "user": "pablo", "path": ".netrc", "secret": "netrc"}, &v)
 	got, err := svc.ManagedView("web")
-	if err != nil || got.RemovedPackages[0] != "perl" || got.PackageOverrides["btop"].OverrideAttrs["doCheck"] != false || got.Home["pablo"].Packages[0] != "ripgrep" {
+	if err != nil || got.RemovedPackages[0] != "perl" || got.PackageOverrides["btop"].OverrideAttrs["doCheck"] != false || got.Home["pablo"].Packages[0] != "ripgrep" ||
+		got.Home["pablo"].Secrets[".netrc"] != "netrc" {
 		t.Fatalf("managed file after MCP edits %+v %v", got, err)
 	}
 	if res := call(t, cs, "set_package_override", map[string]any{"host": "web", "attr": "btop", "override": map[string]any{"src": map[string]any{"url": "file:///etc/shadow"}}}, nil); !res.IsError {
@@ -197,6 +200,14 @@ func TestCustomisationTools(t *testing.T) {
 	call(t, cs, "update_managed_module", map[string]any{}, &h)
 	if h.Hash == "" {
 		t.Fatal("no modules/managed.nix written")
+	}
+	call(t, cs, "update_managed_module", map[string]any{"home": true}, &h)
+	call(t, cs, "edit_packages", map[string]any{"host": "home:pablo@laptop", "add": []string{"jq"}}, &v)
+	if v.Path != "homes/pablo@laptop/managed.json" || v.Packages[0] != "jq" {
+		t.Fatalf("standalone home over MCP %+v", v)
+	}
+	if _, _, err := svc.Read("modules/managed-home.nix"); err != nil {
+		t.Fatalf("no modules/managed-home.nix written: %v", err)
 	}
 }
 
@@ -272,6 +283,21 @@ func TestCreateMachinePlatform(t *testing.T) {
 	}
 	if r := call(t, cs, "create_machine", map[string]any{"name": "x", "system": "x86_64-linux", "role": "minimal", "platform": "xen"}, nil); !r.IsError {
 		t.Fatal("an unknown platform was accepted")
+	}
+}
+
+// The first user, through MCP: the machine can be logged into once deployed.
+func TestCreateMachineWithAUser(t *testing.T) {
+	cs, svc := session(t)
+	key := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl pablo@laptop"
+	user := map[string]any{"name": "pablo", "keys": []string{key}, "wheel": true, "home": true}
+	call(t, cs, "create_machine", map[string]any{"name": "nas", "system": "x86_64-linux", "role": "server", "user": user}, nil)
+	v, err := svc.ManagedView("nas")
+	if err != nil || v.Home["pablo"].Packages == nil || !strings.Contains(fmt.Sprint(v.Settings["users"]), key) {
+		t.Fatalf("%v %+v", err, v)
+	}
+	if r := call(t, cs, "create_machine", map[string]any{"name": "x", "system": "x86_64-linux", "role": "server", "user": map[string]any{"name": "Root!"}}, nil); !r.IsError {
+		t.Fatal("a bad user name was accepted")
 	}
 }
 
