@@ -152,6 +152,8 @@ describe('settings set here', () => {
     const [d] = withSettings([{ host: 'ws', status: 'unchanged' }], { ws: [{ path: ['services', 'fail2ban', 'enable'], to: true }] })
     expect(d.status).toBe('changed')
     expect(impactLine(d)).toBe('fail2ban turned on')
+    const [o] = withSettings([{ host: 'ws', status: 'unchanged' }], { ws: [{ path: ['packageOverrides', 'htop', 'override', 'withVimKeys'], to: true }] })
+    expect(impactLine(o)).toBe('packageOverrides.htop.override.withVimKeys = true')
     expect(impactGroups(d)[0]).toEqual({ label: 'Settings', items: [{ text: 'services.fail2ban.enable = true', title: 'Was not set here', kind: 'up' }] })
     const [e] = withSettings([{ host: 'ws', status: 'changed' }], { ws: [{ path: ['a', 'b'], from: 1 }, { path: ['nix', 'gc', 'dates'], to: 'weekly' }] })
     expect(impactLine(e)).toBe('2 settings changed')

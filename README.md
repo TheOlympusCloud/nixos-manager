@@ -1379,8 +1379,8 @@ editing on for it (the machine page shows it too):
 (import ./modules/managed.nix ./hosts/<name>/managed.json)
 ```
 
-and create `modules/managed.nix`: the machine page's **Update managed.nix**
-writes it (or copy it from `templates/fleet/modules/`).
+and create `modules/managed.nix`: **Create it** on the machine page's Turn on
+editing card writes it (or copy it from `templates/fleet/modules/`).
 
 ## Development
 

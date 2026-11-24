@@ -35,6 +35,8 @@ export function nixValue(v: unknown): string {
 const settingText = (c: SettingChange) => (c.to === undefined ? `${c.path.join('.')} reset` : `${c.path.join('.')} = ${nixValue(c.to)}`)
 /** "fail2ban turned on", "PasswordAuthentication = false": one setting, in few words. */
 function settingShort(c: SettingChange): string {
+  // A package change needs its package or user, which only the whole path names.
+  if (['removedPackages', 'packageOverrides', 'home'].includes(c.path[0])) return settingText(c)
   const last = c.path.at(-1) ?? ''
   if (last === 'enable' && c.path.length > 1 && typeof c.to === 'boolean') return `${c.path.at(-2)} turned ${c.to ? 'on' : 'off'}`
   return c.to === undefined ? `${last} reset to its default` : `${last} = ${nixValue(c.to)}`
