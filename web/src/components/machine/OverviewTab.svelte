@@ -3,7 +3,7 @@
   import { homeUsers, plural } from '../../lib/format'
   import { isRepoFile } from '../../lib/graph'
   import { groupLabel, groupOrder } from '../../lib/matrix'
-  import { countUp } from '../../lib/motion'
+  import { frame, odometer } from '../../lib/ascii'
   import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
   import DeploymentCard from '../deployments/DeploymentCard.svelte'
@@ -24,11 +24,11 @@
   const disko = $derived(app.entries.some((e) => e.path === `hosts/${host.name}/disk-config.nix`))
 </script>
 
-<div class="tiles stagger">
+<div class="tiles">
   {#each tiles as t (t.label)}
-    <a class="tile lift" href={machineLink(host.name, t.tab)}>
-      <span class="t-label">{t.label}</span>
-      <span class="t-value num" use:countUp={t.value}>{t.value}</span>
+    <a class="tile lift" href={machineLink(host.name, t.tab)} use:frame={{ title: t.label, lift: true, animate: true }}>
+      <span class="sr-only">{t.label}</span>
+      <pre class="big t-value" use:odometer={t.value}></pre>
       <span class="t-note">{t.note}</span>
     </a>
   {/each}
@@ -53,8 +53,8 @@
     {#if disko}<InstallCard host={host.name} />{/if}
     <DeploymentCard host={host.name} />
 
-    <section class="section">
-      <h2>Users and access</h2>
+    <section class="section card" use:frame={{ title: 'Users and access' }}>
+      <h2 class="sr-only">Users and access</h2>
       <dl class="kv">
         <dt>Users</dt>
         <dd class="chips">{#each host.users as u (u.name)}<span class="chip" title={u.groups.join(', ')}>{u.name}{u.home ? ' · home-manager' : ''}</span>{:else}<span class="muted">none</span>{/each}</dd>
@@ -91,8 +91,8 @@
       <ul class="files">
         {#each host.files as f (f)}
           <li>
-            <a href={codeLink(f)} class="mono"><Icon name="file" size={13} />{f}</a>
-            {#if f === host.managedFile}<span class="badge ok" title="Changes made by clicking go here">Set here</span>{/if}
+            <a href={codeLink(f)}><Icon name="file" /> {f}</a>
+            {#if f === host.managedFile}<span class="set" title="Changes made by clicking go here">✎ Set here</span>{/if}
           </li>
         {/each}
       </ul>
@@ -103,104 +103,72 @@
 <style>
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: var(--s3);
+    grid-template-columns: repeat(auto-fit, minmax(22ch, 1fr));
+    gap: var(--lh) 2ch;
   }
   .tile {
     display: grid;
-    gap: 2px;
-    padding: 12px 14px;
     color: inherit;
-    text-decoration: none;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-  }
-  .t-label {
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .t-value {
-    color: var(--fg-strong);
-    font-size: var(--fs-2xl);
-    font-weight: 600;
-    letter-spacing: -0.02em;
   }
   .t-note {
     overflow: hidden;
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .cols {
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
-    gap: var(--s5);
+    grid-template-columns: minmax(0, 3fr) minmax(36ch, 2fr);
+    gap: 0 3ch;
   }
   .group {
     display: grid;
-    grid-template-columns: 110px 1fr;
-    gap: 10px;
-    padding: 10px 0;
-    border-top: 1px solid var(--border);
+    grid-template-columns: 18ch 1fr;
+    gap: 0 2ch;
   }
   .g-label {
-    padding-top: 2px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
+  }
+  .card {
+    margin-top: calc(var(--lh) * 2);
+  }
+  .card + .card,
+  :global(.card) + .card {
+    margin-top: var(--lh);
   }
   .kv {
-    display: grid;
-    grid-template-columns: 96px 1fr;
-    gap: 10px 12px;
-    margin: 0;
-  }
-  .kv dt {
-    padding-top: 2px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .kv dd {
-    margin: 0;
+    grid-template-columns: 14ch 1fr;
+    gap: 0 2ch;
   }
   .fs {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 14px;
-  }
-  .files {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid var(--border);
+    gap: 0 2ch;
   }
   .files li {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 0;
-    border-bottom: 1px solid var(--border);
+    gap: 2ch;
+    padding: 0 1ch;
   }
-  .files a {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--fg);
-    font-size: 12.5px;
-    text-decoration: none;
+  .files li:hover {
+    background: var(--bg-hover);
   }
-  .files a:hover {
-    color: var(--accent);
+  .files a :global(.ic) {
+    color: var(--fg-muted);
   }
   .files .perm {
     white-space: nowrap;
   }
-  .files .from {
+  .files .from,
+  .files .set {
     margin-left: auto;
+  }
+  .files .from {
     color: var(--fg-muted);
   }
-  .files :global(svg) {
-    color: var(--fg-muted);
+  .set {
+    color: var(--green);
+    white-space: nowrap;
   }
   @media (max-width: 1100px) {
     .cols {
