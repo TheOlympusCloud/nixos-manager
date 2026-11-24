@@ -165,6 +165,8 @@ describe('another nixpkgs', () => {
   })
   it('writes the line flake.nix needs', () => {
     expect(nixpkgsInputLine('nixpkgs-unstable', 'nixos-unstable')).toBe('nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";')
+    // A name starting with a digit is not a Nix identifier, so it is quoted.
+    expect(nixpkgsInputLine('9p', 'nixos-unstable')).toBe('"9p".url = "github:NixOS/nixpkgs/nixos-unstable";')
   })
   it('needs managed.nix 4', () => {
     expect([3, 4].map((v) => takesFromInputs(host('pc', { managedVersion: v })))).toEqual([false, true])

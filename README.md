@@ -1332,7 +1332,10 @@ hand-written file, or a click here.
     per machine, for the machine's platform and with its `nixpkgs.config` (so
     `allowUnfree` applies), without its overlays, and takes the package from
     it. The changes below apply on top. This needs `inputs` in the
-    `specialArgs` of `nixosSystem`, as the starter fleet has. It suits
+    `specialArgs` of `nixosSystem`, as the starter fleet has. An input that
+    follows another (`x.follows = "…"`) is not listed in `flake.lock` as an
+    input of its own, so the drawer shows the line to add for it; it works
+    as it is. It suits
     applications best: a library from another nixpkgs may not fit what the
     machine builds against it;
   - arguments for `.override` (`withVimKeys = true`) and attributes for

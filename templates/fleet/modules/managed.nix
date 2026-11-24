@@ -169,6 +169,8 @@ let
     let
       # Each such nixpkgs once per machine, for its platform and with its
       # nixpkgs.config (allowUnfree…), but not its overlays.
+      # shortcut: a machine that sets nixpkgs.pkgs has an empty nixpkgs.config, so its
+      # allowUnfree does not reach the input; take the config from prev if one needs it.
       # shortcut: built natively for the machine's platform even where the machine
       # is cross-compiled; pass buildPlatform as well if a fleet cross-compiles.
       other = lib.genAttrs froms (

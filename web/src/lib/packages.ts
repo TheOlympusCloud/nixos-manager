@@ -207,8 +207,8 @@ export function cleanOverride(o: PackageOverride): PackageOverride | null {
 /** The locked flake inputs that are a nixpkgs (a fork too), less the one named nixpkgs: the machines' own. */
 export const otherNixpkgs = (inputs: Input[]) => inputs.filter((i) => i.name !== 'nixpkgs' && /^github:[^/]+\/nixpkgs(\/|$)/i.test(i.url)).map((i) => i.name)
 
-/** The line that adds a branch of NixOS/nixpkgs to flake.nix's inputs. */
-export const nixpkgsInputLine = (name: string, branch: string) => `${name}.url = "github:NixOS/nixpkgs/${branch}";`
+/** The line that adds a branch of NixOS/nixpkgs to flake.nix's inputs; a name not starting with a letter or _ is quoted. */
+export const nixpkgsInputLine = (name: string, branch: string) => `${/^[A-Za-z_]/.test(name) ? name : JSON.stringify(name)}.url = "github:NixOS/nixpkgs/${branch}";`
 
 // ---- starters for the files next to managed.json ----
 
