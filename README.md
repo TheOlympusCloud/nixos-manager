@@ -57,8 +57,9 @@ An MCP server gives automation the same features.
 - **Real values**: an option's effective value on each machine and the file
   that sets it, compared across the fleet, with "copy to" other machines.
 - **New machines**: a wizard creates `hosts/<name>/` with a role preset
-  (server, desktop or minimal) and the hardware configuration; the starter
-  flake picks up every folder in `hosts/`. A physical machine or VM can get a
+  (server, desktop or minimal), its first user (SSH keys, sudo, home-manager)
+  and the hardware configuration; the starter flake picks up every folder in
+  `hosts/`. A physical machine or VM can get a
   disk layout instead (ext4 or Btrfs, with disko): its page then fetches the
   installer's SSH host key for its secrets and gives the `nixos-anywhere`
   command that installs it. Or build an **installer ISO** for it: a USB stick
@@ -302,7 +303,8 @@ like every other machine:
 
 1. In nixos-manager, **New machine**: name it `nixos-manager` (its host name),
    pick a role and the **Proxmox LXC** platform. The server role allows SSH keys
-   only and no root login: add your user and key under **Users** first.
+   only and no root login: give your user and key in the wizard's **User**
+   step.
 2. Add the app to the fleet's flake inputs and run **Lock**:
 
    ```nix
@@ -630,8 +632,18 @@ update a restart interrupts during its check is checked again.
 **New machine** in Machines writes `hosts/<name>/`: `default.nix` for the
 platform (a physical machine, a Proxmox VM or a Proxmox LXC), `managed.json`
 with the role's preset, and the hardware configuration. Nothing is committed
-until you review it in Changes. A physical machine or a VM gets NixOS in one of
-two ways:
+until you review it in Changes.
+
+No role creates a user, and **Server** allows SSH keys only, so the wizard's
+**User** step asks for the first one: a name, the SSH public keys it logs in
+with, whether it is an administrator (`wheel`, for sudo) and whether
+home-manager is on for it. It goes into `managed.json` as **Users → Add user**
+and the **Home** tab would write it, so it stays editable there. home-manager
+needs its NixOS module in the flake, as the starter flake has. Leave the name
+empty when users come from hand-written Nix. Its password is set on the
+machine (`passwd`); the installer ISO offers to.
+
+A physical machine or a VM gets NixOS in one of two ways:
 
 - **Installed by hand**: install NixOS from the installer as usual and paste
   the output of `nixos-generate-config --show-hardware-config` (or leave it
@@ -1410,7 +1422,8 @@ from `PATH`; `E2E_STUB_NIX=1` stubs Nix out. `go test ./internal/core` runs
 runs the checks that need real Nix (network needed): values set by clicking win
 without dropping the hand-written users and SSH settings around them, the
 deployment reporter wires into comin, the binary cache module adds the fleet's
-cache next to cache.nixos.org, new LXC and VM machines evaluate, a sysctl shows
+cache next to cache.nixos.org, new LXC and VM machines evaluate (one with a
+first user and home-manager), a sysctl shows
 as a change and kernel parameters as a reboot while a container never needs
 one, a check builds the one machine an edit changes and fails on a system that
 does not build, a commit pushed from elsewhere is built against the last
