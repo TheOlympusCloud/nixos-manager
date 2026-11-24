@@ -37,8 +37,8 @@ func (s *Server) secretRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/secrets/reencrypt", post(func(r *http.Request, _ struct{}) (any, error) {
 		return nil, sec.Reencrypt(r.Context())
 	}))
-	api.HandleFunc("POST /api/secrets/report-tokens", post(func(r *http.Request, _ struct{}) (any, error) {
-		hosts, err := s.Svc.StoreReportTokens(r.Context())
+	api.HandleFunc("POST /api/secrets/report-tokens", post(func(r *http.Request, in struct{ Hosts []string }) (any, error) {
+		hosts, err := s.Svc.StoreReportTokens(r.Context(), in.Hosts...)
 		return map[string][]string{"hosts": hosts}, err
 	}))
 }

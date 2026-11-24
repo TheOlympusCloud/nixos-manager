@@ -91,6 +91,9 @@ func newEnv(t *testing.T) *env {
 	// Evaluations answer a flake without machines, so a check builds nothing; the rest echoes.
 	os.WriteFile(nix, []byte("#!/bin/sh\ncase \"$*\" in *\" hash path \"*) echo sha256-fake; exit ;; esac\ncase \"$*\" in *\"eval --json\"*) echo '{\"nixos\":[],\"home\":[],\"darwin\":[]}'; exit ;; esac\necho \"nix $*\"\n"), 0o755)
 	svc.Jobs.Nix = nix
+	if svc.ISOs, err = core.OpenISOs(filepath.Join(t.TempDir(), "isos"), svc.Jobs); err != nil {
+		t.Fatal(err)
+	}
 	tools := fakesops.Tools(t)
 	svc.Secrets = core.OpenSecrets(t.TempDir(), repo)
 	svc.Secrets.Sops, svc.Secrets.AgeKeygen, svc.Secrets.SSHToAge = tools.Sops, tools.AgeKeygen, tools.SSHToAge

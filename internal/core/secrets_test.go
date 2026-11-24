@@ -388,6 +388,14 @@ func TestStoreReportTokens(t *testing.T) {
 	must[SecretMachine](t)(sec.SetMachineKey(ctx, "web", webPub))
 	must[SecretMachine](t)(sec.SetMachineKey(ctx, "pi", piPub))
 	ok(t, sec.Set(ctx, "web", "other", "kept"))
+	// Only the machines asked for: one whose key was just approved for its install.
+	isErr(t, must2(svc.StoreReportTokens(ctx, "nas")), ErrInvalid)
+	if hosts := must[[]string](t)(svc.StoreReportTokens(ctx, "pi", "nas")); !slices.Equal(hosts, []string{"pi"}) {
+		t.Fatalf("only pi: %v", hosts)
+	}
+	if _, err := sec.Reveal(ctx, "web", ReportSecret); err == nil {
+		t.Fatal("web got its token when only pi's was asked for")
+	}
 	hosts := must[[]string](t)(svc.StoreReportTokens(ctx))
 	if !slices.Equal(hosts, []string{"pi", "web"}) {
 		t.Fatalf("hosts %v", hosts)
