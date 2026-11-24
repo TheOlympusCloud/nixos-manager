@@ -35,6 +35,12 @@ describe('previewFiles', () => {
     expect(files[1].content).toBe(raw('hardwarePlaceholder').replace('%q', '"aarch64-linux"'))
     expect(previewFiles({ name: 'nas', system: 'x86_64-linux', role: 'minimal', hardware: '{ }' })[1].content).toBe('{ }')
   })
+  it('shows the packages chosen instead of the preset, sorted, as the server writes them', () => {
+    const managed = (packages?: string[]) => JSON.parse(previewFiles({ name: 'nas', system: 'x86_64-linux', role: 'server', packages }).at(-1)!.content)
+    expect(managed(['tmux', 'restic', 'tmux']).packages).toEqual(['restic', 'tmux'])
+    expect(managed([]).packages).toEqual([])
+    expect(managed().packages).toEqual(['btop', 'git', 'htop', 'tmux'])
+  })
   it('matches the server templates of every platform', () => {
     const fill = (t: string) => t.replaceAll('%[1]q', '"ct"').replaceAll('%[2]q', '"x86_64-linux"').replaceAll('%[3]s', '')
     const lxc = previewFiles({ name: 'ct', system: 'x86_64-linux', role: 'server', platform: 'proxmox-lxc' })

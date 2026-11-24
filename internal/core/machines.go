@@ -18,6 +18,8 @@ type MachineSpec struct {
 	Platform string `json:"platform,omitempty" jsonschema:"hardware (default: a physical machine), proxmox-lxc (a NixOS container on Proxmox: no hardware configuration) or proxmox-vm (a Proxmox virtual machine: QEMU guest support plus the hardware configuration)"`
 	Disk     string `json:"disk,omitempty" jsonschema:"a disk layout for disko, for a machine nixos-anywhere installs (hardware or proxmox-vm only): ext4, or btrfs (subvolumes for /, /home and /nix). nixos-anywhere then writes hardware-configuration.nix, so leave hardware out. Empty: NixOS is installed by hand"`
 	Device   string `json:"device,omitempty" jsonschema:"with a disk layout, the disk nixos-anywhere erases and installs on, such as /dev/sda, /dev/nvme0n1 or /dev/disk/by-id/..."`
+	// Packages, when set (an empty list included), replace the role's preset packages.
+	Packages []string `json:"packages,omitempty" jsonschema:"nixpkgs attributes managed.json starts with, instead of the role's preset packages"`
 }
 
 type MachineCreated struct {
@@ -315,6 +317,13 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 	if disko {
 		hardware = fmt.Sprintf(diskoHardwarePlaceholder, spec.System)
 		diskImport = "\n    ./disk-config.nix"
+	}
+	if spec.Packages != nil {
+		if err := checkPackages(spec.Packages); err != nil {
+			return MachineCreated{}, err
+		}
+		pkgs := orEmpty(slices.Compact(slices.Sorted(slices.Values(spec.Packages))))
+		preset = map[string]any{"packages": pkgs, "settings": preset["settings"]}
 	}
 	var managed bytes.Buffer
 	enc := json.NewEncoder(&managed)

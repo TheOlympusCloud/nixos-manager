@@ -283,8 +283,8 @@ export function previewFiles(spec: MachineSpec): { path: string; content: string
     ...(disk ? [{ path: `${dir}/disk-config.nix`, note: `The ${disk} layout disko makes when nixos-anywhere installs: it erases the disk.`, content: diskConfig(spec, disk) }] : []),
     {
       path: `${dir}/managed.json`,
-      note: `The ${preset.label.toLowerCase()} preset: what you change by clicking.`,
-      content: JSON.stringify({ packages: preset.packages, settings: preset.settings }, null, 2) + '\n',
+      note: `The ${preset.label.toLowerCase()} preset${spec.packages ? ', with your packages' : ''}: what you change by clicking.`,
+      content: JSON.stringify({ packages: spec.packages ? [...new Set(spec.packages)].sort() : preset.packages, settings: preset.settings }, null, 2) + '\n',
     },
   ]
 }

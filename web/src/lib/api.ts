@@ -200,6 +200,8 @@ export type MachineSpec = {
   platform?: MachinePlatform
   disk?: MachineDisk
   device?: string
+  /** The packages managed.json starts with instead of the role's (an empty list: none). */
+  packages?: string[]
 }
 /** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. inputSnippet: the disko input flake.nix lacks. */
 export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string; inputSnippet?: string }

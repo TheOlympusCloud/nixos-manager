@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -245,4 +246,20 @@ func TestCreateMachineWithADiskLayoutNeedsTheDiskoInput(t *testing.T) {
 			t.Errorf("disko is no input of %s", flake)
 		}
 	}
+}
+
+// The wizard can change the role's packages before the machine is made, down to none.
+func TestCreateMachineWithItsOwnPackages(t *testing.T) {
+	s := newService(t)
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "nas", System: "x86_64-linux", Role: "server", Packages: []string{"tmux", "restic", "tmux"}}))
+	v := must[ManagedView](t)(s.ManagedView("nas"))
+	if !slices.Equal(v.Packages, []string{"restic", "tmux"}) || v.Settings["services"] == nil {
+		t.Fatalf("packages %v, settings %v", v.Packages, v.Settings)
+	}
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "bare", System: "x86_64-linux", Role: "minimal", Packages: []string{}}))
+	if c := fileText(t, s.Repo, "hosts/bare/managed.json"); !strings.Contains(c, `"packages": []`) {
+		t.Fatalf("no packages:\n%s", c)
+	}
+	_, err := s.CreateMachine(MachineSpec{Name: "bad", System: "x86_64-linux", Role: "minimal", Packages: []string{"rm -rf"}})
+	isErr(t, err, ErrInvalid)
 }
