@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // MachineSpec is what the new-machine wizard asks for.
@@ -20,6 +23,50 @@ type MachineSpec struct {
 	Device   string `json:"device,omitempty" jsonschema:"with a disk layout, the disk nixos-anywhere erases and installs on, such as /dev/sda, /dev/nvme0n1 or /dev/disk/by-id/..."`
 	// Packages, when set (an empty list included), replace the role's preset packages.
 	Packages []string `json:"packages,omitempty" jsonschema:"nixpkgs attributes managed.json starts with, instead of the role's preset packages"`
+	// User, when set, is the machine's first user, written to managed.json. No role creates one.
+	User *MachineUser `json:"user,omitempty" jsonschema:"the first user, a normal user in managed.json; the server role allows SSH keys only, so give it a key. Leave it out when users come from hand-written Nix"`
+}
+
+// MachineUser is a new machine's first user, as Users → Add user and the Home tab would write it.
+type MachineUser struct {
+	Name  string   `json:"name" jsonschema:"the user name: lowercase letters, digits, - and _"`
+	Keys  []string `json:"keys,omitempty" jsonschema:"authorized SSH public keys, one authorized_keys line each"`
+	Wheel bool     `json:"wheel,omitempty" jsonschema:"an administrator: in the wheel group, so sudo works"`
+	Home  bool     `json:"home,omitempty" jsonschema:"home-manager on for the user (needs home-manager's NixOS module in the flake, as the starter flake has)"`
+}
+
+// The release the templates install (system.stateVersion), which a first user's home starts at too.
+const newStateVersion = "26.05"
+
+func (u *MachineUser) check() error {
+	if !userName.MatchString(u.Name) {
+		return errorf(ErrInvalid, "invalid user name %q: lowercase letters, digits, - and _, starting with a letter or _ (at most 32)", u.Name)
+	}
+	for _, k := range u.Keys {
+		// One key per entry: a line break would smuggle in more authorized_keys lines.
+		_, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(k))
+		if err != nil || len(rest) > 0 || strings.ContainsAny(k, "\r\n") {
+			return errorf(ErrInvalid, "%s's SSH keys: each is one public key line, such as ssh-ed25519 AAAA… me@laptop", u.Name)
+		}
+	}
+	return nil
+}
+
+// settings adds the user (and their home-manager release) to a role's settings, without changing the shared preset.
+func (u *MachineUser) settings(preset map[string]any) map[string]any {
+	settings := maps.Clone(preset)
+	user := map[string]any{"isNormalUser": true, "extraGroups": []string{}}
+	if u.Wheel {
+		user["extraGroups"] = []string{"wheel"}
+	}
+	if len(u.Keys) > 0 {
+		user["openssh"] = map[string]any{"authorizedKeys": map[string]any{"keys": u.Keys}}
+	}
+	settings["users"] = map[string]any{"users": map[string]any{u.Name: user}}
+	if u.Home {
+		settings["home-manager"] = map[string]any{"users": map[string]any{u.Name: map[string]any{"home": map[string]any{"stateVersion": newStateVersion}}}}
+	}
+	return settings
 }
 
 type MachineCreated struct {
@@ -325,9 +372,19 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 		pkgs := orEmpty(slices.Compact(slices.Sorted(slices.Values(spec.Packages))))
 		preset = map[string]any{"packages": pkgs, "settings": preset["settings"]}
 	}
+	if u := spec.User; u != nil {
+		if err := u.check(); err != nil {
+			return MachineCreated{}, err
+		}
+		preset = map[string]any{"packages": preset["packages"], "settings": u.settings(preset["settings"].(map[string]any))}
+		if u.Home {
+			preset["home"] = map[string]HomeManaged{u.Name: {Packages: []string{}, RemovedPackages: []string{}}}
+		}
+	}
 	var managed bytes.Buffer
 	enc := json.NewEncoder(&managed)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false) // a key's comment may hold < or &
 	if err := enc.Encode(preset); err != nil {
 		return MachineCreated{}, err
 	}

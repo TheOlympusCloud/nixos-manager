@@ -283,10 +283,26 @@ export function previewFiles(spec: MachineSpec): { path: string; content: string
     ...(disk ? [{ path: `${dir}/disk-config.nix`, note: `The ${disk} layout disko makes when nixos-anywhere installs: it erases the disk.`, content: diskConfig(spec, disk) }] : []),
     {
       path: `${dir}/managed.json`,
-      note: `The ${preset.label.toLowerCase()} preset${spec.packages ? ', with your packages' : ''}: what you change by clicking.`,
-      content: JSON.stringify({ packages: spec.packages ? [...new Set(spec.packages)].sort() : preset.packages, settings: preset.settings }, null, 2) + '\n',
+      note: `The ${preset.label.toLowerCase()} preset${spec.packages ? ', with your packages' : ''}${spec.user ? ` and ${spec.user.name}` : ''}: what you change by clicking.`,
+      content: JSON.stringify(managedPreview(spec, preset.packages, preset.settings), null, 2) + '\n',
     },
   ]
+}
+
+// shortcut: mirrors newStateVersion in internal/core/machines.go (a test compares them).
+const newStateVersion = '26.05'
+
+/** managed.json as CreateMachine writes it: the preset, the packages chosen and the first user (as Users → Add user and the Home tab would). */
+function managedPreview(spec: MachineSpec, presetPackages: string[], presetSettings: Record<string, unknown>) {
+  const packages = spec.packages ? [...new Set(spec.packages)].sort() : presetPackages
+  const u = spec.user
+  if (!u) return { packages, settings: presetSettings }
+  const user: Record<string, unknown> = { isNormalUser: true, extraGroups: u.wheel ? ['wheel'] : [] }
+  if (u.keys?.length) user.openssh = { authorizedKeys: { keys: u.keys } }
+  const settings: Record<string, unknown> = { ...presetSettings, users: { users: { [u.name]: user } } }
+  if (!u.home) return { packages, settings }
+  settings['home-manager'] = { users: { [u.name]: { home: { stateVersion: newStateVersion } } } }
+  return { home: { [u.name]: { packages: [], removedPackages: [] } }, packages, settings }
 }
 
 /** Light checks of a pasted hardware-configuration.nix: errors block, warnings inform. */

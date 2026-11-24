@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"slices"
@@ -114,7 +115,8 @@ func TestCreatedMachinesEvaluate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, spec := range []MachineSpec{
-		{Name: "ct", System: "x86_64-linux", Role: "server", Platform: "proxmox-lxc"},
+		// The first user, with home-manager from the starter flake.
+		{Name: "ct", System: "x86_64-linux", Role: "server", Platform: "proxmox-lxc", User: &MachineUser{Name: "pablo", Keys: []string{testKey}, Wheel: true, Home: true}},
 		{Name: "vm", System: "x86_64-linux", Role: "server", Platform: "proxmox-vm"},
 		// What nixos-anywhere builds: the system and the disko script that partitions the disk.
 		{Name: "pc", System: "x86_64-linux", Role: "desktop", Disk: "ext4", Device: "/dev/nvme0n1"},
@@ -145,6 +147,14 @@ func TestCreatedMachinesEvaluate(t *testing.T) {
 	}
 	if err != nil || strings.TrimSpace(string(out)) != `{"boot":"vfat","efi":true,"grub":["/dev/nvme0n1"],"root":"ext4"}` {
 		t.Errorf("pc: %v\n%s", err, out)
+	}
+	out, err = exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "eval", "--json", "path:"+s.Repo.Dir+"#nixosConfigurations.ct.config",
+		"--apply", `c: let u = c.users.users.pablo; in { normal = u.isNormalUser; groups = u.extraGroups; keys = u.openssh.authorizedKeys.keys; home = c.home-manager.users.pablo.home.stateVersion; }`).Output()
+	if ee, ok := err.(*exec.ExitError); ok {
+		out = append(out, ee.Stderr...)
+	}
+	if err != nil || strings.TrimSpace(string(out)) != `{"groups":["wheel"],"home":"26.05","keys":["`+testKey+`"],"normal":true}` {
+		t.Errorf("ct's first user: %v\n%s", err, out)
 	}
 }
 
@@ -262,4 +272,55 @@ func TestCreateMachineWithItsOwnPackages(t *testing.T) {
 	}
 	_, err := s.CreateMachine(MachineSpec{Name: "bad", System: "x86_64-linux", Role: "minimal", Packages: []string{"rm -rf"}})
 	isErr(t, err, ErrInvalid)
+}
+
+const testKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl pablo@laptop"
+
+// The wizard can make the first user, as Users → Add user and the Home tab would.
+func TestCreateMachineWithItsFirstUser(t *testing.T) {
+	s := newService(t)
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "nas", System: "x86_64-linux", Role: "server",
+		User: &MachineUser{Name: "pablo", Keys: []string{testKey}, Wheel: true, Home: true}}))
+	v := must[ManagedView](t)(s.ManagedView("nas"))
+	users := v.Settings["users"].(map[string]any)["users"].(map[string]any)
+	pablo := users["pablo"].(map[string]any)
+	keys := pablo["openssh"].(map[string]any)["authorizedKeys"].(map[string]any)["keys"].([]any)
+	if pablo["isNormalUser"] != true || fmt.Sprint(pablo["extraGroups"]) != "[wheel]" || len(keys) != 1 || keys[0] != testKey {
+		t.Fatalf("user %+v", pablo)
+	}
+	hm := v.Settings["home-manager"].(map[string]any)["users"].(map[string]any)["pablo"].(map[string]any)["home"].(map[string]any)
+	if hm["stateVersion"] != "26.05" || v.Home["pablo"].Packages == nil {
+		t.Fatalf("home %+v, %+v", hm, v.Home)
+	}
+	if v.Settings["services"].(map[string]any)["openssh"] == nil {
+		t.Fatalf("the preset is gone: %+v", v.Settings)
+	}
+	// The preset itself is shared: the next machine starts without pablo.
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "web", System: "x86_64-linux", Role: "server"}))
+	if c := fileText(t, s.Repo, "hosts/web/managed.json"); strings.Contains(c, "pablo") || strings.Contains(c, `"home`) {
+		t.Fatalf("the preset kept the last user:\n%s", c)
+	}
+
+	// No key, not an administrator and no home: a plain account.
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "pc", System: "x86_64-linux", Role: "minimal", User: &MachineUser{Name: "anna"}}))
+	v = must[ManagedView](t)(s.ManagedView("pc"))
+	anna := v.Settings["users"].(map[string]any)["users"].(map[string]any)["anna"].(map[string]any)
+	if anna["isNormalUser"] != true || fmt.Sprint(anna["extraGroups"]) != "[]" || anna["openssh"] != nil || len(v.Home) != 0 || v.Settings["home-manager"] != nil {
+		t.Fatalf("anna %+v, %+v", anna, v)
+	}
+
+	for _, bad := range []MachineUser{
+		{Name: "Pablo"},
+		{Name: "a b"},
+		{Name: ""},
+		{Name: "pablo", Keys: []string{"not a key"}},
+		{Name: "pablo", Keys: []string{testKey + "\n" + testKey}},
+		{Name: "pablo", Keys: []string{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
+	} {
+		_, err := s.CreateMachine(MachineSpec{Name: "bad", System: "x86_64-linux", Role: "minimal", User: &bad})
+		isErr(t, err, ErrInvalid)
+		if _, _, err := s.Read("hosts/bad/default.nix"); err == nil {
+			t.Fatalf("%+v was written", bad)
+		}
+	}
 }

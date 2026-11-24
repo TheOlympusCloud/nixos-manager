@@ -202,7 +202,11 @@ export type MachineSpec = {
   device?: string
   /** The packages managed.json starts with instead of the role's (an empty list: none). */
   packages?: string[]
+  /** The first user, written to managed.json: no role creates one. */
+  user?: MachineUser
 }
+/** keys: authorized_keys lines; wheel: an administrator (sudo); home: home-manager on for them. */
+export type MachineUser = { name: string; keys?: string[]; wheel?: boolean; home?: boolean }
 /** registered: the flake picks hosts/<name>/ up by itself; otherwise snippet is the line to add to nixosConfigurations. inputSnippet: the disko input flake.nix lacks. */
 export type MachineCreated = { name: string; files: string[]; registered: boolean; snippet?: string; inputSnippet?: string }
 /** An SSH ed25519 host key and its SHA256 fingerprint. */

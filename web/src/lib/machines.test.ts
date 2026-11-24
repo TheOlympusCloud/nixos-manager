@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import go from '../../../internal/core/machines.go?raw'
+import type { MachineSpec } from './api'
 import { deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from './machines'
 
 describe('machineNameProblem', () => {
@@ -40,6 +41,21 @@ describe('previewFiles', () => {
     expect(managed(['tmux', 'restic', 'tmux']).packages).toEqual(['restic', 'tmux'])
     expect(managed([]).packages).toEqual([])
     expect(managed().packages).toEqual(['btop', 'git', 'htop', 'tmux'])
+  })
+  it('shows the first user and their home as the server writes them', () => {
+    const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl pablo@laptop'
+    const managed = (user: MachineSpec['user']) => JSON.parse(previewFiles({ name: 'nas', system: 'x86_64-linux', role: 'server', user }).at(-1)!.content)
+    const m = managed({ name: 'pablo', keys: [key], wheel: true, home: true })
+    expect(m.settings.users.users.pablo).toEqual({ isNormalUser: true, extraGroups: ['wheel'], openssh: { authorizedKeys: { keys: [key] } } })
+    expect(m.settings['home-manager'].users.pablo.home.stateVersion).toBe(/const newStateVersion = "([^"]+)"/.exec(go)![1])
+    expect(m.home).toEqual({ pablo: { packages: [], removedPackages: [] } })
+    expect(m.settings.services.openssh.enable).toBe(true)
+    const anna = managed({ name: 'anna' })
+    expect(anna.settings.users.users.anna).toEqual({ isNormalUser: true, extraGroups: [] })
+    expect(anna.home).toBeUndefined()
+    expect(anna.settings['home-manager']).toBeUndefined()
+    // The preset is shared by every preview.
+    expect(roles[0].settings).not.toHaveProperty('users')
   })
   it('matches the server templates of every platform', () => {
     const fill = (t: string) => t.replaceAll('%[1]q', '"ct"').replaceAll('%[2]q', '"x86_64-linux"').replaceAll('%[3]s', '')
