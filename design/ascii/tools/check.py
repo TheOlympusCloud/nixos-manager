@@ -8,6 +8,12 @@
 It also rewrites the contrast table in ../README.md. Needs Python 3 and fontTools (with brotli).
 
     python3 tools/check.py
+
+With --app it checks the console itself instead: the font in web/src/fonts, every character the
+code in web/src can print (comments and tests left out), and the tokens in web/src/app.css. The
+README is left alone.
+
+    python3 tools/check.py --app
 """
 import glob
 import os
@@ -19,6 +25,8 @@ from fontTools.ttLib import TTFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROTO = os.path.join(HERE, '..', 'prototype')
 README = os.path.join(HERE, '..', 'README.md')
+APP = '--app' in sys.argv[1:]
+WEB = os.path.join(HERE, '..', '..', '..', 'web', 'src')
 failed = False
 
 
@@ -29,13 +37,28 @@ def fail(message):
 
 
 # ---- 1. Glyph coverage ---------------------------------------------------------------------------
-fonts = {name: set(TTFont(os.path.join(PROTO, 'fonts', name)).getBestCmap()) for name in ('DejaVuSansMono.subset.woff2', 'DejaVuSansMono-Bold.subset.woff2')}
+FONTS = os.path.join(WEB, 'fonts') if APP else os.path.join(PROTO, 'fonts')
+fonts = {name: set(TTFont(os.path.join(FONTS, name)).getBestCmap()) for name in ('DejaVuSansMono.subset.woff2', 'DejaVuSansMono-Bold.subset.woff2')}
+if APP:
+    sources = [p for p in glob.glob(os.path.join(WEB, '**', '*'), recursive=True) if re.search(r'\.(svelte|ts|css|html)$', p) and not p.endswith('.test.ts')]
+else:
+    sources = glob.glob(os.path.join(PROTO, 'js', '*.js')) + glob.glob(os.path.join(PROTO, 'css', '*.css')) + [os.path.join(PROTO, 'index.html')]
+
+
+def printable(text):
+    """The text without its comments: a comment never reaches the screen."""
+    if not APP:
+        return text
+    text = re.sub(r'/\*.*?\*/|<!--.*?-->', '', text, flags=re.S)
+    return re.sub(r'(^|\s)//.*$', r'\1', text, flags=re.M)
+
+
 used = {}
-for path in glob.glob(os.path.join(PROTO, 'js', '*.js')) + glob.glob(os.path.join(PROTO, 'css', '*.css')) + [os.path.join(PROTO, 'index.html')]:
+for path in sources:
     with open(path, encoding='utf8') as f:
-        for ch in f.read():
+        for ch in printable(f.read()):
             if ord(ch) > 126:
-                used.setdefault(ch, set()).add(os.path.basename(path))
+                used.setdefault(ch, set()).add(os.path.relpath(path, WEB) if APP else os.path.basename(path))
 for name, cmap in fonts.items():
     missing = sorted(ch for ch in used if ord(ch) not in cmap)
     if missing:
@@ -43,7 +66,7 @@ for name, cmap in fonts.items():
 print(f'glyphs: {len(used)} non-ASCII characters used, all present in {len(fonts)} font files' if not failed else 'glyphs: see above')
 
 # ---- 2. Contrast ---------------------------------------------------------------------------------
-with open(os.path.join(PROTO, 'css', 'tokens.css'), encoding='utf8') as f:
+with open(os.path.join(WEB, 'app.css') if APP else os.path.join(PROTO, 'css', 'tokens.css'), encoding='utf8') as f:
     css = f.read()
 blocks = {'Night': re.search(r':root \{(.*?)\n\}', css, re.S).group(1), 'Print': re.search(r"\[data-theme='print'\] \{(.*?)\n\}", css, re.S).group(1)}
 
@@ -101,6 +124,8 @@ for theme, block in blocks.items():
 table = ['| Theme | Token | Value | On `--bg` | Lowest | On |', '|---|---|---|---|---|---|']
 table += [f'| {th} | `{n}` | `{v}` | {a:.1f}:1 | {w:.1f}:1 | `{g}` |' for th, n, v, a, w, g in rows]
 print(f'contrast: {len(rows)} pairs checked, lowest {min(r[4] for r in rows):.2f}:1')
+if APP:
+    sys.exit(1 if failed else 0)
 with open(README, encoding='utf8') as f:
     doc = f.read()
 doc = re.sub(r'(<!-- contrast:begin -->\n).*?(<!-- contrast:end -->)', lambda m: m.group(1) + '\n'.join(table) + '\n' + m.group(2), doc, flags=re.S)
