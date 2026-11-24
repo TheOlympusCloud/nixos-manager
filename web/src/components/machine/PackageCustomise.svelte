@@ -52,6 +52,7 @@
   let busy = $state(false)
   async function save() {
     if (problem) return
+    if (!override && !current) return onclose() // nothing set, nothing to clear
     busy = true
     const ok = await setPackageOverride(host.name, attr, override)
     busy = false
@@ -161,7 +162,7 @@
   </section>
 
   <div class="buttons">
-    <button class="primary" disabled={busy || !!problem} onclick={save}>{busy ? 'Saving…' : override ? 'Save' : 'Save (no change)'}</button>
+    <button class="primary" disabled={busy || !!problem} onclick={save}>{busy ? 'Saving…' : 'Save'}</button>
     {#if changed}<button class="danger" disabled={busy} onclick={reset}><Icon name="undo" /> Reset to default</button>{/if}
     <button class="ghost" onclick={onclose}>Cancel</button>
   </div>
