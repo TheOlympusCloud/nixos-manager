@@ -1425,8 +1425,9 @@ writes what this machine has to the machines you pick, each in its own
 
 A copy never overwrites. A machine that already has another value for anything
 copied (another change to the package, an option set differently, a file with
-other content, a package the home adds that it removes) is left untouched, and
-the result names what differs. What a machine already has the same is skipped.
+other content or executable bit, a package the home adds that it removes) is
+left untouched, and the result names what differs. What a machine already has
+the same is skipped. A symbolic link is copied as the file it points to.
 Home-manager configuration written by hand outside the machine's folder is not
 copied. To change something on every machine for good, use
 [Every machine](#every-machine-at-once) instead. MCP: `copy_to_machines`.

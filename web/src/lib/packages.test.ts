@@ -174,5 +174,6 @@ describe('copy to other machines', () => {
       ok: false,
     })
     expect(copySummary('htop', [{ host: 'a', changed: false }, { host: 'b', changed: false }]).text).toBe('a, b already have it.')
+    expect(copySummary('htop', [{ host: 'a', changed: true, error: 'hosts/a/managed.json changed since it was loaded' }])).toEqual({ text: 'Not copied to a: hosts/a/managed.json changed since it was loaded.', ok: false })
   })
 })

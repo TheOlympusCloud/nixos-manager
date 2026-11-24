@@ -1,9 +1,20 @@
 package core
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+// modeOf is a file's permissions in the working copy.
+func modeOf(t *testing.T, s *Service, p string) fs.FileMode {
+	t.Helper()
+	fi, err := os.Stat(filepath.Join(s.Repo.Dir, p))
+	ok(t, err)
+	return fi.Mode().Perm()
+}
 
 // readFile is a file's content, or "" when it does not exist.
 func readFile(s *Service, p string) string {
@@ -96,6 +107,8 @@ func TestCopyHome(t *testing.T) {
 	edit(s.SetOption("web", hm("home", "sessionVariables", "EDITOR"), "vim", nil))
 	write(t, s.Repo, "hosts/web/home/pablo/files/.config/a.conf", "a\n")
 	write(t, s.Repo, "hosts/web/home/pablo/custom.nix", "{ }\n")
+	write(t, s.Repo, "hosts/web/home/pablo/files/.local/bin/tool", "#!/bin/sh\n")
+	ok(t, os.Chmod(filepath.Join(s.Repo.Dir, "hosts/web/home/pablo/files/.local/bin/tool"), 0o755)) // git keeps the bit
 	write(t, s.Repo, "hosts/web/home/anna/files/.bashrc", "anna\n")
 	write(t, s.Repo, "home/pablo/files/.profile", "not web's\n") // a home/ folder outside web's
 
@@ -104,13 +117,14 @@ func TestCopyHome(t *testing.T) {
 	edit(s.EditPackages("srv", PackageEdit{User: "pablo", Add: []string{"fd"}}))
 	write(t, s.Repo, "hosts/srv/home/pablo/files/.bashrc", "srv\n")
 	edit(s.SetOption("ct", hm("programs", "git", "enable"), false, nil))
+	write(t, s.Repo, "hosts/ct/home/pablo/files/.local/bin/tool", "#!/bin/sh\n") // the same text, not executable
 	edit(s.EditPackages("db", PackageEdit{User: "pablo", Add: []string{"htop"}}))
 
 	got := must[[]CopyResult](t)(s.Copy("web", CopyRequest{Home: "pablo", To: []string{"laptop", "srv", "ct", "db"}}))
 	want := []CopyResult{
 		{Host: "laptop", Changed: true},
 		{Host: "srv", Changed: true},
-		{Host: "ct", Conflicts: []string{"settings.home-manager.users.pablo.programs.git.enable"}},
+		{Host: "ct", Conflicts: []string{"settings.home-manager.users.pablo.programs.git.enable", "hosts/ct/home/pablo/files/.local/bin/tool"}},
 		{Host: "db", Conflicts: []string{"home.pablo.packages: htop"}},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -123,7 +137,8 @@ func TestCopyHome(t *testing.T) {
 	if want := (HomeManaged{Packages: []string{"ripgrep"}, RemovedPackages: []string{"htop"}}); !reflect.DeepEqual(laptop.Home["pablo"], want) ||
 		!reflect.DeepEqual(opts(laptop), map[string]any{"programs": map[string]any{"git": map[string]any{"enable": true}}, "home": map[string]any{"sessionVariables": map[string]any{"EDITOR": "vim"}}}) ||
 		readFile(s, "hosts/laptop/home/pablo/files/.config/a.conf") != "a\n" || readFile(s, "hosts/laptop/home/pablo/custom.nix") != "{ }\n" ||
-		readFile(s, "hosts/laptop/home/anna/files/.bashrc") != "" || readFile(s, "hosts/laptop/home/pablo/files/.profile") != "" {
+		readFile(s, "hosts/laptop/home/anna/files/.bashrc") != "" || readFile(s, "hosts/laptop/home/pablo/files/.profile") != "" ||
+		modeOf(t, s, "hosts/laptop/home/pablo/files/.local/bin/tool") != 0o755 || modeOf(t, s, "hosts/laptop/home/pablo/files/.config/a.conf") != 0o644 {
 		t.Fatalf("laptop %+v", laptop)
 	}
 	srv := must[ManagedView](t)(s.ManagedView("srv"))

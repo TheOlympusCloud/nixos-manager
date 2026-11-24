@@ -37,8 +37,24 @@ type copyPlan struct {
 	// apply adds the copied entries to a machine's managed file: what it
 	// already has with another value, and whether anything changed.
 	apply  func(v *ManagedView) (conflicts []string, changed bool)
-	files  map[string]string // content by path inside the machine's folder
-	absent []string          // paths inside the machine's folder that it must not have
+	files  map[string]copyFile // by path inside the machine's folder
+	absent []string            // paths inside the machine's folder that it must not have
+}
+
+// copyFile is a file a copy writes: its text, and whether it is executable,
+// which git and home-manager's links both keep.
+type copyFile struct {
+	text string
+	exec bool
+}
+
+func (s *Service) readCopy(p string) (copyFile, error) {
+	text, _, err := s.Read(p)
+	if err != nil {
+		return copyFile{}, err
+	}
+	exec, err := s.Repo.executable(p)
+	return copyFile{text, exec}, err
 }
 
 // Copy copies a package's customisation or a user's home from one machine to
@@ -101,7 +117,7 @@ func (s *Service) copyTo(host string, p copyPlan, res *CopyResult) error {
 	dir := path.Dir(md.view.Path) + "/"
 	var missing []string
 	for _, f := range slices.Sorted(maps.Keys(p.files)) {
-		cur, _, err := s.Read(dir + f)
+		cur, err := s.readCopy(dir + f)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			missing = append(missing, f)
@@ -121,8 +137,13 @@ func (s *Service) copyTo(host string, p copyPlan, res *CopyResult) error {
 		return nil
 	}
 	for _, f := range missing {
-		if _, err := s.Write(dir+f, p.files[f], ""); err != nil {
+		if _, err := s.Write(dir+f, p.files[f].text, ""); err != nil {
 			return err
+		}
+		if p.files[f].exec {
+			if err := s.Repo.makeExecutable(dir + f); err != nil {
+				return err
+			}
 		}
 	}
 	res.Changed = changed || len(missing) > 0
@@ -145,19 +166,19 @@ func (s *Service) overridePlan(src managedDoc, attr string) (copyPlan, error) {
 	}
 	dir := path.Dir(src.view.Path) + "/"
 	o, has := src.view.PackageOverrides[attr]
-	p := copyPlan{files: map[string]string{}}
+	p := copyPlan{files: map[string]copyFile{}}
 	for _, patch := range o.Patches {
 		if patch.File == "" {
 			continue
 		}
-		c, _, err := s.Read(dir + patch.File)
+		c, err := s.readCopy(dir + patch.File)
 		if err != nil {
 			return p, err
 		}
 		p.files[patch.File] = c
 	}
 	nixFile := "packages/" + attr + ".nix"
-	switch c, _, err := s.Read(dir + nixFile); {
+	switch c, err := s.readCopy(dir + nixFile); {
 	case err == nil:
 		p.files[nixFile] = c
 	case errors.Is(err, ErrNotFound):
@@ -205,14 +226,14 @@ func (s *Service) homePlan(src managedDoc, user string) (copyPlan, error) {
 	if err != nil {
 		return copyPlan{}, err
 	}
-	p := copyPlan{files: map[string]string{}}
+	p := copyPlan{files: map[string]copyFile{}}
 	for _, e := range entries {
 		f, in := strings.CutPrefix(e.Path, dir)
 		if e.Dir || !in || (f != home+"custom.nix" && !strings.HasPrefix(f, home+"files/")) {
 			continue
 		}
 		// shortcut: files are read as text, so a binary dotfile stops the copy; copy bytes if one is needed.
-		c, _, err := s.Read(e.Path)
+		c, err := s.readCopy(e.Path)
 		if err != nil {
 			return p, err
 		}

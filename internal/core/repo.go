@@ -313,6 +313,30 @@ func (r *Repo) Write(p, content, baseHash string) (string, error) {
 	return hashOf([]byte(content)), nil
 }
 
+// executable reports whether a file has the executable bit, which git keeps.
+func (r *Repo) executable(p string) (bool, error) {
+	p, err := r.localPath(p)
+	if err != nil {
+		return false, err
+	}
+	fi, err := r.root.Stat(p)
+	if err != nil {
+		return false, err
+	}
+	return fi.Mode().Perm()&0o111 != 0, nil
+}
+
+// makeExecutable sets a file's mode to 0755, as git checks out an executable file.
+func (r *Repo) makeExecutable(p string) error {
+	p, err := r.localPath(p)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.root.Chmod(p, 0o755)
+}
+
 // checkBase makes sure p on disk is still the version the caller saw: hash
 // baseHash, or absent when baseHash is "". Needs r.mu held.
 func (r *Repo) checkBase(p, baseHash string) error {

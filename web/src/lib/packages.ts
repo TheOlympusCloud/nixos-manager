@@ -127,7 +127,8 @@ export const copyTargets = (hosts: Host[], from: string, user?: string) =>
 /** One sentence per outcome of a copy; ok is false when a machine did not get it. */
 export function copySummary(what: string, results: CopyResult[]): { text: string; ok: boolean } {
   const names = (rs: CopyResult[]) => rs.map((r) => r.host).join(', ')
-  const copied = results.filter((r) => r.changed)
+  // A machine whose files were written before its managed.json failed counts as not copied.
+  const copied = results.filter((r) => r.changed && !r.error)
   const same = results.filter((r) => !r.changed && !r.conflicts?.length && !r.error)
   const parts: string[] = []
   if (copied.length) parts.push(`Copied ${what} to ${names(copied)}.`)
