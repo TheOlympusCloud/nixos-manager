@@ -224,8 +224,9 @@ let
   links = lib.mapAttrs (user: u: (sharedHomes.${user}.secrets or { }) // (u.secrets or { })) homes;
   templates = lib.mapAttrs (user: _: filesUnder (dir + "/home/${user}/templates")) homes;
   # Rendered at /run/secrets/rendered/<name>.
-  # shortcut: two paths of one user that differ only in characters a store name
-  # cannot hold (/ included) share a name; add a hash of the path if one ever does.
+  # shortcut: names can collide, so the check fails with a conflict: two paths of one
+  # user that differ only in characters a store name cannot hold (/ included), or
+  # user a's b-c and user a-b's c; add a hash of user and path if one ever does.
   templateName = user: p: lib.strings.sanitizeDerivationName "home-${user}-${p}";
   # @secret:<name>@ becomes that secret's placeholder, which sops-nix replaces on the machine.
   render =
@@ -241,6 +242,8 @@ let
   # Whether a module other than this one declares the secret (modules/secrets.nix, or
   # Nix by hand). A linked secret gets its owner only then, so a missing one fails with
   # the message in homeModule instead of sops-nix's about its default file.
+  # shortcut: a secret declared in this managed.json's own settings (sops.secrets)
+  # shares this module's file, so it does not count; declare it in Nix instead.
   declared =
     name:
     lib.any (d: toString d.file != toString file && d.value ? ${name}) options.sops.secrets.definitionsWithLocations;

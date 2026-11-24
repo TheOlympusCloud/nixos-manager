@@ -148,6 +148,18 @@
     })
   }
 
+  async function unlink(l: { path: string; secret: string; where: string }) {
+    if (l.where === SHARED) {
+      const ok = await confirmBox({
+        title: `Unlink ~/${l.path} on every machine?`,
+        message: `The link is in ${SHARED_FILE}, so ${user}'s home loses ~/${l.path} on every machine whose managed.json has it, not only on ${host.name}. The secret ${l.secret} stays. Undo puts the link back.`,
+        ok: 'Unlink',
+      })
+      if (!ok) return
+    }
+    await run('link:' + l.path, () => unlinkHomeSecret(l.where, user, l.path, l.secret))
+  }
+
   async function addSecret(e: SubmitEvent) {
     e.preventDefault()
     const f = secretFile.trim()
@@ -323,7 +335,7 @@
             <span class="small">= the secret <span class="mono">{l.secret}</span></span>
             {#if l.where === SHARED}<span class="chip ok" title="Set for every machine, in {SHARED_FILE}">⇉ Every machine</span>{/if}
             {#if host.secrets && !secretNames.includes(l.secret)}<span class="chip warn" title="Its check fails until {host.name} gets it, in Settings → Secrets">✖ Not one of {host.name}'s secrets</span>{/if}
-            {#if full}<button class="icon" aria-label="Unlink ~/{l.path}" title="Unlink (the secret stays)" disabled={busy === 'link:' + l.path} onclick={() => run('link:' + l.path, () => unlinkHomeSecret(l.where, user, l.path, l.secret))}
+            {#if full}<button class="icon" aria-label="Unlink ~/{l.path}" title="Unlink (the secret stays)" disabled={busy === 'link:' + l.path} onclick={() => unlink(l)}
                 ><Icon name="trash" /></button
               >{/if}
           </li>
