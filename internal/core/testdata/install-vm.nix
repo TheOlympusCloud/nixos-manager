@@ -31,7 +31,12 @@ let
           ]
           ++ lib.unique (sources fleet);
           isoImage.squashfsCompression = "zstd -Xcompression-level 1"; # quicker to build
-          nix.settings.substituters = lib.mkForce [ ];
+          nix.settings = {
+            substituters = lib.mkForce [ ];
+            # nixos-install copies the system into /mnt's store, but builds what has
+            # allowSubstitutes = false (system-path, the system itself…), which needs stdenv.
+            always-allow-substitutes = true;
+          };
         }
       ];
     }).config.system.build.isoImage;
@@ -47,30 +52,37 @@ pkgs.testers.runNixOSTest {
     import os
     import subprocess
 
+    # The driver stops only its nodes: on a failure, these would keep it waiting.
     installer = create_machine(${py (start "-boot d -cdrom ${installer}/iso/${installer.isoName}")}, name=${py host})
-    subprocess.run(["${pkgs.qemu_test}/bin/qemu-img", "create", "-f", "qcow2", str(installer.state_dir / "disk.qcow2"), "10G"], check=True)
-    installer.start()
-    installer.wait_for_unit("multi-user.target")
-    with subtest("fleet-install --yes --offline on the empty disk"):
-        # It ends with a reboot, which would stop QEMU under the driver: the test shuts down instead.
-        installer.succeed("mkdir -p /tmp/stub && printf '#!/bin/sh\\n' > /tmp/stub/reboot && chmod +x /tmp/stub/reboot")
-        installer.succeed("PATH=/tmp/stub:$PATH fleet-install --yes --offline < /dev/null >&2")
-    installer.shutdown()
+    try:
+        subprocess.run(["${pkgs.qemu_test}/bin/qemu-img", "create", "-f", "qcow2", str(installer.state_dir / "disk.qcow2"), "10G"], check=True)
+        installer.start()
+        installer.wait_for_unit("multi-user.target")
+        with subtest("fleet-install --yes --offline on the empty disk"):
+            # It ends with a reboot, which would stop QEMU under the driver: the test shuts down instead.
+            installer.succeed("mkdir -p /tmp/stub && printf '#!/bin/sh\\n' > /tmp/stub/reboot && chmod +x /tmp/stub/reboot")
+            installer.succeed("PATH=/tmp/stub:$PATH fleet-install --yes --offline < /dev/null >&2")
+        installer.shutdown()
+    finally:
+        installer.release()
 
     machine = create_machine(${py (start "")}, name=${py host}, keep_machine_state=True)
-    machine.start()
-    machine.wait_for_unit("multi-user.target")
-    machine.wait_for_unit(${py "home-manager-${user}.service"})
-    with subtest(${py "${user} logs in"}):
-        machine.wait_until_tty_matches("1", "login: ")
-        machine.send_chars(${py "${user}\n"})
-        machine.wait_until_tty_matches("1", "Password: ")
-        machine.send_chars(${py "${password}\n"})
-        machine.wait_until_succeeds(${py "pgrep -u ${user} bash"})
-        machine.send_chars(${py "(${command}) > /tmp/session 2>&1; mv /tmp/session /tmp/session.txt\n"})
-        machine.wait_for_file("/tmp/session.txt")
-    with open(os.environ["out"] + "/session.txt", "w") as f:
-        f.write(machine.succeed("cat /tmp/session.txt"))
-    machine.shutdown()
+    try:
+        machine.start()
+        machine.wait_for_unit("multi-user.target")
+        machine.wait_for_unit(${py "home-manager-${user}.service"})
+        with subtest(${py "${user} logs in"}):
+            machine.wait_until_tty_matches("1", "login: ")
+            machine.send_chars(${py "${user}\n"})
+            machine.wait_until_tty_matches("1", "Password: ")
+            machine.send_chars(${py "${password}\n"})
+            machine.wait_until_succeeds(${py "pgrep -u ${user} bash"})
+            machine.send_chars(${py "(${command}) > /tmp/session 2>&1; mv /tmp/session /tmp/session.txt\n"})
+            machine.wait_for_file("/tmp/session.txt")
+        with open(os.environ["out"] + "/session.txt", "w") as f:
+            f.write(machine.succeed("cat /tmp/session.txt"))
+        machine.shutdown()
+    finally:
+        machine.release()
   '';
 }

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/TheOlympusCloud/nixos-manager/templates"
 )
@@ -410,7 +411,13 @@ func TestInstallInVMWithRealNix(t *testing.T) {
 	session := `echo ~; echo "$PATH"; command -v jq hello-customised cowsay git strace; cat ~/.config/nixmgr/hello.txt`
 	call := "(" + string(vm) + "\n) { flakeRef = " + nixString(ref) + "; host = \"pc\"; user = \"pablo\"; password = \"nixmgr\"; command = " + nixString(session) +
 		"; iso = " + isoCall(ref, "pc", sha, "Pablo", "pablo@example.invalid") + "; }"
-	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "build", "-L", "--no-link", "--print-out-paths", "--expr", call)
+	// Stopped before go test's own timeout, which would leave nix running and its output open.
+	if d, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, d.Add(-time.Minute))
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "nix", "--extra-experimental-features", "nix-command flakes", "build", "-L", "--no-link", "--print-out-paths", "--expr", call)
 	cmd.Stderr = os.Stderr // the VMs' consoles, as they run
 	out, err := cmd.Output()
 	if err != nil {
