@@ -3,6 +3,7 @@
   import EditorArea from '../components/EditorArea.svelte'
   import FileTree from '../components/FileTree.svelte'
   import Icon from '../components/Icon.svelte'
+  import { cell, frame } from '../lib/ascii'
   import { lspState } from '../lib/lsp.svelte'
   const lspStatus = { off: 'nixd idle', connecting: 'nixd starting', ready: 'nixd ready', down: 'nixd reconnecting', missing: 'nixd not installed' }
   import { fileUrl } from '../lib/forgejo'
@@ -47,91 +48,84 @@
 </script>
 
 <div class="code">
-  <div class="work">
-    <aside class="tree" style:width="{side}px"><FileTree /></aside>
-    <!-- A focusable separator is an ARIA widget (resizable with the arrow keys). -->
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-    <div
-      class="splitter"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize the file tree"
-      aria-valuenow={side}
-      aria-valuemin={200}
-      aria-valuemax={560}
-      tabindex="0"
-      onpointerdown={resize}
-      onkeydown={resizeKey}></div>
+  <!-- The tree's width is the user's (px, resizable); it is drawn in whole cells. -->
+  <aside class="tree" style:width="{Math.round(side / cell.cw)}ch" use:frame={{ title: 'Files' }}><FileTree /></aside>
+  <!-- A focusable separator is an ARIA widget (resizable with the arrow keys). -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="splitter"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize the file tree"
+    aria-valuenow={side}
+    aria-valuemin={200}
+    aria-valuemax={560}
+    tabindex="0"
+    onpointerdown={resize}
+    onkeydown={resizeKey}></div>
+  <div class="ed" use:frame={'square'}>
     <EditorArea />
+    <div class="rule" aria-hidden="true"></div>
+    <footer class="status">
+      <span class="msg" role="status">{statusLine.text}</span>
+      {#if path}<a href={link('history', path.split('/'))}><Icon name="history" /> History of this file</a>{/if}
+      {#if path && app.info?.web && app.status?.upstream}<a href={fileUrl(app.info.web, app.status.branch, path)} target="_blank" rel="noopener noreferrer" title="The pushed version of {path} on Forgejo"><Icon name="external" /> Open in Forgejo</a>{/if}
+      <span title={lspState.reason || 'Nix language server (nixd): completion, hover help and diagnostics'}
+        ><span class="dot {lspState.status === 'ready' ? 'ok' : lspState.status === 'down' ? 'err' : lspState.status === 'connecting' ? 'busy' : 'off'}"></span> {lspStatus[lspState.status]}</span>
+    </footer>
   </div>
-  <footer class="status">
-    <span class="msg" role="status">{statusLine.text}</span>
-    {#if path}<a href={link('history', path.split('/'))}><Icon name="history" size={12} />History of this file</a>{/if}
-    {#if path && app.info?.web && app.status?.upstream}<a href={fileUrl(app.info.web, app.status.branch, path)} target="_blank" rel="noopener noreferrer" title="The pushed version of {path} on Forgejo"><Icon name="external" size={12} />Open in Forgejo</a>{/if}
-    <span title={lspState.reason || 'Nix language server (nixd): completion, hover help and diagnostics'}
-      ><span class="dot {lspState.status === 'ready' ? 'ok' : lspState.status === 'down' ? 'err' : lspState.status === 'connecting' ? 'busy' : 'off'}"></span>{lspStatus[lspState.status]}</span>
-  </footer>
 </div>
 
 <style>
   .code {
     display: flex;
-    flex-direction: column;
     height: 100%;
+    padding: var(--lh) 1ch;
   }
-  .work {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-  }
+  /* Framed, so they never scroll themselves (the frame would scroll away): what is inside does. */
   .tree {
     flex: none;
     min-width: 0;
-    background: var(--bg-side);
+    overflow: hidden;
   }
   .splitter {
     flex: none;
-    z-index: 2;
-    width: 5px;
-    margin: 0 -2px;
-    padding: 0 2px;
-    background: var(--border);
-    background-clip: content-box;
+    width: 1ch;
     cursor: col-resize;
   }
-  .splitter:hover,
+  .splitter:hover {
+    background: var(--bg-hover);
+  }
   .splitter:focus-visible {
-    padding: 0;
     background: var(--accent);
-    outline: none;
+  }
+  .ed {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
   }
   .status {
     display: flex;
     flex: none;
-    align-items: center;
-    gap: 16px;
-    height: 26px;
-    padding: 0 12px;
+    gap: 0 3ch;
+    height: var(--lh);
+    overflow: hidden;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    background: var(--bg-deep);
-    border-top: 1px solid var(--border);
-  }
-  .status span,
-  .status a {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    white-space: nowrap;
   }
   .status a {
     color: var(--fg-muted);
-    text-decoration: none;
   }
   .status a:hover {
-    color: var(--fg-strong);
+    color: var(--on-accent);
   }
   .msg {
     flex: 1;
-    color: var(--fg);
+    min-width: 0;
+    overflow: hidden;
+    color: var(--fg-strong);
+    text-overflow: ellipsis;
   }
 </style>

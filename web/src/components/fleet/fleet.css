@@ -1,233 +1,92 @@
-/* Fleet graph: Svelte Flow theme and node styles. */
+/* Fleet graph: Svelte Flow keeps pan, zoom and the layout. Nodes are framed text (use:frame) sized and placed in
+   whole cells; wires are dotted step paths that light up in accent and carry packets on the clock. */
 
 .fleet-flow {
-  --xy-background-color: transparent; /* the canvas's paper shows through */
-  --xy-node-border-radius-default: var(--r-lg);
+  --xy-background-color: transparent; /* the dot grid shows through */
   --xy-edge-stroke-default: var(--line-strong);
-  --xy-edge-stroke-width-default: 1.4;
+  --xy-edge-stroke-width-default: 1.5;
   --xy-edge-stroke-selected-default: var(--accent);
-  --xy-minimap-background-color-default: var(--bg-side);
+  --xy-minimap-background-color-default: transparent;
   --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--bg-deep) 70%, transparent);
   --xy-minimap-node-background-color-default: var(--line-strong);
-  --xy-controls-button-background-color-default: var(--bg-raised);
-  --xy-controls-button-background-color-hover-default: var(--bg-hover);
-  --xy-controls-button-color-default: var(--fg);
-  --xy-controls-button-color-hover-default: var(--fg-strong);
-  --xy-controls-button-border-color-default: var(--line);
-  --xy-controls-box-shadow-default: var(--shadow-1);
-  --xy-attribution-background-color-default: transparent;
 }
-.fleet-flow .svelte-flow__node {
-  padding: 0;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
+/* Keyboard focus lights the node's frame, not the whole node (the global :focus-visible is reverse video). */
 .fleet-flow .svelte-flow__node:focus-visible {
-  outline: none;
+  color: inherit;
+  background: none;
 }
-.fleet-flow .svelte-flow__node:focus-visible > .node {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+.fleet-flow .svelte-flow__node:focus-visible > .node > .fr {
+  color: var(--accent);
 }
+/* Wires end on the frame line: each handle is a point in the middle of a glyph cell of the first content row. */
 .fleet-flow .svelte-flow__handle {
-  width: 6px;
+  width: 0;
   min-width: 0;
-  height: 6px;
+  height: 0;
   min-height: 0;
-  background: var(--line-strong);
-  border: 0;
   opacity: 0;
+  transform: none;
   pointer-events: none;
 }
-.fleet-flow .svelte-flow__minimap {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-  box-shadow: var(--shadow-1);
+.fleet-flow .svelte-flow__handle-left {
+  top: calc(var(--lh) * 1.5);
+  left: 0.5ch;
 }
-.fleet-flow .svelte-flow__controls {
-  border-radius: var(--r);
-  overflow: hidden;
+.fleet-flow .svelte-flow__handle-right {
+  top: calc(var(--lh) * 1.5);
+  right: 0.5ch;
 }
-.fleet-flow .svelte-flow__controls-button {
-  transition:
-    background var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease);
+.fleet-flow .svelte-flow__handle-top {
+  top: calc(var(--lh) / 2);
 }
-.fleet-flow .svelte-flow__controls-button {
-  width: 28px;
-  height: 28px;
-  padding: 6px;
-  border-radius: 0;
-}
-.fleet-flow .svelte-flow__controls-button svg {
-  fill: currentColor;
+.fleet-flow .svelte-flow__handle-bottom {
+  bottom: calc(var(--lh) / 2);
 }
 
-/* Edges */
+/* Wires: dotted until lit. */
 .fleet-flow .svelte-flow__edge-path {
-  transition:
-    opacity var(--t) var(--ease),
-    stroke var(--t) var(--ease),
-    stroke-width var(--t) var(--ease);
-}
-/* Edges appear after the nodes they join have landed. */
-.fleet-flow .svelte-flow__edge {
-  animation: fade-in 500ms var(--ease) 260ms backwards;
+  stroke-dasharray: 2 4;
 }
 .fleet-flow .svelte-flow__edge.grouped .svelte-flow__edge-path {
-  stroke: color-mix(in srgb, var(--c) 55%, transparent);
+  stroke: color-mix(in srgb, var(--c) 70%, transparent);
 }
 .fleet-flow .svelte-flow__edge.dim .svelte-flow__edge-path {
-  opacity: 0.08;
+  opacity: 0.25;
 }
+/* What you point at lights its wires; a packet and its train •∙∙∙ run from the machine outward, one cell a tick
+   (FleetGraph steps --hop on the clock). */
 .fleet-flow .svelte-flow__edge.hl .svelte-flow__edge-path {
-  stroke-width: 2.2;
-  /* What you point at flows along its edges, from the machine outward. */
-  stroke-dasharray: 7 5;
-  animation: edge-flow 900ms linear infinite;
-}
-@keyframes edge-flow {
-  to {
-    stroke-dashoffset: -24;
-  }
-}
-.fleet-flow .svelte-flow__edge.hl:not(.grouped) .svelte-flow__edge-path {
-  stroke: var(--fg-muted);
-}
-.fleet-flow .svelte-flow__edge.hl.grouped .svelte-flow__edge-path {
-  stroke: var(--c);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4 2 4 2 4 2 8;
+  stroke-dashoffset: calc(var(--hop, 0) * -8);
 }
 
 /* Nodes */
 .node {
-  position: relative;
   width: 100%;
   height: 100%;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  transition:
-    opacity var(--t) var(--ease),
-    border-color var(--t) var(--ease),
-    box-shadow var(--t) var(--ease),
-    transform var(--t) var(--ease);
+  overflow: hidden;
+  white-space: nowrap;
 }
-.node:hover {
-  border-color: color-mix(in srgb, var(--c, var(--accent)) 55%, var(--line-strong));
-}
-/* Nodes land one after another when the graph is drawn. */
-.fleet-flow .svelte-flow__node > .node {
-  animation: pop-in 460ms var(--ease) backwards;
-  animation-delay: calc(var(--k, 12) * 28ms);
-}
-.fleet-flow .svelte-flow__node:nth-child(1) > .node {
-  --k: 0;
-}
-.fleet-flow .svelte-flow__node:nth-child(2) > .node {
-  --k: 1;
-}
-.fleet-flow .svelte-flow__node:nth-child(3) > .node {
-  --k: 2;
-}
-.fleet-flow .svelte-flow__node:nth-child(4) > .node {
-  --k: 3;
-}
-.fleet-flow .svelte-flow__node:nth-child(5) > .node {
-  --k: 4;
-}
-.fleet-flow .svelte-flow__node:nth-child(6) > .node {
-  --k: 5;
-}
-.fleet-flow .svelte-flow__node:nth-child(7) > .node {
-  --k: 6;
-}
-.fleet-flow .svelte-flow__node:nth-child(8) > .node {
-  --k: 7;
-}
-.fleet-flow .svelte-flow__node:nth-child(9) > .node {
-  --k: 8;
-}
-.fleet-flow .svelte-flow__node:nth-child(10) > .node {
-  --k: 9;
-}
-.fleet-flow .svelte-flow__node:nth-child(11) > .node {
-  --k: 10;
+/* The paper under a node stops in the middle of its frame glyphs, so a wire meets the line itself. */
+.node::before {
+  position: absolute;
+  inset: calc(var(--lh) / 2) 0.5ch;
+  z-index: -1;
+  background: var(--bg);
+  content: '';
 }
 .node.dim {
-  opacity: 0.22;
+  opacity: 0.35;
 }
-.node.sel {
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent),
-    var(--shadow-2);
+/* What does not evaluate stays red, under the pointer too. */
+.node[data-tone='err'] > .fr {
+  color: var(--red);
 }
-.node.machine {
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
-  cursor: pointer;
-}
-.node.machine:hover:not(.sel) {
-  box-shadow: var(--shadow-2);
-  transform: translateY(-1px);
-}
-.node.machine.err:hover:not(.sel) {
-  --c: var(--red);
-}
-.node.pill:hover:not(.sel),
-.node.group:hover:not(.sel) {
-  box-shadow: var(--shadow-1);
-}
-.node.pill .ico,
-.node.group .ico {
-  transition: transform var(--t) var(--ease);
-}
-.node.pill:hover .ico,
-.node.group:hover .ico {
-  transform: scale(1.12);
-}
-.node.machine.err {
-  border-color: color-mix(in srgb, var(--red) 45%, var(--line));
-  background: color-mix(in srgb, var(--red) 6%, var(--bg-raised));
-}
-.node.machine.sel.err {
-  border-color: var(--red);
-}
-
-.node.pill,
-.node.group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px 0 6px;
-  border-radius: var(--r);
-  cursor: pointer;
-}
-.node.pill.tall,
-.node.group {
-  border-radius: var(--r-lg);
-}
-.node.pill .ico,
-.node.group .ico {
-  display: grid;
+.node .ico {
   flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
   color: var(--c, var(--fg-muted));
-  background: color-mix(in srgb, var(--c, var(--fg-muted)) 12%, transparent);
-  border-radius: var(--r-sm);
-}
-.node.pill.tall .ico,
-.node.group .ico {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r);
 }
 .node .text {
   display: flex;
@@ -238,43 +97,31 @@
 .node .label {
   overflow: hidden;
   color: var(--fg-strong);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 700;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .node .label.mono {
-  font-family: var(--mono);
-  font-size: 11.5px;
   font-weight: 400;
 }
 .node .sub {
   overflow: hidden;
   color: var(--fg-muted);
-  font-size: 11px;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .node .n {
   flex: none;
-  min-width: 18px;
-  padding: 0 5px;
-  color: var(--fg);
-  font-size: 10.5px;
-  line-height: 16px;
-  text-align: center;
-  background: var(--bg-raised);
-  border-radius: var(--r);
+  color: var(--fg-muted);
 }
-.node.pill.k-feature {
-  border-color: color-mix(in srgb, var(--c) 35%, var(--line));
+
+/* Pills and the packages group: one glyph, the name, the count. */
+.node.pill,
+.node.group {
+  display: flex;
+  gap: 1ch;
 }
-.node.pill.k-file {
-  --c: var(--fg-muted);
-  background: var(--bg-side);
-  border-style: dashed;
-}
-.node.pill.k-package {
+.node.pill.k-file,
+.node.pill.k-package,
+.node.group {
   --c: var(--fg-muted);
 }
 .node.pill.k-user,
@@ -283,20 +130,14 @@
 }
 .node.pill.k-input {
   --c: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 .node.pill.err {
   --c: var(--red);
-  border-color: color-mix(in srgb, var(--red) 45%, var(--line));
-}
-.node.group {
-  --c: var(--fg-muted);
-  padding-right: 4px;
 }
 .node.group .icon {
   flex: none;
-  width: 24px;
-  height: 24px;
+  min-width: 0;
+  padding: 0 1ch;
 }
 
 /* Machine node: the card, then what only this machine runs. */
@@ -306,53 +147,13 @@
 }
 .node.machine .card-slot {
   flex: none;
-  height: 134px; /* 136 minus the node border */
+  height: calc(var(--lh) * 3);
+  overflow: hidden;
 }
 .node.machine .solo {
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 4px;
-  margin: 0;
-  padding: 8px 13px 10px;
-  list-style: none;
-  border-top: 1px solid var(--border);
-}
-.solo-chip {
-  max-width: 100%;
-  height: 20px;
-  padding: 0 7px;
   overflow: hidden;
-  color: color-mix(in srgb, var(--c, var(--fg-muted)) 70%, var(--fg-strong));
-  font-size: 11px;
-  line-height: 18px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  background: color-mix(in srgb, var(--c, var(--fg-muted)) 9%, var(--bg-raised));
-  border: 1px solid color-mix(in srgb, var(--c, var(--fg-muted)) 28%, transparent);
-  border-radius: var(--r-sm);
 }
 .solo-chip.lit {
-  color: var(--fg-strong);
-  background: color-mix(in srgb, var(--c) 18%, var(--bg-raised));
-  border-color: var(--c);
-}
-.solo-chip.more {
-  color: var(--fg-muted);
-  background: var(--bg-hover);
-  border-color: var(--line);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fleet-flow .svelte-flow__node > .node,
-  .fleet-flow .svelte-flow__edge {
-    animation: none !important;
-  }
-  .fleet-flow .svelte-flow__edge.hl .svelte-flow__edge-path {
-    stroke-dasharray: none;
-    animation: none !important;
-  }
-  .node.machine:hover:not(.sel) {
-    transform: none;
-  }
+  color: var(--on-accent);
+  background: var(--c);
 }

@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type Token, type TokenScope } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { expiresAt, expiry, lifetimes, scopes } from '../lib/tokens'
   import { confirmBox } from '../lib/ui.svelte'
   import { ago, copyText } from '../lib/util'
+  import Icon from './Icon.svelte'
 
   let tokens = $state<Token[] | null>(null)
   let name = $state('')
@@ -72,7 +74,7 @@
 </script>
 
 <section class="tokens" aria-labelledby="tokens-title">
-  <h2 id="tokens-title">API tokens</h2>
+  <h2 id="tokens-title" class="sr-only">API tokens</h2>
   <p class="muted">
     Tokens let scripts and MCP clients use the MCP endpoint and the <code>/api/</code> routes (<code>Authorization: Bearer &lt;token&gt;</code>). Give each the least
     access it needs: only a full token can push, which deploys. Commits made with a token name it in a <code>Via:</code> line.
@@ -91,12 +93,12 @@
     </select>
     <button class="primary" type="submit" disabled={!name.trim() || busy}>Create</button>
   </form>
-  <p class="muted hint" id="token-scope-hint">{scopes.find((s) => s.value === scope)?.hint}</p>
+  <p class="muted" id="token-scope-hint">{scopes.find((s) => s.value === scope)?.hint}</p>
 
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
   {#if created}
-    <div class="secret" role="status">
+    <div class="secret" role="status" use:frame={{ animate: true }} data-tone="ok">
       <p>
         <strong>Token "{created.name}" created</strong> ({scopes.find((s) => s.value === created?.scope)?.label.toLowerCase()}, expires {expiry(created.expires)}). Copy
         it now; it is not shown again.
@@ -109,21 +111,21 @@
     </div>
   {/if}
 
-  <table>
+  <table class="data">
     <thead><tr><th>Name</th><th>Access</th><th>Created</th><th>Expires</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>
       {#if tokens === null}
-        <tr><td colspan="6" class="muted">Loading…</td></tr>
+        <tr><td colspan="6" class="muted"><span class="spinner"></span>Loading…</td></tr>
       {:else}
         {#each tokens as t (t.id)}
           {@const exp = expiry(t.expires)}
           <tr>
-            <td>{t.name}</td>
+            <td><b>{t.name}</b></td>
             <td>{scopes.find((s) => s.value === t.scope)?.label ?? t.scope}</td>
             <td title={t.created}>{ago(t.created)}</td>
-            <td title={t.expires} class:expired={exp === 'expired'}>{exp}</td>
+            <td title={t.expires} class:expired={exp === 'expired'}>{#if exp === 'expired'}✖ {/if}{exp}</td>
             <td title={t.last_used}>{t.last_used ? ago(t.last_used) : 'never'}</td>
-            <td class="act"><button class="small revoke" onclick={() => revoke(t)} aria-label="Revoke {t.name}">Revoke</button></td>
+            <td class="act"><button class="danger" onclick={() => revoke(t)} aria-label="Revoke {t.name}">Revoke</button></td>
           </tr>
         {:else}
           <tr><td colspan="6" class="muted">No tokens yet.</td></tr>
@@ -135,109 +137,57 @@
   <h3>MCP endpoint</h3>
   <div class="row">
     <code class="endpoint">{endpoint}</code>
-    <button onclick={() => copy(endpoint, 'endpoint')}>{copied === 'endpoint' ? 'Copied' : 'Copy'}</button>
+    <button onclick={() => copy(endpoint, 'endpoint')}><Icon name={copied === 'endpoint' ? 'tick' : 'copy'} /> {copied === 'endpoint' ? 'Copied' : 'Copy'}</button>
   </div>
   <h3>Client configuration</h3>
   <pre>{config}</pre>
-  <button onclick={() => copy(config, 'config')}>{copied === 'config' ? 'Copied' : 'Copy configuration'}</button>
+  <button onclick={() => copy(config, 'config')}><Icon name={copied === 'config' ? 'tick' : 'copy'} /> {copied === 'config' ? 'Copied' : 'Copy configuration'}</button>
 </section>
 
 <style>
-  h2 {
-    font-size: var(--fs-lg);
+  .tokens > * + * {
+    margin-top: var(--lh);
   }
-  h3 {
-    margin: 18px 0 6px;
-    font-size: 13px;
-  }
-  p {
-    margin: 6px 0 12px;
+  .tokens > :is(h2 + p, #token-scope-hint, h3 + *) {
+    margin-top: 0;
   }
   .row {
     display: flex;
-    max-width: 640px;
-    align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 2ch;
   }
   .row input {
     flex: 1;
-    min-width: 0;
-  }
-  form.row {
-    max-width: 820px;
+    width: auto;
+    min-width: 16ch;
   }
   form.row .label {
     white-space: nowrap;
-  }
-  form.row input {
-    min-width: 140px;
   }
   form.row select {
     flex: none;
     width: auto;
   }
-  .error,
+  .secret .row {
+    margin-top: var(--lh);
+  }
   .expired {
     color: var(--red);
   }
-  .hint {
-    margin-top: 4px;
-    font-size: 12px;
-  }
-  .secret {
-    margin: 12px 0;
-    padding: 10px 12px;
-    background: color-mix(in srgb, var(--green) 10%, var(--bg-side));
-    border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
-    border-radius: 6px;
-  }
-  .secret p {
-    margin: 0 0 8px;
-  }
-  .secret input {
-    font-family: var(--mono);
-  }
-  table {
-    width: 100%;
-    margin-top: 14px;
-    border-collapse: collapse;
-  }
-  th,
-  td {
-    padding: 5px 6px;
-    text-align: left;
-    border-bottom: 1px solid var(--line);
-  }
-  th {
-    color: var(--fg-muted);
-    font-size: 12px;
-    font-weight: 500;
-  }
   td.act {
+    width: 1%;
     text-align: right;
-  }
-  .revoke {
-    color: var(--fg-muted);
-    background: none;
-    border-color: var(--line);
-  }
-  .revoke:hover:not(:disabled) {
-    color: var(--red);
-    background: color-mix(in srgb, var(--red) 10%, transparent);
-    border-color: color-mix(in srgb, var(--red) 40%, transparent);
+    white-space: nowrap;
   }
   .endpoint {
     flex: 1;
-    padding: 5px 8px;
-    background: var(--bg-deep);
-    border-radius: 4px;
+    padding: 0 1ch;
+    background: var(--bg-input);
   }
   pre {
-    margin: 0 0 8px;
-    padding: 10px;
+    padding: 0 1ch;
     overflow: auto;
-    font: 12px/1.5 var(--mono);
-    background: var(--bg-deep);
-    border-radius: 4px;
+    background: var(--bg-input);
   }
 </style>

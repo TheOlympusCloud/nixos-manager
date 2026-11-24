@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { Background, BackgroundVariant, Controls, MiniMap, Position, SvelteFlow, useSvelteFlow, type Edge, type Node } from '@xyflow/svelte'
-  import '@xyflow/svelte/dist/style.css'
+  import { Background, BackgroundVariant, MiniMap, Position, SvelteFlow, useSvelteFlow, useViewport, type Edge, type Node } from '@xyflow/svelte'
+  import '@xyflow/svelte/dist/base.css'
   import './fleet.css'
   import { tick } from 'svelte'
   import type { Model } from '../../lib/api'
-  import { buildGraph, defaultLayers, related, searchModel, type GNode, type Hit, type Layers } from '../../lib/graph'
+  import { cell, frame, on, still } from '../../lib/ascii'
+  import { buildGraph, defaultLayers, packChips, related, searchModel, type GNode, type Hit, type Layers } from '../../lib/graph'
   import { fleet, loadManaged } from '../../lib/fleet.svelte'
   import { plural } from '../../lib/format'
   import { graphUi, toggleExpanded } from '../../lib/graphui.svelte'
@@ -62,6 +63,16 @@
   const nodeTypes = { machine: MachineNode, pkgs: GroupNode, pill: PillNode }
   const flowType = (n: GNode) => (n.kind === 'machine' ? 'machine' : n.kind === 'pkgs' ? 'pkgs' : 'pill')
 
+  // Nodes are framed text, so they measure whole cells. lib/graph.ts estimates labels at 7.3 px a character;
+  // a machine is 40 columns, which holds the chip rows packChips planned.
+  const inCells = (n: GNode): GNode => {
+    const cols = n.kind === 'machine' ? 40 : Math.ceil(n.width / 7.3)
+    const rows = n.kind === 'machine' ? 5 + (n.chips.length ? 1 + packChips(n.chips).rows : 0) : n.height > 40 ? 4 : 3
+    return { ...n, width: cols * cell.cw, height: rows * cell.lh }
+  }
+  // Half a cell off the background's grid, so its dots sit in the middle of a cell, as a · would.
+  const snap = (p: { x: number; y: number }) => ({ x: (Math.round(p.x / cell.cw) + 0.5) * cell.cw, y: (Math.round(p.y / cell.lh) + 0.5) * cell.lh })
+
   async function fit(duration = 300) {
     if (!nodes.length) return
     await flow.fitView({ padding: PAD, duration, maxZoom: 1.1 })
@@ -76,8 +87,8 @@
     const node = nodes.find((x) => x.id === id)
     const g = node && (node.data as GNode)
     if (!node || !g) return false
-    // Shifted right by half the details panel, so the node lands in the visible part of the canvas.
-    flow.setCenter(node.position.x + g.width / 2 + 180 / 1.15, node.position.y + g.height / 2, { zoom: 1.15, duration: 450 })
+    // Shifted right by half the details panel (51 columns), so the node lands in the visible part of the canvas.
+    flow.setCenter(node.position.x + g.width / 2 + (25.5 * cell.cw) / 1.15, node.position.y + g.height / 2, { zoom: 1.15, duration: 450 })
     return true
   }
 
@@ -90,15 +101,17 @@
     const inputs = layers.inputs
     void layoutRun
     const mine = ++seq
-    layout(g.nodes, g.edges, d, inputs).then(
+    const sized = g.nodes.map(inCells)
+    // One row more for the layout, so snapping to rows always leaves a blank row between two nodes.
+    layout(sized.map((n) => ({ ...n, height: n.height + cell.lh })), g.edges, d, inputs).then(
       async (pos) => {
         if (mine !== seq) return
         layoutError = ''
         const [source, target] = d === 'RIGHT' ? [Position.Right, Position.Left] : [Position.Bottom, Position.Top]
-        nodes = g.nodes.map((n) => ({
+        nodes = sized.map((n) => ({
           id: n.id,
           type: flowType(n),
-          position: pos.get(n.id) ?? { x: 0, y: 0 },
+          position: snap(pos.get(n.id) ?? { x: 0, y: 0 }),
           data: n,
           width: n.width,
           height: n.height,
@@ -145,6 +158,7 @@
       id: e.id,
       source: e.source,
       target: e.target,
+      type: 'step',
       selectable: false,
       focusable: false,
       deletable: false,
@@ -152,6 +166,14 @@
       style: e.group ? `--c: var(--g-${e.group})` : undefined,
     })),
   )
+  // Lit wires carry packets: fleet.css shifts their dashes one cell per tick of the clock (still under reduced motion).
+  let canvas = $state<HTMLElement>()
+  $effect(() => {
+    const el = canvas
+    if (!rel || still || !el) return
+    return on((t) => el.style.setProperty('--hop', String(t % 4)))
+  })
+  const viewport = useViewport()
 
   // Drop a selection whose node disappeared (layer turned off, machine removed).
   $effect(() => {
@@ -223,7 +245,7 @@
 <div class="fleet">
   <div class="bar">
     <div class="search-box">
-      <span class="search-ico"><Icon name="search" size={14} /></span>
+      <b class="prompt" aria-hidden="true">λ ›</b>
       <input
         class="search"
         type="search"
@@ -242,28 +264,28 @@
         onblur={() => setTimeout(() => (searchOpen = false), 120)}
         onkeydown={searchKey} />
       {#if searchOpen && query.trim()}
-        <ul class="results" id="fleet-search-list" role="listbox">
-          {#each matches as m, i (m.kind + m.select + m.label)}
-            <li id="fs-{i}" role="option" aria-selected={i === cursor}>
-              <button class="ghost" tabindex="-1" onmousedown={(e) => e.preventDefault()} onclick={() => jump(m)}>
-                <span class="r-text">
+        <div class="results" use:frame={{ kind: 'square', shadow: true, animate: true }}>
+          <ul class="rows" id="fleet-search-list" role="listbox">
+            {#each matches as m, i (m.kind + m.select + m.label)}
+              <li id="fs-{i}" role="option" aria-selected={i === cursor}>
+                <button class="bare" tabindex="-1" onmousedown={(e) => e.preventDefault()} onclick={() => jump(m)}>
                   <span class="r-label" class:mono={m.kind === 'File' || m.kind === 'Package'}>{m.label}</span>
                   {#if m.sub}<span class="r-sub">{m.sub}</span>{/if}
-                </span>
-                <span class="r-kind">{m.kind}</span>
-              </button>
-            </li>
-          {:else}
-            <li class="none">Nothing in the fleet matches.</li>
-          {/each}
-        </ul>
+                  <span class="r-kind">{m.kind}</span>
+                </button>
+              </li>
+            {:else}
+              <li class="none">Nothing in the fleet matches.</li>
+            {/each}
+          </ul>
+        </div>
       {/if}
     </div>
 
-    <div class="layers" role="group" aria-label="Layers">
+    <div class="layers seg" role="group" aria-label="Layers">
       {#each layerList as l (l.key)}
         <button class="layer" class:on={layers[l.key]} aria-pressed={layers[l.key]} aria-label={l.label} title={l.title} onclick={() => (layers[l.key] = !layers[l.key])}>
-          <Icon name={l.icon} size={14} /><span class="layer-label" class:long={!!l.short}>{l.label}</span>{#if l.short}<span class="layer-label short">{l.short}</span>{/if}
+          <Icon name={l.icon} /><span class="layer-label" class:long={!!l.short}>{l.label}</span>{#if l.short}<span class="layer-label short">{l.short}</span>{/if}
         </button>
       {/each}
     </div>
@@ -285,7 +307,7 @@
     </button>
   </div>
 
-  <div class="canvas" class:ready={laidOut}>
+  <div class="canvas" class:ready={laidOut} bind:this={canvas}>
     <SvelteFlow
       class="fleet-flow"
       bind:nodes
@@ -301,25 +323,30 @@
       onnodepointerenter={({ node }) => (graphUi.hover = node.id)}
       onnodepointerleave={() => (graphUi.hover = '')}
       onpaneclick={() => (graphUi.selected = '')}>
-      <!-- Engineering paper: a fine grid, and a heavier line every fifth square. -->
-      <Background id="minor" variant={BackgroundVariant.Lines} gap={22} patternColor="var(--grid)" />
-      <Background id="major" variant={BackgroundVariant.Lines} gap={110} patternColor="var(--grid-major)" />
-      <Controls position="bottom-left" showLock={false} showFitView={false} />
-      <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} nodeBorderRadius={6} width={180} height={120} />
+      <!-- The dot grid: a dot every 4 columns and 2 rows, a cross every 16 and 8 (it pans and zooms with the graph). -->
+      <Background id="minor" variant={BackgroundVariant.Dots} gap={[4 * cell.cw, 2 * cell.lh]} size={2} patternColor="var(--grid-major)" />
+      <Background id="major" variant={BackgroundVariant.Cross} gap={[16 * cell.cw, 8 * cell.lh]} size={7} patternColor="var(--grid-major)" />
+      <div class="zoom" role="group" aria-label="Control Panel" use:frame={'square'}>
+        <button class="icon" title="Zoom In" aria-label="Zoom In" disabled={viewport.current.zoom >= 2} onclick={() => flow.zoomIn()}>+</button>
+        <button class="icon" title="Zoom Out" aria-label="Zoom Out" disabled={viewport.current.zoom <= 0.15} onclick={() => flow.zoomOut()}>−</button>
+      </div>
+      <div class="minimap" use:frame={{ kind: 'square', title: 'map' }}>
+        <MiniMap pannable zoomable nodeColor={minimapColor} nodeBorderRadius={0} width={22 * cell.cw} height={6 * cell.lh} />
+      </div>
     </SvelteFlow>
     {#if !laidOut}
       <div class="placeholder" role={layoutError ? 'alert' : undefined} aria-hidden={layoutError ? undefined : 'true'}>
         {#if layoutError}
           <div class="layout-error">
             <p>{layoutError}</p>
-            <button onclick={() => layoutRun++}><Icon name="refresh" size={14} />Try again</button>
+            <button onclick={() => layoutRun++}><Icon name="refresh" /> Try again</button>
           </div>
         {:else}
-          {#each [0, 1, 2] as i (i)}<span class="skel ghost-card" style:top="{18 + i * 26}%"></span>{/each}
+          {#each [0, 1, 2] as i (i)}<span class="ghost-card" style:top="calc(var(--lh) * {1 + i * 8})" use:frame={'dash'}><span class="skel"></span></span>{/each}
         {/if}
       </div>
     {:else if layoutError}
-      <p class="layout-warn" role="alert">{layoutError} <button class="link" onclick={() => layoutRun++}>Try again</button></p>
+      <p class="layout-warn" role="alert" data-tone="err" use:frame={'square'}>{layoutError} <button class="link" onclick={() => layoutRun++}>Try again</button></p>
     {/if}
     {#if selected}<Inspector node={selected} {model} onclose={() => (graphUi.selected = '')} />{/if}
   </div>
@@ -330,23 +357,26 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    padding: var(--lh) 1ch;
   }
+  /* One row of tools over a blank one, as in a terminal. */
   .bar {
     display: flex;
-    align-items: center;
-    gap: var(--s2);
-    min-height: 52px;
+    flex: none;
+    align-items: baseline;
+    gap: 2ch;
+    height: calc(var(--lh) * 2);
     position: relative;
     z-index: 2; /* its search results open over the canvas */
-    padding: 10px var(--s4);
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
     container-type: inline-size;
   }
   .search-box {
     position: relative;
-    flex: 0 1 240px;
-    min-width: 170px;
+    display: flex;
+    flex: 0 1 32ch;
+    gap: 1ch;
+    min-width: 20ch;
   }
   .layers,
   .legend,
@@ -354,129 +384,102 @@
   .bar > .icon {
     flex: none;
   }
-  .search-ico {
-    position: absolute;
-    top: 8px;
-    left: 10px;
-    color: var(--fg-muted);
-    pointer-events: none;
-  }
-  .search {
-    padding-left: 30px;
+  .bar > .icon {
+    min-width: 0;
+    padding: 0 1ch;
   }
   .results {
     position: absolute;
-    top: calc(100% + 6px);
+    top: var(--lh);
     left: 0;
     z-index: 20;
-    width: 360px;
-    margin: 0;
-    padding: 4px;
-    list-style: none;
+    width: 64ch;
     background: var(--bg-raised);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
   }
   .results button {
-    justify-content: space-between;
-    gap: 12px;
+    display: flex;
+    gap: 2ch;
     width: 100%;
-    height: auto;
-    min-height: 32px;
-    padding: 5px 8px;
-    font-weight: 400;
+    color: inherit;
+    font-weight: inherit;
     text-align: left;
   }
-  .results [aria-selected='true'] button {
-    background: var(--bg-active);
-  }
-  .r-text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
   .r-label {
+    flex: none;
+    max-width: 32ch;
     overflow: hidden;
     color: var(--fg-strong);
     text-overflow: ellipsis;
   }
   .r-sub {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
     text-overflow: ellipsis;
   }
   .r-kind {
     flex: none;
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
+    margin-left: auto;
+    color: var(--fg-faint);
+  }
+  [aria-selected='true'] :is(.r-label, .r-sub, .r-kind),
+  .results button:is(:hover, :focus-visible) > * {
+    color: inherit;
   }
   .none {
-    padding: 8px;
     color: var(--fg-muted);
+    cursor: default;
   }
-  .layers {
-    display: flex;
-    gap: 4px;
-    padding: 3px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-  .layer {
-    height: 26px;
-    padding: 0 10px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    background: none;
-    border-color: transparent;
-  }
-  .layer:hover:not(:disabled) {
-    color: var(--fg-strong);
-    background: var(--bg-hover);
-    border-color: transparent;
-  }
-  .layer.on {
-    color: var(--fg-strong);
-    background: var(--bg-active);
-    border-color: var(--line);
-  }
-  .layer.on :global(svg) {
-    color: var(--accent);
+  .layer-label {
+    margin-left: 1ch;
   }
   .legend {
     display: flex;
-    gap: 10px;
-    margin: 0 0 0 4px;
-    padding: 0;
+    gap: 2ch;
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    list-style: none;
-  }
-  .lg {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
   }
   .lg .dot {
-    width: 7px;
-    height: 7px;
-    background: var(--c);
+    --c: inherit; /* the group's colour, from .g-* on the item */
+  }
+  .lg-name {
+    margin-left: 1ch;
   }
   .canvas {
     position: relative;
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background: var(--bg);
   }
   .canvas :global(.svelte-flow) {
-    opacity: 0;
-    transition: opacity var(--t) var(--ease);
+    visibility: hidden;
   }
   .canvas.ready :global(.svelte-flow) {
-    opacity: 1;
+    visibility: visible;
+  }
+  /* Zoom and map are glyph boxes over the canvas. */
+  .zoom,
+  .minimap {
+    position: absolute;
+    bottom: var(--lh);
+    z-index: 5;
+  }
+  .zoom {
+    left: 2ch;
+    display: flex;
+    gap: 1ch;
+    background: var(--bg);
+  }
+  .zoom button {
+    min-width: 1ch;
+  }
+  .minimap {
+    right: 2ch;
+    background: var(--bg-raised);
+  }
+  .minimap :global(.svelte-flow__panel) {
+    position: static;
+    margin: 0;
   }
   .placeholder {
     position: absolute;
@@ -484,60 +487,50 @@
   }
   .ghost-card {
     position: absolute;
-    left: 8%;
-    width: 240px;
-    height: 120px;
-    border-radius: 10px;
-    opacity: 0.5;
+    left: 4ch;
+    width: 40ch;
+    height: calc(var(--lh) * 6);
+  }
+  .ghost-card .skel {
+    width: 24ch;
   }
   .layout-error {
     display: grid;
     justify-items: start;
-    gap: var(--s3);
-    max-width: 440px;
-    margin: 18vh auto 0;
-    color: var(--fg);
+    gap: var(--lh);
+    max-width: 72ch;
+    margin: calc(var(--lh) * 8) auto 0;
   }
   .layout-warn {
     position: absolute;
-    top: 12px;
-    left: 50%;
+    top: var(--lh);
+    left: 2ch;
     z-index: 5;
-    padding: 6px 12px;
-    color: var(--fg);
-    font-size: var(--fs-sm);
     background: var(--bg-raised);
-    border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line));
-    border-radius: var(--r);
-    transform: translateX(-50%);
   }
   .layer-label.short {
     display: none;
   }
-  /* Narrower bars drop the least useful text first, so the toolbar never wraps (widths measured). */
-  @container (max-width: 1740px) {
+  /* Narrower bars drop the least useful text first, so the toolbar never wraps (widths in columns, measured). */
+  @container (max-width: 259ch) {
     .stats {
       display: none;
     }
   }
-  @container (max-width: 1420px) {
+  @container (max-width: 204ch) {
     .lg-name {
       display: none;
     }
     .legend {
-      gap: 7px;
+      gap: 1ch;
     }
   }
-  @container (max-width: 1200px) {
-    .search-box {
-      flex-basis: 180px;
-    }
+  @container (max-width: 169ch) {
     .legend {
       display: none;
     }
-    .layer {
-      padding: 0 8px;
-    }
+  }
+  @container (max-width: 149ch) {
     .layer-label.long {
       display: none;
     }
@@ -545,14 +538,10 @@
       display: inline;
     }
   }
-  @container (max-width: 970px) {
+  @container (max-width: 130ch) {
     .layer-label,
     .layer-label.short {
       display: none;
-    }
-    .layer {
-      width: 30px;
-      padding: 0;
     }
   }
 </style>

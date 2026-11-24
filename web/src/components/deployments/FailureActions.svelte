@@ -14,11 +14,11 @@
   <div class="fix">
     {#if trial}
       <button class="small" disabled={!!repo.busy} onclick={() => endTrial(m)} title="Point {m.testing} back at {m.main}, so comin switches {m.host} back to it">
-        <Icon name="undo" size={13} />End the trial
+        <Icon name="undo" /> End the trial
       </button>
     {:else if r}
-      <button class="small" disabled={!!repo.busy} onclick={() => rollBack(m)} title="Stage the revert and run the checks; then commit and push it">
-        <Icon name="undo" size={13} />{r.label}
+      <button class="small danger" disabled={!!repo.busy} onclick={() => rollBack(m)} title="Stage the revert and run the checks; then commit and push it">
+        <Icon name="undo" /> {r.label}
       </button>
     {/if}
   </div>
@@ -28,7 +28,7 @@
   .fix {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
+    gap: 0 2ch;
+    margin-top: var(--lh);
   }
 </style>

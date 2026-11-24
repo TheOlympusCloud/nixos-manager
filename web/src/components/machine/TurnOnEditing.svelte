@@ -5,6 +5,7 @@
   import { app } from '../../lib/state.svelte'
   import { copyText } from '../../lib/util'
   import { editingPreview } from '../../lib/values'
+  import { frame } from '../../lib/ascii'
   import Icon from '../Icon.svelte'
 
   /** How to make a Code only machine Editable here: one line in flake.nix, previewed where it goes. */
@@ -28,10 +29,10 @@
   }
 </script>
 
-<section class="card toe" aria-labelledby="toe-title">
+<section class="card toe" aria-labelledby="toe-title" data-tone="accent" use:frame={{ title: `Turn on editing for ${host}`, animate: true }}>
   <header>
-    <h2 id="toe-title">Turn on editing for {host}</h2>
-    <button class="icon" aria-label="Close" onclick={onclose}><Icon name="x" size={15} /></button>
+    <h2 id="toe-title" class="sr-only">Turn on editing for {host}</h2>
+    <button class="icon" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
   </header>
   <p class="lead">
     Editing here keeps the packages and options you set by clicking in <span class="mono">hosts/{host}/managed.json</span>. Your hand-written Nix stays as it is; a value set here wins over it.
@@ -44,7 +45,7 @@
         <p>Add this line to {host}'s <span class="mono">modules</span> in <span class="mono">flake.nix</span>:</p>
         <div class="line">
           <code>{line}</code>
-          <button class="small" onclick={copy}><Icon name={copied ? 'tick' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button>
+          <button class="small" onclick={copy}><Icon name={copied ? 'tick' : 'copy'} /> {copied ? 'Copied' : 'Copy'}</button>
         </div>
         {#if preview}
           <div class="preview" role="figure" aria-label="Where it goes in flake.nix">
@@ -56,7 +57,7 @@
           <p class="muted small">flake.nix does not import <span class="mono">./hosts/{host}</span> on a line of its own (a helper function may build the machines): add the line to the list of modules that builds {host}.</p>
         {/if}
         {#if !hasModule}
-          <p class="warn small"><Icon name="alert" size={13} />This repository has no <span class="mono">modules/managed.nix</span> yet. Copy it from the starter flake (<span class="mono">templates/fleet</span>) first.</p>
+          <p class="warn small"><Icon name="alert" /> This repository has no <span class="mono">modules/managed.nix</span> yet. Copy it from the starter flake (<span class="mono">templates/fleet</span>) first.</p>
         {/if}
       </div>
     </li>
@@ -68,92 +69,67 @@
     </li>
   </ol>
   <div class="actions">
-    <a class="btn primary" href={codeLink('flake.nix')}><Icon name="code" size={14} />Open flake.nix</a>
+    <a class="btn primary" href={codeLink('flake.nix')}><Icon name="code" /> Open flake.nix</a>
   </div>
 </section>
 
 <style>
   .toe {
-    display: grid;
-    gap: 12px;
-    margin-bottom: var(--s4);
-    padding: var(--s4) var(--s5);
-    background: color-mix(in srgb, var(--accent-strong) 7%, var(--bg-raised));
-    border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+    margin-bottom: var(--lh);
   }
+  /* The close button sits at the end of the first line; the text runs beside it. */
   header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  h2 {
-    font-size: var(--fs-lg);
+    float: right;
+    margin-left: 2ch;
   }
   .lead {
     max-width: 80ch;
-    color: var(--fg);
-    line-height: 1.55;
   }
   .steps {
     display: grid;
-    gap: 14px;
-    margin: 4px 0 0;
-    padding: 0;
-    list-style: none;
+    gap: var(--lh);
+    margin-top: var(--lh);
   }
   .steps li {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: 3ch minmax(0, 1fr);
+    gap: 0 2ch;
   }
+  /* The step number in reverse video. */
   .n {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    color: var(--accent);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-    border-radius: 50%;
+    align-self: start;
+    color: var(--on-accent);
+    font-weight: 700;
+    text-align: center;
+    background: var(--accent);
   }
   .step {
     display: grid;
-    gap: 8px;
+    gap: var(--lh);
     min-width: 0;
-    line-height: 1.55;
   }
   .line {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-start;
+    gap: 0 2ch;
     min-width: 0;
   }
   .line code {
     min-width: 0;
-    padding: 6px 10px;
-    overflow-x: auto;
+    padding: 0 1ch;
+    overflow-wrap: anywhere;
     color: var(--fg-strong);
-    white-space: nowrap;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    background: var(--bg-input);
   }
   .preview {
-    max-width: 760px;
-    margin: 0;
-    padding: 8px 0;
-    overflow-x: auto;
-    font: 12px/1.6 var(--mono);
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    max-width: 96ch;
+    background: var(--bg-input);
   }
   .preview span.ctx,
   .preview span.add {
     display: block;
-    padding-right: 12px;
-    white-space: pre;
+    padding-right: 1ch;
+    white-space: pre-wrap;
   }
   .ctx {
     color: var(--fg-muted);
@@ -161,24 +137,27 @@
   .add {
     color: var(--fg-strong);
     background: color-mix(in srgb, var(--green) 14%, transparent);
-    box-shadow: inset 2px 0 0 var(--green);
   }
   .ln {
     display: inline-block;
-    width: 44px;
-    padding-right: 12px;
+    width: 6ch;
+    padding-right: 2ch;
     color: var(--fg-faint);
     text-align: right;
     user-select: none;
   }
+  .add .ln {
+    color: var(--green);
+  }
   .warn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
     color: var(--yellow);
+  }
+  .warn :global(.ic) {
+    color: inherit;
   }
   .actions {
     display: flex;
-    gap: 8px;
+    gap: 0 2ch;
+    margin-top: var(--lh);
   }
 </style>

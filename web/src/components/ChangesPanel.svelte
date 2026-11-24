@@ -110,12 +110,12 @@
       {#if !staged.length}
         <span class="muted">Nothing staged yet.</span>
       {:else if checked}
-        <span class="ok"><Icon name="tick" size={13} />Checks passed{app.status?.staged_check ? `: ${builtText(app.status.staged_check)}` : ''}.</span>
+        <span class="ok"><Icon name="tick" /> Checks passed{app.status?.staged_check ? `: ${builtText(app.status.staged_check)}` : ''}.</span>
       {:else if checking}
         <span class="busy"><span class="spinner" aria-hidden="true"></span>Checking the staged files…</span>
         <button class="link" onclick={() => stagedJob && (app.inspect = { kind: 'job', id: stagedJob.id })}>Log</button>
       {:else if stagedJob?.state === 'failed'}
-        <span class="bad"><Icon name="alert" size={13} />The checks failed.</span>
+        <span class="bad"><Icon name="alert" /> The checks failed.</span>
         <button class="link" onclick={() => stagedJob && (app.inspect = { kind: 'job', id: stagedJob.id })}>Show the log</button>
       {:else}
         <span class="warn">Not checked yet: run the checks before committing.</span>
@@ -124,9 +124,9 @@
 
     <div class="buttons">
       <button onclick={checkStaged} disabled={!staged.length || checking} title="Runs {targetsHint} on the staged files; pick dry builds in Checks">
-        <Icon name="play" size={12} />Run checks
+        <Icon name="play" /> Run checks
       </button>
-      <button class="primary grow" disabled={!canCommit} onclick={() => commit(false)}>{committing ? 'Committing…' : `Commit${staged.length ? ` ${staged.length} file${staged.length === 1 ? '' : 's'}` : ''}`}</button>
+      <button class="primary" disabled={!canCommit} onclick={() => commit(false)}>{committing ? 'Committing…' : `Commit${staged.length ? ` ${staged.length} file${staged.length === 1 ? '' : 's'}` : ''}`}</button>
     </div>
     {#if commitHint && files.length}<p class="muted small hint">{commitHint}</p>{/if}
     {#if commitError}<p class="error small" role="alert">{commitError}</p>{/if}
@@ -150,7 +150,7 @@
             : staged.length
               ? 'Write a commit message first.'
               : ''}>
-          <Icon name="deploy" size={13} />{repo.busy === 'try' ? 'Pushing…' : tryable.length > 1 ? 'Try on it' : `Try on ${tryOn.host}`}
+          <Icon name="deploy" /> {repo.busy === 'try' ? 'Pushing…' : tryable.length > 1 ? 'Try on it' : `Try on ${tryOn.host}`}
         </button>
       </div>
     {/if}
@@ -165,9 +165,9 @@
     <span class="muted small">{staged.length} staged</span>
     <span class="spacer"></span>
     <button class="icon" title="Discard every unstaged change" aria-label="Discard every unstaged change" disabled={!files.some((f) => f.unstaged)} onclick={() => discard(files.filter((f) => f.unstaged).map((f) => f.path))}>
-      <Icon name="undo" size={15} />
+      <Icon name="undo" />
     </button>
-    <button class="icon" title="Refresh" aria-label="Refresh the file list" onclick={refreshStatus}><Icon name="refresh" size={15} /></button>
+    <button class="icon" title="Refresh" aria-label="Refresh the file list" onclick={refreshStatus}><Icon name="refresh" /></button>
   </div>
 
   <ul class="list files">
@@ -182,7 +182,7 @@
         </button>
         {#if f.unstaged}
           <span class="item-tools">
-            <button class="icon" title="Discard the unstaged changes" aria-label="Discard changes in {f.path}" onclick={() => discard([f.path])}><Icon name="undo" size={14} /></button>
+            <button class="icon" title="Discard the unstaged changes" aria-label="Discard changes in {f.path}" onclick={() => discard([f.path])}><Icon name="undo" /></button>
           </span>
         {/if}
         <span class="word w-{cls(f)}" title={f.staged && f.unstaged ? 'Partly staged' : f.staged ? 'Staged' : 'Not staged'}>{word(f)}</span>
@@ -198,26 +198,13 @@
   }
   .commit-box {
     display: flex;
+    flex: none;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px 12px 14px;
-    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+    margin-bottom: var(--lh);
   }
   textarea {
-    resize: vertical;
-    min-height: 62px;
-  }
-  .check-state {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--fs-sm);
-  }
-  .check-state span {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
+    margin-bottom: var(--lh);
   }
   .ok {
     color: var(--green);
@@ -225,68 +212,59 @@
   .warn {
     color: var(--yellow);
   }
+  .warn::before {
+    content: '▲ ';
+  }
   .bad {
     color: var(--red);
   }
   .busy {
     color: var(--accent);
   }
+  .check-state {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2ch;
+  }
   .buttons {
     display: flex;
-    gap: 6px;
-  }
-  .buttons button {
-    height: 32px;
-  }
-  .grow {
-    flex: 1;
-  }
-  .hint,
-  .error {
-    margin: 0;
+    flex-wrap: wrap;
+    gap: 0 2ch;
   }
   .error {
     color: var(--red);
     white-space: pre-wrap;
   }
+  .unchecked {
+    color: var(--fg-muted);
+  }
+  .unchecked:hover:not(:disabled) {
+    color: var(--on-accent);
+    background: var(--red);
+  }
   .try {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
+    align-items: baseline;
+    gap: 0 1ch;
+    margin-top: var(--lh);
   }
   .try select {
     width: auto;
     max-width: 50%;
   }
-  .unchecked {
-    align-self: flex-start;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .unchecked:hover:not(:disabled) {
-    color: var(--red);
-  }
   .files-head {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 38px;
-    padding: 0 6px 0 12px;
+    flex: none;
+    align-items: baseline;
+    gap: 2ch;
   }
   .all {
     display: inline-flex;
-    align-items: center;
-    gap: 8px;
+    gap: 1ch;
     color: var(--fg-strong);
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-  }
-  .files .item {
-    padding-left: 12px;
-  }
-  .files .item-main {
-    padding-left: 8px;
   }
   .stage {
     flex: none;
@@ -294,10 +272,8 @@
   .word {
     --c: var(--yellow);
     flex: none;
-    min-width: 54px;
+    min-width: 7ch;
     color: var(--c);
-    font-size: var(--fs-xs);
-    font-weight: 500;
     text-align: right;
   }
   .w-new {
@@ -308,8 +284,5 @@
   }
   .w-ren {
     --c: var(--blue);
-  }
-  .empty {
-    line-height: 1.5;
   }
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte'
+  import { frame } from '../../lib/ascii'
   import { age, plural } from '../../lib/format'
   import type { GNode } from '../../lib/graph'
   import { graphUi } from '../../lib/graphui.svelte'
@@ -30,13 +31,15 @@
 </script>
 
 <div
-  class="node pill k-{data.kind} {data.kind === 'feature' ? 'g-' + data.group : ''}"
+  class="node pill lift k-{data.kind} {data.kind === 'feature' ? 'g-' + data.group : ''}"
   class:dim
   class:sel={graphUi.selected === id}
   class:tall={!!sub}
-  class:err={data.kind === 'home' && !!data.home.error}>
+  class:err={data.kind === 'home' && !!data.home.error}
+  data-tone={data.kind === 'home' && data.home.error ? 'err' : undefined}
+  use:frame={{ kind: graphUi.selected === id ? 'heavy' : 'square', lift: true, animate: true }}>
   <Handle type="target" position={targetPosition ?? Position.Left} isConnectable={false} />
-  <span class="ico"><Icon name={data.kind === 'feature' ? featureIcon[data.group] ?? 'services' : icon[data.kind]} size={13} /></span>
+  <span class="ico"><Icon name={data.kind === 'feature' ? featureIcon[data.group] ?? 'services' : icon[data.kind]} /></span>
   <span class="text">
     <span class="label" class:mono={data.kind === 'file'}>{data.label}</span>
     {#if sub}<span class="sub">{sub}</span>{/if}

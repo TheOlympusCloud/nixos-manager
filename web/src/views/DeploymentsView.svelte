@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte'
+  import { bigText, frame, odometer } from '../lib/ascii'
   import DeployBadge from '../components/deployments/DeployBadge.svelte'
   import DeploySetup from '../components/deployments/DeploySetup.svelte'
   import FailureActions from '../components/deployments/FailureActions.svelte'
@@ -51,27 +52,31 @@
 <div class="page">
   <div class="page-inner">
     <div class="page-head">
-      <h1>Deployments</h1>
-      <span class="sub">What comin deployed on each machine, as the machines report it</span>
+      <div>
+        <h1 class="big" aria-label="Deployments" use:bigText={'Deployments'}></h1>
+        <p class="sub">What comin deployed on each machine, as the machines report it</p>
+      </div>
       <span class="spacer"></span>
-      {#if live}<span class="badge busy" title="A machine is catching up with a recent commit: checking every few seconds"><span class="dot busy"></span>Rolling out</span>{/if}
-      <button class="ghost" onclick={refresh} disabled={refreshing} title="Ask for the reports again"><Icon name="refresh" size={14} />Refresh</button>
+      <div class="tools">
+        {#if live}<span class="badge busy" title="A machine is catching up with a recent commit: checking every few seconds">Rolling out</span>{/if}
+        <button onclick={refresh} disabled={refreshing} title="Ask for the reports again"><Icon name="refresh" /> Refresh</button>
+      </div>
     </div>
 
     {#if deploys.error && !ov}
       <div class="empty-state" role="alert">
         <h2>Cannot load the deployments</h2>
         <pre>{deploys.error}</pre>
-        <div class="row"><button class="primary" onclick={refresh}><Icon name="refresh" size={14} />Try again</button></div>
+        <div class="row"><button class="primary" onclick={refresh}><Icon name="refresh" /> Try again</button></div>
       </div>
     {:else if !ov}
-      <div class="tiles" aria-hidden="true">{#each [0, 1, 2, 3] as k (k)}<div class="tile"><span class="skel" style:width="50%"></span><span class="skel" style:width="30%"></span></div>{/each}</div>
+      <div class="tiles" aria-hidden="true">{#each [0, 1, 2, 3] as k (k)}<div class="tile" use:frame><span class="skel" style:width="12ch"></span><span class="skel" style:width="8ch"></span><span class="skel" style:width="18ch"></span></div>{/each}</div>
     {:else if !ov.reporting}
-      <section class="intro card">
+      <section class="intro card" use:frame={{ title: 'No machine has reported a deployment yet' }}>
         <div class="intro-text">
-          <span class="intro-mark"><Icon name="deploy" size={20} /></span>
+          <span class="intro-mark"><Icon name="deploy" /></span>
           <div>
-            <h2>No machine has reported a deployment yet</h2>
+            <h2 class="sr-only">No machine has reported a deployment yet</h2>
             <p class="muted">
               Every machine runs comin, which pulls <span class="mono">{ov.branch}</span> from Forgejo and switches to it, so a push is a deploy. With reporting on, each machine tells this
               console which commit it switched to, and why a switch or build failed. Then you can watch a push roll out here, and Health warns about machines that fail or fall behind.
@@ -83,9 +88,9 @@
     {:else}
       <div class="tiles">
         {#each tiles as t (t.label)}
-          <div class="tile t-{t.tone}" class:zero={!t.value}>
-            <span class="t-label"><span class="dot" aria-hidden="true"></span>{t.label}</span>
-            <span class="t-value num">{t.value}</span>
+          <div class="tile" class:zero={!t.value} use:frame={{ title: t.label, animate: true }}>
+            <span class="sr-only">{t.label}: {t.value}</span>
+            <pre class="big t-value {t.tone}" aria-hidden="true" use:odometer={t.value}></pre>
             <span class="t-note">{t.note}</span>
           </div>
         {/each}
@@ -95,7 +100,7 @@
 
       <section class="section" aria-labelledby="machines-title">
         <h2 id="machines-title">Machines</h2>
-        <div class="table-wrap card">
+        <div class="table-wrap">
           <table class="data">
             <thead><tr><th>Machine</th><th>State</th><th>Runs</th><th>Deployed</th><th>Branch</th><th>Last report</th><th><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
@@ -110,7 +115,7 @@
                     {:else}<span class="muted">—</span>{/if}
                   </td>
                   <td class="when">{#if m.deployedAt}<span title={new Date(m.deployedAt).toLocaleString()}>{ago(m.deployedAt)}</span>{:else}<span class="muted">—</span>{/if}</td>
-                  <td class="mono branch">{m.branch}</td>
+                  <td class="mono branch"><Icon name="branch" /> {m.branch}</td>
                   <td class="when muted">{m.lastSeen ? ago(m.lastSeen) : 'never'}</td>
                   <td class="act">
                     {#if m.reports.length || m.lastSeen}
@@ -122,8 +127,8 @@
                   <tr class="err-row">
                     <td></td>
                     <td colspan="6">
-                      <div class="err-box">
-                        <span class="err-title">{m.failure.phase === 'build' ? 'Build' : 'Switch'} of <span class="mono">{short(m.failure.commit)}</span> failed {ago(m.failure.at)}</span>
+                      <div class="err-box" data-tone="err" use:frame={{ title: `${m.failure.phase === 'build' ? 'Build' : 'Switch'} of ${short(m.failure.commit)} failed ${ago(m.failure.at)}` }}>
+                        <span class="err-title sr-only">{m.failure.phase === 'build' ? 'Build' : 'Switch'} of <span class="mono">{short(m.failure.commit)}</span> failed {ago(m.failure.at)}</span>
                         <pre>{excerpt(m.failure.error) || 'comin gave no error message'}</pre>
                         <FailureActions {m} />
                       </div>
@@ -136,8 +141,8 @@
         </div>
       </section>
 
-      <details class="section setup card">
-        <summary><Icon name="key" size={14} />Setup: the address, the report token and how to install it</summary>
+      <details class="section setup">
+        <summary><Icon name="key" /> Setup: the address, the report token and how to install it</summary>
         <div class="setup-body"><DeploySetup {ov} /></div>
       </details>
     {/if}
@@ -145,121 +150,61 @@
 </div>
 
 <style>
-  .page-inner {
-    max-width: 1180px;
+  .page-head .tools {
+    align-items: baseline;
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: var(--s3);
-    margin-bottom: var(--s4);
+    grid-template-columns: repeat(auto-fit, minmax(22ch, 1fr));
+    gap: var(--lh) 2ch;
+    margin-bottom: var(--lh);
   }
   .tile {
     display: grid;
-    gap: 2px;
-    padding: 12px 14px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
-  }
-  .t-label {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .t-value {
-    color: var(--fg-strong);
-    font-size: var(--fs-2xl);
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    align-content: start;
   }
   .t-note {
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
-  }
-  .t-ok {
-    --c: var(--green);
-  }
-  .t-warn {
-    --c: var(--yellow);
-  }
-  .t-err {
-    --c: var(--red);
-  }
-  .t-off {
-    --c: var(--fg-faint);
-  }
-  .tile.t-err:not(.zero) {
-    background: color-mix(in srgb, var(--red) 6%, var(--bg-raised));
-    border-color: color-mix(in srgb, var(--red) 30%, var(--border));
-  }
-  .tile.t-warn:not(.zero) {
-    border-color: color-mix(in srgb, var(--yellow) 25%, var(--border));
   }
   .tile.zero .t-value {
     color: var(--fg-faint);
   }
   .intro {
     display: grid;
-    gap: var(--s5);
-    max-width: 860px;
-    padding: var(--s5);
+    gap: var(--lh) 0;
+    max-width: 100ch;
   }
   .intro-text {
     display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: var(--s3);
+    grid-template-columns: 2ch minmax(0, 1fr);
+    gap: 0 2ch;
   }
   .intro-mark {
-    display: grid;
-    place-items: center;
-    width: 38px;
-    height: 38px;
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: 10px;
-  }
-  .intro h2 {
-    margin-bottom: var(--s2);
-    font-size: var(--fs-xl);
   }
   .intro p {
-    max-width: 70ch;
-    margin: 0;
-    line-height: 1.6;
+    max-width: 80ch;
   }
   .table-wrap {
     overflow: auto;
   }
-  table.data th:first-child,
-  table.data td:first-child {
-    padding-left: 16px;
-  }
   .host a {
     color: var(--fg-strong);
-    font-weight: 500;
-    text-decoration: none;
+    font-weight: 700;
   }
   .host a:hover {
-    color: var(--accent);
+    color: var(--on-accent);
   }
   .runs {
-    max-width: 380px;
-  }
-  .runs a {
-    margin-right: 8px;
-    color: var(--accent);
-    text-decoration: none;
+    white-space: nowrap;
   }
   .runs .subject {
     display: inline-block;
-    max-width: 290px;
+    max-width: 28ch;
+    margin-left: 1ch;
     overflow: hidden;
-    vertical-align: bottom;
+    color: var(--fg-muted);
+    vertical-align: top;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -267,67 +212,36 @@
   .branch {
     white-space: nowrap;
   }
+  .branch :global(.ic) {
+    color: var(--fg-muted);
+  }
   td.act {
     text-align: right;
   }
   .forget {
     color: var(--fg-muted);
-    background: none;
-    border-color: var(--line);
   }
-  .forget:hover:not(:disabled) {
-    color: var(--red);
-    background: color-mix(in srgb, var(--red) 10%, transparent);
-    border-color: color-mix(in srgb, var(--red) 40%, transparent);
-  }
-  tr.failed td {
-    border-bottom: 0;
-  }
-  .err-row td {
-    padding-top: 0;
-    padding-bottom: 10px;
-  }
-  table.data tbody tr.err-row:hover td {
+  table.data tbody tr.err-row:hover {
     background: none;
   }
   .err-box {
-    padding: 8px 12px;
-    background: color-mix(in srgb, var(--red) 6%, var(--bg-deep));
-    border: 1px solid color-mix(in srgb, var(--red) 25%, var(--border));
-    border-radius: var(--r);
-  }
-  .err-title {
-    color: var(--red);
-    font-size: var(--fs-sm);
-    font-weight: 500;
+    margin-bottom: var(--lh);
   }
   .err-box pre {
-    margin: 4px 0 0;
     color: var(--fg);
-    font: 12px/1.5 var(--mono);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .setup {
-    padding: 0;
-  }
   .setup summary {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: var(--s3) var(--s4);
-    color: var(--fg-strong);
-    font-weight: 500;
-    cursor: pointer;
-  }
-  .setup summary :global(svg) {
     color: var(--fg-muted);
   }
-  .setup-body {
-    padding: var(--s2) var(--s4) var(--s4);
-    border-top: 1px solid var(--border);
+  .setup summary :global(.ic) {
+    color: var(--fg-muted);
   }
-  .setup[open] summary {
-    border-bottom: 0;
+  .setup summary:hover {
+    color: var(--fg-strong);
+  }
+  .setup-body {
+    margin-top: var(--lh);
   }
 </style>

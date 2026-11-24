@@ -50,11 +50,11 @@
   <p class="muted intro">
     Common services, ready to go. Adding one sets the options below in {host.name}'s managed settings; review and commit in Changes to deploy it.
   </p>
-  <input class="search" type="search" placeholder="Filter: media, backup, containers…" aria-label="Filter the catalog" bind:value={filter} />
+  <span class="filter"><Icon name="filter" /><input class="search" type="search" placeholder="Filter: media, backup, containers…" aria-label="Filter the catalog" bind:value={filter} /></span>
   {#if vals.error}<p class="error small">Could not read the current values: {vals.error}</p>{/if}
   {#if portsSetHere}
     <p class="note small">
-      <Icon name="alert" size={13} />{host.name}'s open ports are set here as one list, so services cannot open their own ports. After adding one that needs a port, add it in Network &amp; storage.
+      <Icon name="alert" /> {host.name}'s open ports are set here as one list, so services cannot open their own ports. After adding one that needs a port, add it in Network &amp; storage.
     </p>
   {/if}
   {#each categories as c (c)}
@@ -67,17 +67,17 @@
           <div class="top">
             <h4>{r.name}</h4>
             {#if st === 'on'}
-              <span class="badge ok"><Icon name="tick" size={12} />On</span>
+              <span class="badge ok">On</span>
             {:else if st === 'missing'}
-              <span class="badge" title="This machine's NixOS has no {pathName(r.settings[0].path)} option">Not in this NixOS</span>
+              <span class="badge missing" title="This machine's NixOS has no {pathName(r.settings[0].path)} option">Not in this NixOS</span>
             {:else}
               <button class="small" class:primary={st !== 'unknown'} disabled={st === 'unknown' || !!busy} onclick={() => add(r)}>
-                {#if busy === r.id}<span class="spin" aria-hidden="true"></span>Adding…{:else if st === 'partial'}<Icon name="refresh" size={13} />Finish adding{:else}<Icon name="plus" size={13} />Add{/if}
+                {#if busy === r.id}<span class="spinner" aria-hidden="true"></span>Adding…{:else if st === 'partial'}<Icon name="refresh" /> Finish adding{:else}<Icon name="plus" /> Add{/if}
               </button>
             {/if}
           </div>
           <p class="summary">{r.summary}</p>
-          {#if st === 'on' && r.url}<p class="small muted">Open <code>{r.url.replace('<machine>', host.hostName || host.name)}</code> once deployed.</p>{/if}
+          {#if st === 'on' && r.url}<p class="small muted url">Open <code>{r.url.replace('<machine>', host.hostName || host.name)}</code> once deployed.</p>{/if}
           <ul class="sets" aria-label="Options it sets">
             {#each r.settings as s (s.path.join('.'))}<li><code>{pathName(s.path)} = {showValue(s.value)};</code></li>{/each}
           </ul>
@@ -86,74 +86,79 @@
     {/if}
   {/each}
   {#if !shown.length}<p class="muted">Nothing matches “{filter}”. The Add service or program search covers every NixOS option.</p>{/if}
-  {#if vals.loading}<p class="muted small"><span class="spin" aria-hidden="true"></span>Reading what {host.name} runs today…</p>{/if}
+  {#if vals.loading}<p class="muted small"><span class="spinner" aria-hidden="true"></span>Reading what {host.name} runs today…</p>{/if}
 </div>
 
 <style>
   .catalog {
     display: grid;
-    gap: var(--s2);
-    padding: var(--s3) var(--s4) var(--s4);
   }
-  .intro {
-    line-height: 1.5;
+  .filter {
+    display: flex;
+    gap: 1ch;
+    margin-top: var(--lh);
   }
+  .error {
+    color: var(--red);
+  }
+  .note {
+    margin-top: var(--lh);
+    color: var(--yellow);
+  }
+  .note :global(.ic) {
+    color: inherit;
+  }
+  /* A category reads like a section heading. */
   .cat {
-    margin-top: var(--s3);
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    margin: var(--lh) 0;
     text-transform: uppercase;
   }
+  .cat::before {
+    margin-right: 1ch;
+    color: var(--accent);
+    content: '▌';
+  }
+  /* One recipe: the name, what it is and its state on one line, the options it sets under it. */
   .recipe {
     display: grid;
-    gap: 6px;
-    padding: 12px 14px;
+    grid-template-columns: 16ch minmax(0, 1fr) auto;
+    gap: 0 2ch;
+    margin: 0 -1ch;
+    padding: 0 1ch;
   }
-  .recipe.on {
-    border-color: color-mix(in srgb, var(--green) 35%, var(--border));
+  .recipe + .recipe {
+    margin-top: var(--lh);
+  }
+  .recipe:hover {
+    background: var(--bg-hover);
   }
   .top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    display: contents;
+  }
+  .top > :not(h4) {
+    grid-row: 1;
+    grid-column: 3;
+    justify-self: end;
   }
   h4 {
-    font-size: var(--fs-md);
+    overflow-wrap: anywhere;
   }
   .summary {
+    grid-row: 1;
+    grid-column: 2;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.5;
   }
+  .url,
   .sets {
-    display: grid;
-    gap: 2px;
-    margin: 0;
+    grid-column: 2 / -1;
+  }
+  .badge.missing {
     padding: 0;
-    list-style: none;
+    color: var(--fg-faint);
+    background: none;
   }
   .sets code {
     color: var(--fg-faint);
-    font-size: var(--fs-xs);
     overflow-wrap: anywhere;
-  }
-  .note {
-    display: flex;
-    gap: 6px;
-    align-items: flex-start;
-    padding: 8px 10px;
-    color: var(--yellow);
-    background: color-mix(in srgb, var(--yellow) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--yellow) 25%, transparent);
-    border-radius: var(--r-sm);
-    line-height: 1.45;
-  }
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
   }
 </style>

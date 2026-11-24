@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { cubicOut } from 'svelte/easing'
-  import { fly } from 'svelte/transition'
   import type { Model } from '../../lib/api'
+  import { big, bigText, frame } from '../../lib/ascii'
   import { openPackageSearch } from '../../lib/dialogs.svelte'
   import { enablePath, errorFile, fleet, managedValue, removePackageByName, toggleFeature } from '../../lib/fleet.svelte'
   import { age, arch, plural } from '../../lib/format'
@@ -33,18 +32,19 @@
 
   const select = (id: string) => (graphUi.selected = id)
   let copied = $state(false)
+  const heading = $derived(node.kind === 'pkgs' ? node.host : node.label)
+  // The pixel face when the name fits the 47 columns inside the frame (big() ends each line with a blank column).
+  const fits = $derived(big(heading).indexOf('\n') <= 48)
 </script>
 
-
-<aside class="inspector" aria-label="Details" in:fly={{ x: 36, duration: 320, easing: cubicOut }} out:fly={{ x: 24, duration: 160 }}>
+<aside class="inspector" aria-label="Details" use:frame={{ kind: 'heavy', title: 'Inspector', tag: 'Esc', animate: true }}>
+  <!-- On the frame's top line, left of its Esc. -->
+  <button class="icon close" aria-label="Close details" title="Close (Esc)" onclick={onclose}><Icon name="x" /></button>
   <header>
-    <div class="head-text">
-      <span class="kind">
-        {#if node.kind === 'feature'}<span class="dot" style:--c="var(--g-{node.group})"></span>{groupLabel[node.group]}{:else}{kindLabel[node.kind]}{/if}
-      </span>
-      <h2 class:mono={node.kind === 'file'}>{node.kind === 'pkgs' ? node.host : node.label}</h2>
-    </div>
-    <button class="icon" aria-label="Close details" title="Close (Esc)" onclick={onclose}><Icon name="x" /></button>
+    {#if fits}<h2 class="sr-only">{heading}</h2><pre class="big" aria-hidden="true" use:bigText={heading}></pre>{:else}<h2 class="name" class:mono={node.kind === 'file'}>{heading}</h2>{/if}
+    <span class="kind">
+      {#if node.kind === 'feature'}<span class="dot" style:--c="var(--g-{node.group})"></span> {groupLabel[node.group]}{:else}{kindLabel[node.kind]}{/if}
+    </span>
   </header>
 
   <div class="body">
@@ -54,9 +54,9 @@
         {@const file = errorFile(h.error)}
         <p class="lead err-lead">This machine does not evaluate, so nothing else is known about it.</p>
         <pre class="error-pre">{h.error}</pre>
-        {#if file}<a class="btn" href={codeLink(file)}><Icon name="code" size={14} />Open {file}</a>{/if}
+        {#if file}<a class="btn" href={codeLink(file)}><Icon name="code" /> Open {file}</a>{/if}
       {:else}
-        <dl class="facts">
+        <dl class="facts kv">
           <dt>Host name</dt><dd>{h.hostName}</dd>
           <dt>System</dt><dd class="mono">{arch(h.system)}</dd>
           <dt>NixOS</dt><dd>{h.release} <span class="muted">(state {h.stateVersion})</span></dd>
@@ -77,7 +77,7 @@
         <p class="muted small">Open ports: {h.ports.tcp.length ? h.ports.tcp.map((p) => 'tcp/' + p).join(', ') : 'none'}{h.ports.udp.length ? ', ' + h.ports.udp.map((p) => 'udp/' + p).join(', ') : ''}</p>
       {/if}
       <div class="actions">
-        <a class="btn primary" href={machineLink(h.name)}><Icon name="server" size={14} />Open machine page</a>
+        <a class="btn primary" href={machineLink(h.name)}><Icon name="server" /> Open machine page</a>
       </div>
     {:else if node.kind === 'feature'}
       {@const n = node}
@@ -97,7 +97,7 @@
             <div class="row-main">
               <a class="host" href={machineLink(h.name, 'services')}>{h.name}</a>
               {#if waiting}
-                <span class="pending small"><span class="dot busy"></span>{fromManaged ? 'Turning on' : 'Turning off'}; re-evaluating…</span>
+                <span class="pending small"><span class="dot busy"></span> {fromManaged ? 'Turning on' : 'Turning off'}; re-evaluating…</span>
               {:else if has}
                 <span class="src-line"><SourceTag source={sourceOf(has.files, h.managedFile)} /></span>
               {:else}
@@ -123,7 +123,7 @@
       {@const first = n.hosts[0]?.host ?? healthy[0]?.name}
       {#if first}
         <div class="actions">
-          <a class="btn" href={link('options', [first], { q: `${n.group}.${n.name}.` })}><Icon name="sliders" size={14} />Configure options</a>
+          <a class="btn" href={link('options', [first], { q: `${n.group}.${n.name}.` })}><Icon name="sliders" /> Configure options</a>
         </div>
       {/if}
     {:else if node.kind === 'file'}
@@ -143,8 +143,8 @@
         <div class="chips">{#each pkgs as p (p)}<span class="chip mono">{p}</span>{/each}</div>
       {/if}
       <div class="actions">
-        <a class="btn primary" href={codeLink(path)}><Icon name="code" size={14} />Open in Code</a>
-        <a class="btn" href={link('history', path.split('/'))}><Icon name="history" size={14} />History</a>
+        <a class="btn primary" href={codeLink(path)}><Icon name="code" /> Open in Code</a>
+        <a class="btn" href={link('history', path.split('/'))}><Icon name="history" /> History</a>
       </div>
     {:else if node.kind === 'pkgs'}
       {@const h = model.hosts.find((x) => x.name === node.host)}
@@ -158,7 +158,7 @@
         <div class="actions">
           <button onclick={() => toggleExpanded(h.name)}>{node.expanded ? 'Collapse in graph' : 'Show each package'}</button>
           <a class="btn" href={machineLink(h.name, 'packages')}>Packages page</a>
-          {#if h.managedFile}<button class="primary" onclick={() => openPackageSearch('', [h.name])}><Icon name="plus" size={14} />Add</button>{/if}
+          {#if h.managedFile}<button class="primary" onclick={() => openPackageSearch('', [h.name])}><Icon name="plus" /> Add</button>{/if}
         </div>
       {/if}
     {:else if node.kind === 'package'}
@@ -182,7 +182,7 @@
       {@const missing = healthy.filter((h) => h.managedFile && !node.hosts.some((r) => r.host === h.name))}
       {#if missing.length}
         <div class="actions">
-          <button class="primary" onclick={() => openPackageSearch(name, missing.map((h) => h.name))}><Icon name="plus" size={14} />Add to {missing.map((h) => h.name).join(', ')}…</button>
+          <button class="primary" onclick={() => openPackageSearch(name, missing.map((h) => h.name))}><Icon name="plus" /> Add to {missing.map((h) => h.name).join(', ')}…</button>
         </div>
       {/if}
     {:else if node.kind === 'user'}
@@ -212,7 +212,7 @@
       {/if}
     {:else if node.kind === 'input'}
       {@const i = node.input}
-      <dl class="facts">
+      <dl class="facts kv">
         <dt>Source</dt><dd class="mono">{i.url}</dd>
         <dt>Type</dt><dd>{i.type}</dd>
         <dt>Updated</dt><dd>{new Date(i.lastModified * 1000).toLocaleDateString()} <span class="muted">({age(i.lastModified)})</span></dd>
@@ -220,13 +220,13 @@
         <dd class="rev">
           <span class="mono">{i.rev.slice(0, 12)}</span>
           <button class="icon" aria-label="Copy the full revision" title={copied ? 'Copied' : 'Copy the full revision'} onclick={async () => (copied = await copyText(i.rev))}>
-            <Icon name={copied ? 'tick' : 'copy'} size={14} />
+            <Icon name={copied ? 'tick' : 'copy'} />
           </button>
         </dd>
       </dl>
       <p class="muted small">Every machine is built from this input. Updating it changes <span class="mono">flake.lock</span> in the working copy; review and commit it from Changes.</p>
       <div class="actions">
-        <button class="primary" onclick={() => startJob({ kind: 'update', inputs: [i.name] })}><Icon name="refresh" size={14} />Update {i.name}</button>
+        <button class="primary" onclick={() => startJob({ kind: 'update', inputs: [i.name] })}><Icon name="refresh" /> Update {i.name}</button>
       </div>
     {/if}
     {#if fleet.computing}<p class="stale muted small"><span class="dot busy"></span>Re-evaluating; this shows the last evaluation.</p>{/if}
@@ -234,199 +234,144 @@
 </aside>
 
 <style>
+  /* A drawer over the right of the canvas, whole rows tall; the body scrolls inside the frame. */
   .inspector {
     position: absolute;
-    top: 12px;
-    right: 12px;
-    bottom: 12px;
+    top: 0;
+    right: 0;
     z-index: 10;
     display: flex;
     flex-direction: column;
-    width: 360px;
-    max-width: calc(100% - 24px);
+    width: 51ch;
+    max-width: 100%;
+    height: round(down, 100%, var(--lh));
     background: var(--bg-raised);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
+  }
+  .close {
+    position: absolute;
+    top: 0;
+    right: 6ch;
+    z-index: 2; /* over the frame's glyphs */
+    min-width: 0;
+    padding: 0 1ch;
+    background: var(--bg-raised);
   }
   header {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--s2);
-    padding: 14px 10px 12px 16px;
-    border-bottom: 1px solid var(--border);
+    flex: none;
+    margin-bottom: var(--lh);
   }
-  .head-text {
-    flex: 1;
-    min-width: 0;
+  .name {
+    color: var(--fg-strong);
+    text-transform: none;
+    overflow-wrap: anywhere;
+  }
+  .name::before {
+    content: none;
   }
   .kind {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .kind .dot {
-    background: var(--c);
-  }
-  h2 {
-    margin-top: 2px;
-    overflow-wrap: anywhere;
-    font-size: var(--fs-xl);
-    letter-spacing: -0.01em;
-  }
-  h2.mono {
-    font-size: var(--fs-lg);
   }
   .body {
     flex: 1;
     min-height: 0;
-    padding: 4px 16px 16px;
     overflow: auto;
   }
-  h3 {
-    margin: 18px 0 8px;
-    color: var(--fg);
-    font-size: var(--fs-md);
+  h3,
+  .body > p,
+  .facts,
+  .error-pre,
+  .pkglist,
+  .block,
+  .actions,
+  .stale {
+    margin-top: var(--lh);
   }
-  .lead {
-    margin-top: 12px;
-    line-height: 1.55;
+  .body > :first-child {
+    margin-top: 0;
   }
-  .err-lead {
-    color: var(--fg);
+  .error-pre + .btn {
+    margin-top: var(--lh);
   }
   .error-pre {
-    margin: 10px 0;
-    padding: 10px;
+    padding: 0 1ch;
     overflow: auto;
-    color: color-mix(in srgb, var(--red) 70%, var(--fg-strong));
-    font: 11.5px/1.5 var(--mono);
+    color: var(--red);
     white-space: pre-wrap;
-    background: var(--bg-deep);
-    border: 1px solid color-mix(in srgb, var(--red) 25%, var(--border));
-    border-radius: var(--r);
+    background: var(--bg-input);
   }
   .facts {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 6px 16px;
-    margin: 14px 0 0;
-  }
-  .facts dt {
-    color: var(--fg-muted);
+    grid-template-columns: 11ch 1fr;
+    gap: 0 2ch;
   }
   .facts dd {
-    margin: 0;
-    min-width: 0;
     overflow-wrap: anywhere;
   }
   .rev {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    gap: 1ch;
   }
-  .rev .icon {
-    width: 22px;
-    height: 22px;
-  }
-  .rows {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
+  /* One row per machine: name, where it is set, then its switch. */
   .rows li {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 0;
-    border-bottom: 1px solid var(--border);
+    align-items: baseline;
+    gap: 2ch;
+    cursor: default;
   }
   .rows li.off .host {
     color: var(--fg-muted);
   }
-  .src-line {
-    display: flex;
-    min-width: 0;
-  }
-  .pending {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--accent);
-  }
-  .side {
-    flex: none;
-    text-decoration: none;
-  }
-  a.side:hover {
-    color: var(--fg-strong);
-    text-decoration: underline;
-  }
-  .hint {
-    margin-left: 6px;
-    font-size: var(--fs-sm);
-  }
   .row-main {
     display: flex;
     flex: 1;
-    flex-direction: column;
-    gap: 5px;
+    gap: 2ch;
     min-width: 0;
+  }
+  .host,
+  .host-line {
+    flex: none;
   }
   .host-line {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    gap: 1ch;
   }
-  .host {
-    color: var(--fg-strong);
-    font-weight: 500;
-    text-decoration: none;
+  .src-line {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
   }
-  .host:hover {
-    text-decoration: underline;
+  .pending {
+    overflow: hidden;
+    color: var(--accent);
+    text-overflow: ellipsis;
   }
-  a.chip {
-    text-decoration: none;
+  .side {
+    flex: none;
   }
-  a.chip:hover {
-    border-color: var(--line-strong);
-    color: var(--fg-strong);
+  .hint {
+    margin-left: 1ch;
   }
   .pkglist {
-    max-height: 340px;
-    margin: 12px 0 0;
-    padding: 0;
+    max-height: calc(var(--lh) * 20);
     overflow: auto;
-    list-style: none;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
   }
   .pkglist li {
     display: flex;
     justify-content: space-between;
-    gap: 8px;
-    padding: 5px 10px;
-    font-size: var(--fs-sm);
+    gap: 2ch;
+    padding: 0 1ch;
   }
-  .pkglist li:nth-child(odd) {
-    background: color-mix(in srgb, var(--bg-raised) 60%, transparent);
+  .pkglist li:hover {
+    background: var(--bg-hover);
   }
   .block .sub {
-    margin: 10px 0 6px;
+    margin: var(--lh) 0 0;
   }
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 20px;
+    gap: 0 2ch;
   }
   .stale {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 20px;
+    gap: 1ch;
   }
 </style>

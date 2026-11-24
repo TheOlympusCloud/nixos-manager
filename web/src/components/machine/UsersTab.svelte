@@ -8,6 +8,7 @@
   import { confirmBox } from '../../lib/ui.svelte'
   import { commonGroups, editableList, keySummary, parseSSHKeys, userNameProblem } from '../../lib/users'
   import { effective, type Effective } from '../../lib/values'
+  import { frame } from '../../lib/ascii'
   import Icon from '../Icon.svelte'
   import SourceTag from '../SourceTag.svelte'
 
@@ -167,17 +168,17 @@
   {#if editable}
     <p class="muted small intro">Users and their SSH keys. Changes are kept in <span class="mono">{host.managedFile}</span> and win over hand-written Nix; groups and keys are written as whole lists.</p>
     <span class="spacer"></span>
-    {#if !adding}<button class="primary" onclick={openAdd}><Icon name="plus" size={14} />Add user</button>{/if}
+    {#if !adding}<button class="primary" onclick={openAdd}><Icon name="plus" /> Add user</button>{/if}
   {:else if host.managedFile}
-    <span class="skel" style:width="40%"></span>
+    <span class="skel" style:width="60ch"></span>
   {:else}
     <p class="muted small intro">Users of {host.name}, as evaluated. {host.name} is Code only: change users in its Nix files, or <a href={machineLink(host.name)}>turn on editing</a>.</p>
   {/if}
 </div>
 
 {#if adding}
-  <form class="card add-user" onsubmit={addUser} aria-labelledby="add-title">
-    <h3 id="add-title">New user on {host.name}</h3>
+  <form class="card add-user" onsubmit={addUser} aria-labelledby="add-title" use:frame={{ kind: 'dash', title: `New user on ${host.name}`, animate: true }}>
+    <h3 id="add-title" class="sr-only">New user on {host.name}</h3>
     <div class="fields">
       <label class="field">
         <span class="label">User name</span>
@@ -192,7 +193,7 @@
     </div>
     <div class="field">
       <span class="label" id="groups-label">Groups</span>
-      <div class="chips" role="group" aria-labelledby="groups-label">
+      <div class="picks" role="group" aria-labelledby="groups-label">
         {#each commonGroups as g (g.name)}
           <label class="pick" class:on={newGroups.has(g.name)} title={g.note}>
             <input type="checkbox" checked={newGroups.has(g.name)} onchange={() => toggle(newGroups, g.name)} />{g.name}
@@ -222,15 +223,19 @@
     {@const keys = keysOf(u.name)}
     {@const gKnown = knownGroups(u.name)}
     {@const kKnown = knownKeys(u.name)}
-    <section class="card user" class:pending>
+    <section
+      class="card user"
+      class:pending
+      use:frame={{ kind: pending ? 'dash' : 'round', title: u.name, tag: pending ? 'Pending evaluation' : createdHere(u.name) ? 'Created here' : undefined }}>
       <div class="u-head">
         <span class="av">{initial(u.name)}</span>
         <div class="u-title">
-          <h3>{u.name}</h3>
+          <h3 class="sr-only">{u.name}</h3>
           {#if u.description}<p class="muted small">{u.description}</p>{/if}
         </div>
         <span class="spacer"></span>
-        {#if pending}<span class="badge busy">Pending evaluation</span>{:else if createdHere(u.name)}<span class="badge">Created here</span>{/if}
+        <!-- Shown on the frame line. -->
+        {#if pending}<span class="badge busy sr-only">Pending evaluation</span>{:else if createdHere(u.name)}<span class="badge sr-only">Created here</span>{/if}
       </div>
 
       <div class="row">
@@ -239,12 +244,12 @@
           <div class="chips">
             {#each groups as g (g)}
               <span class="chip" class:admin={g === 'wheel'} title={commonGroups.find((c) => c.name === g)?.note}
-                >{g}{#if editable && gKnown}<button class="x" aria-label="Remove {u.name} from {g}" disabled={busy === u.name + ':groups'} onclick={() => removeGroup(u, g)}><Icon name="x" size={11} /></button>{/if}</span>
+                >{g}{#if editable && gKnown}<button class="x icon" aria-label="Remove {u.name} from {g}" disabled={busy === u.name + ':groups'} onclick={() => removeGroup(u, g)}><Icon name="x" /></button>{/if}</span>
             {:else}
               <span class="muted small">none</span>
             {/each}
             {#if editable && gKnown && addingGroup !== u.name}
-              <button class="chip add-btn" onclick={() => ((addingGroup = u.name), (groupText = ''))} aria-label="Add a group to {u.name}"><Icon name="plus" size={11} />Group</button>
+              <button class="chip add-btn" onclick={() => ((addingGroup = u.name), (groupText = ''))} aria-label="Add a group to {u.name}"><Icon name="plus" /> Group</button>
             {/if}
           </div>
           {#if addingGroup === u.name}
@@ -264,17 +269,17 @@
         <span class="label">SSH keys</span>
         <div class="cell">
           {#if !vals.values && !vals.error && !pending}
-            <span class="skel" style:width="60%"></span>
+            <span class="skel" style:width="30ch"></span>
           {:else}
             <ul class="keys">
               {#each keys as k (k)}
                 {@const s = keySummary(k)}
                 <li>
-                  <Icon name="key" size={13} />
+                  <Icon name="key" />
                   <span class="k-type">{s.type}</span>
                   <span class="k-comment" title={k}>{s.comment || 'no comment'}</span>
                   <span class="k-tail mono" title={k}>…{s.tail}</span>
-                  {#if editable && kKnown}<button class="icon" aria-label="Remove key {s.comment || s.tail} from {u.name}" title="Remove this key" disabled={busy === u.name + ':keys'} onclick={() => removeKey(u.name, k)}><Icon name="x" size={13} /></button>{/if}
+                  {#if editable && kKnown}<button class="icon" aria-label="Remove key {s.comment || s.tail} from {u.name}" title="Remove this key" disabled={busy === u.name + ':keys'} onclick={() => removeKey(u.name, k)}><Icon name="x" /></button>{/if}
                 </li>
               {:else}
                 <li class="none muted small">
@@ -296,7 +301,7 @@
             {/if}
             {#if (editable && kKnown && addingKey !== u.name) || kEff?.state === 'value'}
               <div class="src-line">
-                {#if editable && kKnown && addingKey !== u.name}<button class="small ghost" onclick={() => ((addingKey = u.name), (keyText = ''))}><Icon name="plus" size={12} />Add key</button>{/if}
+                {#if editable && kKnown && addingKey !== u.name}<button class="small link" onclick={() => ((addingKey = u.name), (keyText = ''))}><Icon name="plus" /> Add key</button>{/if}
                 <span class="spacer"></span>
                 {#if kEff?.state === 'value'}<SourceTag source={kEff.source} pending={kEff.pending} />{/if}
               </div>
@@ -308,14 +313,14 @@
       {#if u.home}
         <div class="row"><span class="label">Programs</span><div class="chips">{#each u.home.programs as p (p)}<span class="chip g-programs">{p}</span>{:else}<span class="muted small">none</span>{/each}</div></div>
         <div class="row"><span class="label">Packages</span><div class="chips">{#each u.home.packages as p (p)}<span class="chip mono">{p}</span>{:else}<span class="muted small">none</span>{/each}</div></div>
-        <p class="muted small">home-manager: {plural(u.home.programs.length, 'program')}, {plural(u.home.packages.length, 'package')}</p>
+        <p class="muted small summary">home-manager: {plural(u.home.programs.length, 'program')}, {plural(u.home.packages.length, 'package')}</p>
       {:else if !pending}
-        <p class="muted small">No home-manager configuration.</p>
+        <p class="muted small summary">No home-manager configuration.</p>
       {/if}
 
       {#if editable && createdHere(u.name)}
         <div class="u-foot">
-          <button class="small ghost danger-text" disabled={busy === u.name + ':remove'} onclick={() => removeUser(u.name)}><Icon name="trash" size={13} />Remove user</button>
+          <button class="small danger" disabled={busy === u.name + ':remove'} onclick={() => removeUser(u.name)}><Icon name="trash" /> Remove user</button>
         </div>
       {/if}
     </section>
@@ -326,190 +331,145 @@
 
 <style>
   .toolbar {
-    margin-bottom: var(--s3);
+    margin-bottom: var(--lh);
   }
   .intro {
     max-width: 90ch;
-    line-height: 1.5;
   }
   .add-user {
     display: grid;
-    gap: 14px;
-    max-width: 760px;
-    margin-bottom: var(--s4);
-    padding: 16px 18px;
-    border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
-  }
-  h3 {
-    font-size: var(--fs-lg);
+    gap: var(--lh);
+    max-width: 90ch;
+    margin-bottom: var(--lh);
   }
   .fields {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--lh) 2ch;
   }
   .field {
     display: grid;
-    gap: 5px;
   }
   .faint {
     color: var(--fg-faint);
   }
   .hint {
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
   }
   .problem {
     color: var(--red);
-    font-size: var(--fs-sm);
+  }
+  .picks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2ch;
   }
   .pick {
     display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 13px;
+    gap: 1ch;
+    padding-right: 1ch;
     cursor: pointer;
   }
   .pick.on {
     color: var(--fg-strong);
-    background: color-mix(in srgb, var(--accent-strong) 22%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .buttons {
     display: flex;
-    gap: 8px;
+    gap: 0 2ch;
   }
   .users {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-    gap: var(--s3);
+    grid-template-columns: repeat(auto-fill, minmax(56ch, 1fr));
+    gap: var(--lh) 2ch;
     align-items: start;
   }
   .user {
     display: grid;
-    gap: 12px;
-    padding: 14px 16px;
-  }
-  .user.pending {
-    border-style: dashed;
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   }
   .u-head {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    gap: 0 2ch;
+    margin-bottom: var(--lh);
   }
   .u-title {
     min-width: 0;
   }
+  /* The initial in reverse video. */
   .av {
-    display: grid;
     flex: none;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    color: var(--fg-strong);
-    font-weight: 600;
-    background: color-mix(in srgb, var(--g-programs) 35%, var(--bg-active));
-    border-radius: 50%;
+    padding: 0 1ch;
+    color: var(--on-accent);
+    font-weight: 700;
+    background: var(--accent);
   }
   .row {
     display: grid;
-    grid-template-columns: 80px minmax(0, 1fr);
-    gap: 10px;
-  }
-  .row .label {
-    padding-top: 3px;
+    grid-template-columns: 10ch minmax(0, 1fr);
+    gap: 0 2ch;
   }
   .cell {
     display: grid;
-    gap: 8px;
     min-width: 0;
   }
   .chip.admin {
     --c: var(--yellow);
   }
   .add-btn {
-    color: var(--fg-muted);
+    color: var(--accent);
     background: none;
-    border-style: dashed;
   }
   .inline {
     display: flex;
-    gap: 6px;
+    gap: 0 2ch;
   }
   .inline input {
-    width: 200px;
-    height: 26px;
+    width: 24ch;
   }
   .src-line {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: 0 2ch;
     min-width: 0;
-  }
-  .keys {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
   }
   .keys li {
     display: grid;
-    grid-template-columns: 14px auto minmax(0, 1fr) auto 28px;
-    gap: 8px;
-    align-items: center;
-    min-height: 28px;
-    padding: 0 0 0 8px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    grid-template-columns: 2ch auto minmax(0, 1fr) auto 2ch;
+    gap: 0 1ch;
   }
-  .keys li :global(svg) {
-    color: var(--fg-muted);
+  .keys li:hover {
+    background: var(--bg-hover);
+  }
+  .keys li :global(.ic) {
+    color: var(--accent);
   }
   .keys li.none {
     display: block;
-    padding: 6px 8px;
+  }
+  .keys li.none:hover {
     background: none;
-    border: 0;
   }
   .k-type {
     color: var(--fg-strong);
-    font-size: var(--fs-sm);
-    font-weight: 500;
   }
   .k-comment {
     overflow: hidden;
-    color: var(--fg);
-    font-size: var(--fs-sm);
     white-space: nowrap;
     text-overflow: ellipsis;
   }
   .k-tail {
     color: var(--fg-faint);
-    font-size: 11px;
   }
   .keys li:not(:has(button)) {
-    grid-template-columns: 14px auto minmax(0, 1fr) auto;
-    padding-right: 8px;
+    grid-template-columns: 2ch auto minmax(0, 1fr) auto;
   }
   .key-form {
     display: grid;
-    gap: 6px;
+  }
+  .summary {
+    margin-top: var(--lh);
   }
   .u-foot {
     display: flex;
-    justify-content: flex-end;
-    padding-top: 4px;
-    border-top: 1px solid var(--border);
-  }
-  .danger-text {
-    color: var(--red);
+    margin-top: var(--lh);
   }
   @media (max-width: 700px) {
     .fields {

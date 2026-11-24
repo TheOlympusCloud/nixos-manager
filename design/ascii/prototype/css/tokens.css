@@ -1,0 +1,127 @@
+/* Cellwork tokens. The names are the ones web/src/app.css already uses, so the console's components
+   pick the new look up without a rename; the few new ones are marked NEW. */
+
+@font-face {
+  font-family: 'Cell Mono';
+  font-weight: 400;
+  src: url('../fonts/DejaVuSansMono.subset.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Cell Mono';
+  font-weight: 700;
+  src: url('../fonts/DejaVuSansMono-Bold.subset.woff2') format('woff2');
+}
+
+/* Night: the default. A dark screen lit in bone white and the two blues of the Nix snowflake. */
+:root {
+  /* The screen, back to front. */
+  --bg-deep: #06080d;
+  --bg: #0a0d15;
+  --bg-side: #0a0d15;
+  --bg-raised: #10141f;
+  --bg-hover: #171d2c;
+  --bg-active: #1f273b;
+  --bg-input: #131826;
+  --bg-rail: #0a0d15;
+  /* Glyph strokes: frames, rules, the dot grid. */
+  --border: #333b54;
+  --line: #3d4763;
+  --line-strong: #6b78a0;
+  --shade: #222838; /* NEW: the ░ cast by a lifted frame */
+
+  /* Text. Every one holds 4.5:1 or more on every screen colour above. */
+  --fg: #d3cfc3;
+  --fg-strong: #f6f2e6;
+  --fg-muted: #a6abbb;
+  --fg-faint: #8f95ab;
+
+  /* The snowflake's light blue is the accent; its dark blue is for fills. */
+  --accent: #7ebae4;
+  --accent-strong: #a5d2f2;
+  --accent-hover: #a5d2f2;
+  --accent-fill: #5277c3; /* NEW */
+  --on-accent: #06080d;
+
+  --green: #8dd28a;
+  --red: #ff7468;
+  --yellow: #f0b950;
+  --blue: #7ebae4;
+  --purple: #b9a0f5;
+  --cyan: #6fd2c6;
+  --mark: #f0b950;
+  --danger: #ff7468;
+  --danger-hover: #ff9c93;
+
+  --g-services: #6fd2c6;
+  --g-programs: #b9a0f5;
+  --g-virtualisation: #f08fb6;
+  --g-hardware: #f09a5e;
+
+  --grid: #1b2131;
+  --grid-major: #2b3247;
+  --scrim: rgb(3 4 8 / 0.72);
+  --glow: 0 0 12px rgb(126 186 228 / 0.45); /* NEW: phosphor bloom, pixel headlines only */
+  --bars: none; /* NEW: the greenbar of the print theme */
+
+  /* The cell. Everything is sized in whole cells: 1ch wide, 1 --lh tall. */
+  --mono: 'Cell Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
+  --sans: var(--mono);
+  --fs: 14px;
+  --lh: 17px;
+
+  /* The one clock: every animation steps on this beat (js/ascii.js reads it). */
+  --tick: 80ms;
+
+  color-scheme: dark;
+}
+
+/* Print: the same console on continuous greenbar paper, for daylight. */
+[data-theme='print'] {
+  --bg-deep: #e3e0d2;
+  --bg: #f3f1e7;
+  --bg-side: #f3f1e7;
+  --bg-raised: #faf8f0;
+  --bg-hover: #e4e7d6;
+  --bg-active: #d3dcc6;
+  --bg-input: #fdfcf7;
+  --bg-rail: #f3f1e7;
+  --border: #c9c6b6;
+  --line: #a3a696;
+  --line-strong: #666c62;
+  --shade: #cfd0c0;
+
+  --fg: #23272e;
+  --fg-strong: #0e1114;
+  --fg-muted: #4a4f55;
+  --fg-faint: #5a5f63;
+
+  --accent: #264f9c;
+  --accent-strong: #1c3d7c;
+  --accent-hover: #1c3d7c;
+  --accent-fill: #264f9c;
+  --on-accent: #faf8f0;
+
+  --green: #1f6338;
+  --red: #a32a22;
+  --yellow: #6e4f00;
+  --blue: #264f9c;
+  --purple: #5f3fa0;
+  --cyan: #0d5c64;
+  --mark: #6e4f00;
+  --danger: #a32a22;
+  --danger-hover: #7f1f19;
+
+  --g-services: #0d5c64;
+  --g-programs: #5f3fa0;
+  --g-virtualisation: #91305f;
+  --g-hardware: #84400f;
+
+  --grid: #dcdccb;
+  --grid-major: #c3c6b3;
+  --scrim: rgb(60 58 44 / 0.5);
+  --glow: none;
+  /* Two rows tinted, two rows plain, locked to the cell grid. */
+  --bars: repeating-linear-gradient(to bottom, rgb(48 128 78 / 0.075) 0 calc(var(--lh) * 2), transparent 0 calc(var(--lh) * 4));
+
+  color-scheme: light;
+}

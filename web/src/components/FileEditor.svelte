@@ -61,39 +61,35 @@
   .file-bar {
     display: flex;
     flex: none;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
-    border-bottom: 1px solid var(--border);
+    align-items: baseline;
+    gap: 0 2ch;
+    height: var(--lh);
   }
   .path {
     overflow: hidden;
     color: var(--fg-muted);
-    font-family: var(--mono);
-    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .spacer {
     flex: 1;
   }
-  .small {
-    font-size: 12px;
-  }
+  /* Changed on disk: a filled band of whole rows, ▲ in front. */
   .conflict {
     flex: none;
-    padding: 8px 12px;
+    margin-bottom: var(--lh);
+    padding: 0 1ch;
     background: color-mix(in srgb, var(--yellow) 14%, var(--bg));
-    border-bottom: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
   }
-  .conflict p {
-    margin: 0 0 6px;
+  .conflict p::before {
+    color: var(--yellow);
+    content: '▲ ';
   }
   .row {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+    align-items: baseline;
+    gap: 0 2ch;
   }
   .cm-host {
     flex: 1;

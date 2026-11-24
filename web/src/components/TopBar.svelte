@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import { frame, typed } from '../lib/ascii'
   import { fleet, healthy } from '../lib/fleet.svelte'
   import { link, machineLink, route } from '../lib/router.svelte'
   import { mergeBranch, noRemote, pullOrPush, repo } from '../lib/repo.svelte'
@@ -23,6 +24,7 @@
     services: 'Services',
     options: 'Options',
     health: 'Health',
+    deployments: 'Deployments',
     inputs: 'Inputs',
     changes: 'Changes',
     history: 'History',
@@ -30,6 +32,8 @@
     settings: 'Settings',
   }
   const crumb = $derived(route.view === 'machines' && route.parts[0] ? route.parts[0] : route.view === 'options' && route.parts[0] ? route.parts[0] : '')
+  // The title is typed into the bar as you arrive: λ Machines › workstation.
+  const where = $derived((titles[route.view] ?? '') + (crumb ? ' › ' + crumb : ''))
 
   /** The evaluation state; a click goes where the problem is. */
   const model = $derived.by(() => {
@@ -141,40 +145,40 @@
 
 <svelte:window onclick={onWindowClick} onkeydown={(e) => e.key === 'Escape' && menu && (menu = '')} />
 
-<header class="topbar">
+<header class="topbar" use:frame={{ animate: true }}>
   <div class="where">
-    {#key route.view}<span class="title">{titles[route.view]}</span>{/key}
-    {#if crumb}<Icon name="right" size={14} />{#key crumb}<span class="crumb">{crumb}</span>{/key}{/if}
+    <span class="prompt" aria-hidden="true">λ</span>
+    <span class="sr-only">{where}</span>
+    <b class="title" aria-hidden="true" use:typed={where}></b>
   </div>
 
   <span class="spacer"></span>
 
-  <a class="badge model {model.cls}" href={model.href} title={model.title} aria-live="polite">
-    <span class="dot {model.cls}"></span>{model.text}
+  <a class="model {model.cls}" href={model.href} title={model.title} aria-live="polite">
+    <span class="dot {model.cls}"></span> {model.text}
   </a>
 
-  <span class="sep" aria-hidden="true"></span>
+  <i class="sep" aria-hidden="true">│</i>
 
   <div class="pop" bind:this={branchEl}>
-    <button class="ghost branch" aria-haspopup="true" aria-expanded={menu === 'branch'} onclick={openBranches} disabled={!!busy} title="Switch, create or merge branches">
-      <Icon name="branch" size={15} />
-      <span class="mono">{current || '…'}</span>
-      <Icon name="down" size={12} />
+    <button class="bare branch" aria-haspopup="true" aria-expanded={menu === 'branch'} onclick={openBranches} disabled={!!busy} title="Switch, create or merge branches">
+      <Icon name="branch" />
+      <span>{current || '…'}</span>
+      <Icon name="down" />
     </button>
     {#if menu === 'branch'}
-      <div class="menu right branch-menu" role="menu">
-        <div class="menu-title">Local branches</div>
+      <div class="menu right branch-menu" role="menu" use:frame={{ kind: 'square', shadow: true, animate: true, title: 'Local branches' }}>
         {#if branches === null}
-          <div class="pad"><span class="skel" style:width="60%"></span></div>
+          <span class="skel"></span>
         {:else}
           <ul>
             {#each branches as b (b)}
               <li class="b-row">
-                <button class="ghost menu-item mono" role="menuitem" disabled={b === current || !!busy} aria-current={b === current} title={b === current ? 'The current branch' : `Switch to ${b}`} onclick={() => switchTo(b)}>
-                  <span class="mark">{#if b === current}<Icon name="tick" size={14} />{/if}</span><span class="b-name">{b}</span>
+                <button class="bare menu-item" role="menuitem" disabled={b === current || !!busy} aria-current={b === current} title={b === current ? 'The current branch' : `Switch to ${b}`} onclick={() => switchTo(b)}>
+                  <span class="mark">{#if b === current}<Icon name="tick" />{/if}</span><span class="b-name">{b}</span>
                 </button>
                 {#if b !== current}
-                  <button class="small merge" role="menuitem" disabled={!!busy} title="Stage everything {b} changes on {current}, as one change to review and commit" onclick={() => merge(b)}>
+                  <button class="merge" role="menuitem" disabled={!!busy} title="Stage everything {b} changes on {current}, as one change to review and commit" onclick={() => merge(b)}>
                     Merge into {current}
                   </button>
                 {/if}
@@ -183,6 +187,7 @@
           </ul>
           {#if branches.length > 1}<p class="menu-hint">Merging stages the branch as one change on {current}; you review, check and commit it in Changes.</p>{/if}
         {/if}
+        <div class="rule" aria-hidden="true"></div>
         <form class="new" onsubmit={create}>
           <label for="new-branch" class="label">New branch from HEAD</label>
           <div class="row">
@@ -195,38 +200,40 @@
   </div>
 
   {#if incoming}
-    <button class="incoming" onclick={() => pullOrPush('pull')} disabled={!!busy} aria-label="{incoming} new on Forgejo: pull" title="Forgejo has {incoming} commit{incoming === 1 ? '' : 's'} this console does not have yet. Pull brings {incoming === 1 ? 'it' : 'them'} in.">
-      <Icon name="arrow-down" size={13} /><span class="num">{incoming}</span><span class="lbl">new on Forgejo</span>
+    <button class="bare incoming" onclick={() => pullOrPush('pull')} disabled={!!busy} aria-label="{incoming} new on Forgejo: pull" title="Forgejo has {incoming} commit{incoming === 1 ? '' : 's'} this console does not have yet. Pull brings {incoming === 1 ? 'it' : 'them'} in.">
+      <Icon name="arrow-down" /><span class="num">{incoming}</span> <span class="lbl">new on Forgejo</span>
     </button>
   {/if}
   {#if status?.upstream}
     <span class="sync num" class:quiet={incoming && !status.ahead} title="Tracking {status.upstream}: {status.ahead} ahead, {status.behind} behind">
-      <span><Icon name="up" size={13} />{status.ahead}</span>
-      <span><Icon name="arrow-down" size={13} />{status.behind}</span>
+      <span><Icon name="up" />{status.ahead}</span>
+      <span><Icon name="arrow-down" />{status.behind}</span>
     </span>
   {:else if status && !remoteMissing}
-    <span class="muted small" title="This branch has no remote branch yet; Push creates it">Not pushed yet</span>
+    <span class="muted" title="This branch has no remote branch yet; Push creates it">Not pushed yet</span>
   {/if}
 
-  <button class="ghost" class:off={!!remoteMissing} class:twin={!!incoming} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('pull')} disabled={!!busy} title={remoteMissing || 'Pull from the remote'}>
-    <Icon name="pull" size={15} /><span class="lbl">{busy === 'pull' ? 'Pulling…' : 'Pull'}</span>
-  </button>
-  <button class="ghost" class:off={!!remoteMissing} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('push')} disabled={!!busy} title={remoteMissing || 'Push to the remote; the machines deploy what is pushed'}>
-    <Icon name="push" size={15} /><span class="lbl">{busy === 'push' ? 'Pushing…' : 'Push'}</span>
-  </button>
+  <span class="pair">
+    <button class:off={!!remoteMissing} class:twin={!!incoming} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('pull')} disabled={!!busy} title={remoteMissing || 'Pull from the remote'}>
+      <Icon name="pull" /> <span class="lbl">{busy === 'pull' ? 'Pulling…' : 'Pull'}</span>
+    </button>
+    <button class:off={!!remoteMissing} aria-disabled={!!remoteMissing || undefined} onclick={() => pullOrPush('push')} disabled={!!busy} title={remoteMissing || 'Push to the remote; the machines deploy what is pushed'}>
+      <Icon name="push" /> <span class="lbl">{busy === 'push' ? 'Pushing…' : 'Push'}</span>
+    </button>
+  </span>
 
-  <span class="sep" aria-hidden="true"></span>
+  <i class="sep" aria-hidden="true">│</i>
 
   <div class="pop" bind:this={userEl}>
-    <button class="ghost user" aria-haspopup="true" aria-expanded={menu === 'user'} aria-label="Account menu" onclick={() => (menu = menu === 'user' ? '' : 'user')}>
-      <span class="avatar">{initials}</span>
-      <Icon name="down" size={12} />
+    <button class="bare user" aria-haspopup="true" aria-expanded={menu === 'user'} aria-label="Account menu" onclick={() => (menu = menu === 'user' ? '' : 'user')}>
+      <span class="count">{initials}</span>
+      <Icon name="down" />
     </button>
     {#if menu === 'user'}
-      <div class="menu right" role="menu">
-        {#if app.info?.author}<div class="menu-title who" title="Commits are made as this author">{app.info.author}</div>{/if}
-        <a class="menu-item" role="menuitem" href="#/settings" onclick={() => (menu = '')}><Icon name="key" size={15} />Tokens and MCP</a>
-        <button class="ghost menu-item" role="menuitem" onclick={() => ((menu = ''), logout())}><Icon name="logout" size={15} />Log out</button>
+      <div class="menu right" role="menu" use:frame={{ kind: 'square', shadow: true, animate: true }}>
+        {#if app.info?.author}<div class="menu-title who" title="Commits are made as this author">{app.info.author}</div><div class="rule" aria-hidden="true"></div>{/if}
+        <a class="menu-item" role="menuitem" href="#/settings" onclick={() => (menu = '')}><Icon name="key" /> Tokens and MCP</a>
+        <button class="bare menu-item" role="menuitem" onclick={() => ((menu = ''), logout())}><Icon name="logout" /> Log out</button>
       </div>
     {/if}
   </div>
@@ -234,180 +241,98 @@
 
 <style>
   .topbar {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    height: 48px;
     position: relative;
     z-index: 5; /* its menus open over the page */
-    padding: 0 var(--s3) 0 var(--s4);
-    background: var(--bg-raised);
-    border-bottom: 1px solid var(--line);
-  }
-  .title,
-  .crumb {
-    animation: slide-in var(--t-slow) var(--ease) backwards;
-  }
-  @keyframes slide-in {
-    from {
-      opacity: 0;
-      transform: translateX(-8px);
-    }
+    display: flex;
+    flex: none;
+    align-items: baseline;
+    gap: 2ch;
+    white-space: nowrap;
   }
   .where {
     display: flex;
-    align-items: center;
-    gap: 6px;
+    gap: 1ch;
     min-width: 0;
-    color: var(--fg-muted);
+    overflow: hidden;
   }
   .title {
-    color: var(--fg-strong);
-    font-size: var(--fs-lg);
-    font-weight: 600;
-  }
-  .crumb {
     overflow: hidden;
-    color: var(--fg);
-    font-size: var(--fs-lg);
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .model {
-    height: 26px;
-    padding: 0 10px;
-    gap: 8px;
-    font-size: var(--fs-sm);
-    border-radius: var(--r);
-  }
-  .model {
-    text-decoration: none;
-    transition:
-      background var(--t) var(--ease),
-      border-color var(--t) var(--ease),
-      color var(--t) var(--ease),
-      box-shadow var(--t) var(--ease);
-  }
-  .model.ok {
     color: var(--fg);
-    background: var(--bg-raised);
-    border-color: var(--line);
-  }
-  .model.ok:hover {
-    border-color: var(--line-strong);
   }
   .model.warn {
     color: var(--yellow);
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
-    border-color: color-mix(in srgb, var(--yellow) 32%, transparent);
   }
   .model.warn .dot {
     --c: var(--yellow);
   }
-  .model.warn:hover,
-  .model.err:hover {
-    background: color-mix(in srgb, currentColor 16%, transparent);
+  .model.err {
+    color: var(--red);
+  }
+  .model:hover,
+  .model:hover .dot {
+    color: var(--on-accent);
+  }
+  .sep {
+    color: var(--line);
+  }
+  .pop {
+    position: relative;
+  }
+  .branch,
+  .user,
+  .incoming {
+    color: var(--fg);
+    font-weight: 400;
+  }
+  .incoming {
+    color: var(--accent);
+  }
+  .sync {
+    display: inline-flex;
+    gap: 1ch;
+    color: var(--fg-muted);
+  }
+  .sync.quiet {
+    display: none; /* "N new on Forgejo" already says it */
+  }
+  .pair {
+    display: inline-flex;
+    gap: 1ch;
   }
   .off {
     color: var(--fg-faint);
     cursor: not-allowed;
   }
-  .off:hover:not(:disabled) {
-    color: var(--fg-muted);
-  }
-  .sep {
-    width: 1px;
-    height: 20px;
-    margin: 0 var(--s1);
-    background: var(--line);
-  }
-  .pop {
-    position: relative;
-  }
-  .branch .mono {
-    font-size: 12.5px;
-  }
-  .sync {
-    display: inline-flex;
-    gap: 10px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .sync.quiet {
-    display: none; /* "N new on Forgejo" already says it */
-  }
-  .sync span {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .incoming {
-    height: 26px;
-    padding: 0 10px 0 8px;
-    gap: 5px;
-    color: var(--accent);
-    font-size: var(--fs-sm);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
-    border-radius: var(--r);
-  }
-  .incoming:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .user {
-    padding: 0 6px 0 4px;
-  }
-  .avatar {
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    color: var(--on-accent);
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    background: var(--fg);
-    border-radius: 50%;
+  .user .count {
+    min-width: 3ch;
   }
   .menu {
     position: absolute;
-    top: calc(100% + 6px);
+    top: calc(var(--lh) * 2);
     left: 0;
     z-index: 50;
-    width: 340px;
-    padding: 6px;
+    width: 40ch;
+    white-space: normal;
     background: var(--bg-raised);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-2);
-    transform-origin: top right;
-    animation: drop 220ms var(--ease);
   }
   .menu.right {
-    right: 0;
+    right: -2ch;
     left: auto;
-    width: 240px;
+    width: 32ch;
   }
   .menu.branch-menu {
-    width: 340px;
-  }
-  @keyframes drop {
-    from {
-      opacity: 0;
-      transform: translateY(-6px) scale(0.97);
-    }
+    width: 48ch;
   }
   .menu-title {
-    padding: 6px 8px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
   }
   .who {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 4px;
   }
   ul {
     max-height: 40vh;
@@ -418,43 +343,30 @@
   }
   .menu-item {
     display: flex;
-    justify-content: flex-start;
-    gap: 8px;
+    gap: 1ch;
     width: 100%;
-    height: 30px;
-    padding: 0 8px;
+    padding: 0 1ch;
     color: var(--fg);
-    font-size: var(--fs-md);
     font-weight: 400;
     text-align: left;
-    text-decoration: none;
-    border-radius: var(--r);
   }
-  a.menu-item {
-    align-items: center;
-  }
-  a.menu-item:hover {
+  .menu-item:hover:not(:disabled) {
+    color: var(--fg-strong);
     background: var(--bg-hover);
   }
-  .menu-item.mono {
-    font-size: 12.5px;
-  }
   .menu-item:disabled {
-    opacity: 1;
     color: var(--fg-strong);
+    font-weight: 700;
+    cursor: default;
   }
   .mark {
-    display: inline-grid;
-    width: 16px;
+    display: inline-block;
+    width: 1ch;
     color: var(--green);
-  }
-  .pad {
-    padding: 10px 8px;
   }
   .b-row {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    gap: 1ch;
   }
   .b-row .menu-item {
     flex: 1;
@@ -466,31 +378,19 @@
   }
   .merge {
     flex: none;
-    margin-right: 2px;
     color: var(--fg-muted);
-    font-weight: 500;
-  }
-  .merge:hover:not(:disabled) {
-    color: var(--fg-strong);
+    font-weight: 400;
   }
   .menu-hint {
-    margin: 6px 8px 2px;
+    padding: 0 1ch;
     color: var(--fg-faint);
-    font-size: var(--fs-xs);
-    line-height: 1.45;
-  }
-  .new {
-    margin-top: 6px;
-    padding: 10px 6px 4px;
-    border-top: 1px solid var(--border);
   }
   .new label {
     display: block;
-    margin-bottom: 6px;
   }
   .row {
     display: flex;
-    gap: 6px;
+    gap: 1ch;
   }
   .row input {
     flex: 1;
@@ -509,8 +409,7 @@
       display: none;
     }
     .topbar {
-      gap: 4px;
-      padding: 0 var(--s2);
+      gap: 1ch;
     }
     .twin {
       display: none; /* the "new on Forgejo" button pulls too */

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type MachineDisk, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
+  import { bigText, frame } from '../lib/ascii'
   import { createMachine, fleet } from '../lib/fleet.svelte'
   import { installCommand } from '../lib/install'
   import { architectures, deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
@@ -8,6 +9,7 @@
   import { app } from '../lib/state.svelte'
   import { toast } from '../lib/ui.svelte'
   import { copyText } from '../lib/util'
+  import Dither from './cell/Dither.svelte'
   import Icon from './Icon.svelte'
 
   /** The new-machine wizard: name, architecture, role, platform and hardware or disk layout, then a preview of the files. */
@@ -98,367 +100,340 @@
   }
 </script>
 
-<dialog bind:this={el} class="nm" onclose={onclose} aria-labelledby="nm-title">
-  <header>
-    <h2 id="nm-title">New machine</h2>
-    <ol class="progress" aria-label="Steps">
-      {#each steps as s, i (s)}
-        <li class:done={i < step} class:now={i === step} aria-current={i === step ? 'step' : undefined}>
-          <button type="button" class="step-btn" disabled={i > step} onclick={() => (step = i)}><span class="num">{i + 1}</span>{s}</button>
-        </li>
-      {/each}
-    </ol>
-    <button class="icon" aria-label="Close" onclick={() => el.close()}><Icon name="x" /></button>
-  </header>
+<dialog bind:this={el} class="nm screen" onclose={onclose} aria-labelledby="nm-title">
+  <Dither />
+  <div class="modal" use:frame={{ kind: 'double', shadow: true, animate: true, title: 'New machine', tag: `${step + 1} / ${steps.length}` }}>
+    <header>
+      <h2 id="nm-title" class="sr-only">New machine</h2>
+      <!-- ✓ Name ──── Role ──── Platform ──── Review -->
+      <ol class="steps" aria-label="Steps">
+        {#each steps as s, i (s)}
+          <li class:done={i < step} class:now={i === step} aria-current={i === step ? 'step' : undefined}>
+            <button type="button" class="bare step-btn" disabled={i > step} onclick={() => (step = i)}>{s}</button>
+          </li>
+        {/each}
+      </ol>
+      <!-- On the top line, left of the step count: ═ × ═ 2 / 4 ═╗ -->
+      <button class="icon close" aria-label="Close" onclick={() => el.close()}><Icon name="x" /></button>
+    </header>
 
-  <form class="body" onsubmit={next} id="nm-form">
-    {#if step === 0}
-      <label class="field">
-        <span class="label">Name</span>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input class="mono big" bind:value={name} placeholder="nas" spellcheck="false" autocomplete="off" autofocus aria-invalid={!!nameProblem} aria-describedby="name-hint" />
-        {#if nameProblem}
-          <span class="problem" id="name-hint">{nameProblem}</span>
-        {:else}
-          <span class="hint" id="name-hint">It becomes the folder <span class="mono">hosts/{name.trim() || 'name'}/</span> and the machine's host name, which comin uses to find its configuration.</span>
-        {/if}
-      </label>
-      <fieldset class="field">
-        <legend class="label">Architecture</legend>
-        <div class="choices two">
-          {#each architectures as a (a.system)}
-            <label class="choice" class:on={system === a.system}>
-              <input type="radio" name="system" value={a.system} bind:group={system} />
-              <span class="c-title"><Icon name="cpu" size={15} />{a.label}<span class="mono faint">{a.system}</span></span>
-              <span class="c-note">{a.note}</span>
-            </label>
-          {/each}
-        </div>
-      </fieldset>
-    {:else if step === 1}
-      <fieldset class="field">
-        <legend class="label">What is {name.trim()} for?</legend>
-        <div class="choices three">
-          {#each roles as r (r.role)}
-            <label class="choice role" class:on={role === r.role}>
-              <input type="radio" name="role" value={r.role} bind:group={role} />
-              <span class="c-title"><Icon name={r.role === 'server' ? 'server' : r.role === 'desktop' ? 'box' : 'terminal'} size={15} />{r.label}</span>
-              <span class="c-note">{r.note}</span>
-              <ul class="gets">
-                {#each r.gets as g (g)}<li><Icon name="tick" size={12} />{g}</li>{/each}
-              </ul>
-              <span class="pkgs">{#each r.packages as p (p)}<span class="chip mono">{p}</span>{/each}</span>
-            </label>
-          {/each}
-        </div>
-        <p class="hint">All of it lands in <span class="mono">managed.json</span>, so you can change any of it by clicking later.</p>
-      </fieldset>
-    {:else if step === 2}
-      <fieldset class="field">
-        <legend class="label">Where does {name.trim()} run?</legend>
-        <div class="choices three">
-          {#each platforms as p (p.platform)}
-            <label class="choice" class:on={platform === p.platform}>
-              <input type="radio" name="platform" value={p.platform} bind:group={platform} />
-              <span class="c-title"><Icon name={p.platform === 'hardware' ? 'cpu' : p.platform === 'proxmox-vm' ? 'layers' : 'box'} size={15} />{p.label}</span>
-              <span class="c-note">{p.note}</span>
-            </label>
-          {/each}
-        </div>
-      </fieldset>
-      {#if lxc}
-        <div class="field">
-          <span class="label">Creating the container</span>
-          <p class="lead">
-            There is no hardware configuration: <span class="mono">default.nix</span> imports the Proxmox container module instead. On the Proxmox host, create
-            {name.trim()} from the NixOS LXC template, unprivileged and with nesting on (Nix and systemd's service sandboxing need it):
-          </p>
-          <div class="cmd">
-            <!-- Wrap between arguments only, never inside one such as --unprivileged. -->
-            <code class="wrap">{#each pctCommand.split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
-            <button type="button" class="small" onclick={() => copyCommand(pctCommand)}
-              ><Icon name={copied === pctCommand ? 'tick' : 'copy'} size={13} />{copied === pctCommand ? 'Copied' : 'Copy'}</button
-            >
-          </div>
-          <span class="hint">
-            Then switch it once to this configuration with <span class="mono">nixos-rebuild switch --flake &lt;repository&gt;#{name.trim()}</span>; comin keeps it up to date
-            from then on. The README's Proxmox section has the template download and the details.
-          </span>
-        </div>
-      {:else}
+    <form class="body" onsubmit={next} id="nm-form">
+      {#if step === 0}
+        <label class="field">
+          <span class="label">Name</span>
+          <pre class="big acc" aria-hidden="true" use:bigText={name.trim()}></pre>
+          <span class="prompt-row"
+            ><b class="prompt">λ ›</b>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input class="mono" bind:value={name} placeholder="nas" spellcheck="false" autocomplete="off" autofocus aria-invalid={!!nameProblem} aria-describedby="name-hint" /></span>
+          {#if nameProblem}
+            <span class="problem" id="name-hint">{nameProblem}</span>
+          {:else}
+            <span class="hint" id="name-hint">It becomes the folder <span class="mono">hosts/{name.trim() || 'name'}/</span> and the machine's host name, which comin uses to find its configuration.</span>
+          {/if}
+        </label>
         <fieldset class="field">
-          <legend class="label">Installing NixOS</legend>
+          <legend class="label">Architecture</legend>
           <div class="choices two">
-            <label class="choice" class:on={!anywhere}>
-              <input type="radio" name="install" value={false} bind:group={anywhere} />
-              <span class="c-title"><Icon name="terminal" size={15} />Installed by hand</span>
-              <span class="c-note">From the NixOS installer, as usual. Its hardware configuration goes below.</span>
-            </label>
-            <label class="choice" class:on={anywhere}>
-              <input type="radio" name="install" value={true} bind:group={anywhere} />
-              <span class="c-title"><Icon name="layers" size={15} />nixos-anywhere</span>
-              <span class="c-note">Erases a disk, lays it out with disko and installs over SSH. It writes the hardware configuration itself.</span>
-            </label>
-          </div>
-        </fieldset>
-      {/if}
-      {#if layout}
-        <fieldset class="field">
-          <legend class="label">Disk layout</legend>
-          <div class="choices two">
-            {#each disks as d (d.disk)}
-              <label class="choice" class:on={disk === d.disk}>
-                <input type="radio" name="disk" value={d.disk} bind:group={disk} />
-                <span class="c-title"><Icon name="box" size={15} />{d.label}</span>
-                <span class="c-note">{d.note}</span>
+            {#each architectures as a (a.system)}
+              <label class="choice lift" class:on={system === a.system} use:frame={{ kind: system === a.system ? 'heavy' : 'round', lift: true }}>
+                <input type="radio" name="system" value={a.system} bind:group={system} />
+                <span class="c-title"><Icon name="cpu" /> {a.label}<span class="mono faint">{a.system}</span></span>
+                <span class="c-note">{a.note}</span>
               </label>
             {/each}
           </div>
-          <span class="hint">Both have a 1 GiB boot partition and boot with GRUB{system === 'x86_64-linux' ? ', on BIOS and UEFI' : ' on UEFI'}.</span>
         </fieldset>
-        <label class="field">
-          <span class="label">Disk to erase</span>
-          <input class="mono" bind:value={device} placeholder="/dev/nvme0n1" spellcheck="false" autocomplete="off" aria-invalid={!!devProblem} aria-describedby="device-hint" />
-          {#if devProblem}
-            <span class="problem" id="device-hint">{devProblem}</span>
-          {:else}
-            <span class="hint" id="device-hint">
-              As <span class="mono">lsblk</span> shows it on the machine: <span class="mono">/dev/sda</span>, <span class="mono">/dev/nvme0n1</span>{#if platform === 'proxmox-vm'}, or
-                <span class="mono">/dev/vda</span> for a VirtIO Block disk{/if}. A <span class="mono">/dev/disk/by-id/…</span> name stays right when disks are added. Everything on
-              it is erased when you run the install.
+      {:else if step === 1}
+        <fieldset class="field">
+          <legend class="label">What is {name.trim()} for?</legend>
+          <div class="choices three">
+            {#each roles as r (r.role)}
+              <label class="choice role lift" class:on={role === r.role} use:frame={{ kind: role === r.role ? 'heavy' : 'round', lift: true }}>
+                <input type="radio" name="role" value={r.role} bind:group={role} />
+                <span class="c-title"><Icon name={r.role === 'server' ? 'server' : r.role === 'desktop' ? 'box' : 'terminal'} /> {r.label}</span>
+                <span class="c-note">{r.note}</span>
+                <ul class="gets">
+                  {#each r.gets as g (g)}<li><Icon name="tick" /> {g}</li>{/each}
+                </ul>
+                <span class="pkgs">{#each r.packages as p (p)}<span class="chip mono">{p}</span>{/each}</span>
+              </label>
+            {/each}
+          </div>
+          <p class="hint">All of it lands in <span class="mono">managed.json</span>, so you can change any of it by clicking later.</p>
+        </fieldset>
+      {:else if step === 2}
+        <fieldset class="field">
+          <legend class="label">Where does {name.trim()} run?</legend>
+          <div class="choices three">
+            {#each platforms as p (p.platform)}
+              <label class="choice lift" class:on={platform === p.platform} use:frame={{ kind: platform === p.platform ? 'heavy' : 'round', lift: true }}>
+                <input type="radio" name="platform" value={p.platform} bind:group={platform} />
+                <span class="c-title"><Icon name={p.platform === 'hardware' ? 'cpu' : p.platform === 'proxmox-vm' ? 'layers' : 'box'} /> {p.label}</span>
+                <span class="c-note">{p.note}</span>
+              </label>
+            {/each}
+          </div>
+        </fieldset>
+        {#if lxc}
+          <div class="field">
+            <span class="label">Creating the container</span>
+            <p class="lead">
+              There is no hardware configuration: <span class="mono">default.nix</span> imports the Proxmox container module instead. On the Proxmox host, create
+              {name.trim()} from the NixOS LXC template, unprivileged and with nesting on (Nix and systemd's service sandboxing need it):
+            </p>
+            <div class="cmd">
+              <!-- Wrap between arguments only, never inside one such as --unprivileged. -->
+              <code class="wrap">{#each pctCommand.split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
+              <button type="button" class="small" onclick={() => copyCommand(pctCommand)}
+                ><Icon name={copied === pctCommand ? 'tick' : 'copy'} /> {copied === pctCommand ? 'Copied' : 'Copy'}</button
+              >
+            </div>
+            <span class="hint">
+              Then switch it once to this configuration with <span class="mono">nixos-rebuild switch --flake &lt;repository&gt;#{name.trim()}</span>; comin keeps it up to date
+              from then on. The README's Proxmox section has the template download and the details.
             </span>
-          {/if}
-        </label>
-      {:else if !lxc}
-        <div class="field">
-          <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
-          <p class="lead">
-            {#if platform === 'proxmox-vm'}
-              NixOS needs to know the VM's disks. Install NixOS in it from the ISO (and turn on <span class="mono">QEMU Guest Agent</span> in the VM's Options), then run inside it:
+          </div>
+        {:else}
+          <fieldset class="field">
+            <legend class="label">Installing NixOS</legend>
+            <div class="choices two">
+              <label class="choice lift" class:on={!anywhere} use:frame={{ kind: !anywhere ? 'heavy' : 'round', lift: true }}>
+                <input type="radio" name="install" value={false} bind:group={anywhere} />
+                <span class="c-title"><Icon name="terminal" /> Installed by hand</span>
+                <span class="c-note">From the NixOS installer, as usual. Its hardware configuration goes below.</span>
+              </label>
+              <label class="choice lift" class:on={anywhere} use:frame={{ kind: anywhere ? 'heavy' : 'round', lift: true }}>
+                <input type="radio" name="install" value={true} bind:group={anywhere} />
+                <span class="c-title"><Icon name="layers" /> nixos-anywhere</span>
+                <span class="c-note">Erases a disk, lays it out with disko and installs over SSH. It writes the hardware configuration itself.</span>
+              </label>
+            </div>
+          </fieldset>
+        {/if}
+        {#if layout}
+          <fieldset class="field">
+            <legend class="label">Disk layout</legend>
+            <div class="choices two">
+              {#each disks as d (d.disk)}
+                <label class="choice lift" class:on={disk === d.disk} use:frame={{ kind: disk === d.disk ? 'heavy' : 'round', lift: true }}>
+                  <input type="radio" name="disk" value={d.disk} bind:group={disk} />
+                  <span class="c-title"><Icon name="box" /> {d.label}</span>
+                  <span class="c-note">{d.note}</span>
+                </label>
+              {/each}
+            </div>
+            <span class="hint">Both have a 1 GiB boot partition and boot with GRUB{system === 'x86_64-linux' ? ', on BIOS and UEFI' : ' on UEFI'}.</span>
+          </fieldset>
+          <label class="field">
+            <span class="label">Disk to erase</span>
+            <input class="mono" bind:value={device} placeholder="/dev/nvme0n1" spellcheck="false" autocomplete="off" aria-invalid={!!devProblem} aria-describedby="device-hint" />
+            {#if devProblem}
+              <span class="problem" id="device-hint">{devProblem}</span>
             {:else}
-              NixOS needs to know {name.trim()}'s disks and kernel modules. On the machine, booted from the NixOS installer or already running NixOS, run:
+              <span class="hint" id="device-hint">
+                As <span class="mono">lsblk</span> shows it on the machine: <span class="mono">/dev/sda</span>, <span class="mono">/dev/nvme0n1</span>{#if platform === 'proxmox-vm'}, or
+                  <span class="mono">/dev/vda</span> for a VirtIO Block disk{/if}. A <span class="mono">/dev/disk/by-id/…</span> name stays right when disks are added. Everything on
+                it is erased when you run the install.
+              </span>
+            {/if}
+          </label>
+        {:else if !lxc}
+          <div class="field">
+            <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
+            <p class="lead">
+              {#if platform === 'proxmox-vm'}
+                NixOS needs to know the VM's disks. Install NixOS in it from the ISO (and turn on <span class="mono">QEMU Guest Agent</span> in the VM's Options), then run inside it:
+              {:else}
+                NixOS needs to know {name.trim()}'s disks and kernel modules. On the machine, booted from the NixOS installer or already running NixOS, run:
+              {/if}
+            </p>
+            <div class="cmd">
+              <code>{command}</code>
+              <button type="button" class="small" onclick={() => copyCommand(command)}><Icon name={copied === command ? 'tick' : 'copy'} /> {copied === command ? 'Copied' : 'Copy'}</button>
+            </div>
+            <p class="lead">and paste its output here:</p>
+            <textarea class="mono" rows="7" bind:value={hardware} spellcheck="false" placeholder={'{ config, lib, pkgs, modulesPath, ... }:\n{\n  imports = [ ... ];\n  fileSystems."/" = { ... };\n}'} aria-label="hardware-configuration.nix" aria-invalid={!!hw.error}
+            ></textarea>
+            {#if hw.error}
+              <span class="problem">{hw.error}</span>
+            {:else if hw.warning}
+              <span class="warn"><Icon name="alert" /> {hw.warning}</span>
+            {:else if !hardware.trim()}
+              <span class="hint">Leave it empty to write a placeholder now; replace <span class="mono">hosts/{name.trim()}/hardware-configuration.nix</span> in Code before the first deploy.</span>
+            {/if}
+          </div>
+        {/if}
+      {:else}
+        <div class="review">
+          <p class="lead">
+            These files are written to the working copy; nothing is committed until you review them in Changes.
+            {#if autoFlake === true}
+              <span class="ok-text"><Icon name="tick" /> flake.nix finds <span class="mono">hosts/{spec.name}/</span> by itself.</span>
+            {:else if autoFlake === false}
+              <span class="warn"><Icon name="info" /> flake.nix lists its machines by hand: you will get the line to add.</span>
+            {/if}
+            {#if role === 'server'}
+              <span class="warn"><Icon name="key" /> The server preset allows SSH keys only and creates no user: add yours with a key in Users before deploying, or nobody can log in over SSH.</span>
+            {/if}
+            {#if noDiskoInput}
+              <span class="warn"><Icon name="alert" /> flake.nix has no disko input, which disk-config.nix needs: add it to its inputs, then Lock.</span>
             {/if}
           </p>
-          <div class="cmd">
-            <code>{command}</code>
-            <button type="button" class="small" onclick={() => copyCommand(command)}><Icon name={copied === command ? 'tick' : 'copy'} size={13} />{copied === command ? 'Copied' : 'Copy'}</button>
+          {#if noDiskoInput}
+            <div class="cmd">
+              <pre class="snippet">{diskoInputSnippet}</pre>
+              <button type="button" class="small" onclick={() => copyCommand(diskoInputSnippet)}
+                ><Icon name={copied === diskoInputSnippet ? 'tick' : 'copy'} /> {copied === diskoInputSnippet ? 'Copied' : 'Copy'}</button
+              >
+            </div>
+          {/if}
+          <div class="files">
+            <ul class="file-list" role="tablist" aria-label="Files">
+              {#each files as f (f.path)}
+                <li>
+                  <button type="button" role="tab" aria-selected={shown === f} class="bare" class:on={shown === f} onclick={() => (openName = f.path.split('/').pop()!)}>
+                    <Icon name="file-plus" /> <span class="mono">{f.path.split('/').pop()}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+            <div class="file-view" role="tabpanel">
+              <div class="fv-head"><span class="mono">{shown.path}</span><span class="muted small">{shown.note}</span></div>
+              <pre>{shown.content}</pre>
+            </div>
           </div>
-          <p class="lead">and paste its output here:</p>
-          <textarea class="mono" rows="7" bind:value={hardware} spellcheck="false" placeholder={'{ config, lib, pkgs, modulesPath, ... }:\n{\n  imports = [ ... ];\n  fileSystems."/" = { ... };\n}'} aria-label="hardware-configuration.nix" aria-invalid={!!hw.error}
-          ></textarea>
-          {#if hw.error}
-            <span class="problem">{hw.error}</span>
-          {:else if hw.warning}
-            <span class="warn"><Icon name="alert" size={13} />{hw.warning}</span>
-          {:else if !hardware.trim()}
-            <span class="hint">Leave it empty to write a placeholder now; replace <span class="mono">hosts/{name.trim()}/hardware-configuration.nix</span> in Code before the first deploy.</span>
+          {#if layout}
+            <div class="install">
+              <span class="label">Installing it</span>
+              <p class="hint">
+                Once you commit and push, {spec.name}'s page walks you through it: boot the NixOS installer, fetch its SSH host key for secrets, then run this from a clone of the
+                repository. Nothing is installed until you do.
+              </p>
+              <code class="wrap">{#each installCommand(spec.name, '', true).split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
+            </div>
           {/if}
         </div>
       {/if}
-    {:else}
-      <div class="review">
-        <p class="lead">
-          These files are written to the working copy; nothing is committed until you review them in Changes.
-          {#if autoFlake === true}
-            <span class="ok-text"><Icon name="tick" size={13} />flake.nix finds <span class="mono">hosts/{spec.name}/</span> by itself.</span>
-          {:else if autoFlake === false}
-            <span class="warn"><Icon name="info" size={13} />flake.nix lists its machines by hand: you will get the line to add.</span>
-          {/if}
-          {#if role === 'server'}
-            <span class="warn"><Icon name="key" size={13} />The server preset allows SSH keys only and creates no user: add yours with a key in Users before deploying, or nobody can log in over SSH.</span>
-          {/if}
-          {#if noDiskoInput}
-            <span class="warn"><Icon name="alert" size={13} />flake.nix has no disko input, which disk-config.nix needs: add it to its inputs, then Lock.</span>
-          {/if}
-        </p>
-        {#if noDiskoInput}
-          <div class="cmd">
-            <pre class="snippet">{diskoInputSnippet}</pre>
-            <button type="button" class="small" onclick={() => copyCommand(diskoInputSnippet)}
-              ><Icon name={copied === diskoInputSnippet ? 'tick' : 'copy'} size={13} />{copied === diskoInputSnippet ? 'Copied' : 'Copy'}</button
-            >
-          </div>
-        {/if}
-        <div class="files">
-          <ul class="file-list" role="tablist" aria-label="Files">
-            {#each files as f (f.path)}
-              <li>
-                <button type="button" role="tab" aria-selected={shown === f} class:on={shown === f} onclick={() => (openName = f.path.split('/').pop()!)}>
-                  <Icon name="file-plus" size={14} /><span class="mono">{f.path.split('/').pop()}</span>
-                </button>
-              </li>
-            {/each}
-          </ul>
-          <div class="file-view" role="tabpanel">
-            <div class="fv-head"><span class="mono">{shown.path}</span><span class="muted small">{shown.note}</span></div>
-            <pre>{shown.content}</pre>
-          </div>
-        </div>
-        {#if layout}
-          <div class="install">
-            <span class="label">Installing it</span>
-            <p class="hint">
-              Once you commit and push, {spec.name}'s page walks you through it: boot the NixOS installer, fetch its SSH host key for secrets, then run this from a clone of the
-              repository. Nothing is installed until you do.
-            </p>
-            <code class="wrap">{#each installCommand(spec.name, '', true).split(' ') as arg, i (i)}<span class="nw">{arg}</span>{' '}{/each}</code>
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </form>
+    </form>
 
-  <footer>
-    {#if step > 0}<button type="button" class="ghost" onclick={() => step--}><Icon name="left" size={14} />Back</button>{/if}
-    <span class="spacer"></span>
-    <button type="button" onclick={() => el.close()}>Cancel</button>
-    <button type="submit" form="nm-form" class="primary" disabled={!canNext || creating}>
-      {#if step < steps.length - 1}Next<Icon name="right" size={14} />{:else}{creating ? 'Creating…' : `Create ${spec.name}`}{/if}
-    </button>
-  </footer>
+    <footer>
+      {#if step > 0}<button type="button" class="ghost" onclick={() => step--}><Icon name="left" /> Back</button>{/if}
+      <span class="spacer"></span>
+      <button type="button" onclick={() => el.close()}>Cancel</button>
+      <button type="submit" form="nm-form" class="primary" disabled={!canNext || creating}>
+        {#if step < steps.length - 1}Next <Icon name="right" />{:else}{creating ? 'Creating…' : `Create ${spec.name}`}{/if}
+      </button>
+    </footer>
+  </div>
 </dialog>
 
 <style>
-  .nm {
+  /* A fixed height: the steps scroll inside, never the framed (and shadowed) box. */
+  .modal {
     display: flex;
     flex-direction: column;
-    width: min(820px, 94vw);
-    height: min(620px, 90vh);
-    padding: 0;
-    color: var(--fg);
-    background: var(--bg-side);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-3);
-  }
-  .nm::backdrop {
-    background: var(--scrim);
+    width: 96ch;
+    height: min(calc(var(--lh) * 38), round(down, calc(100vh - var(--lh) * 4), var(--lh)));
   }
   header {
-    display: flex;
-    align-items: center;
-    gap: var(--s4);
-    padding: 12px 12px 12px 20px;
-    border-bottom: 1px solid var(--border);
+    flex: none;
+    margin-bottom: var(--lh);
   }
-  h2 {
-    font-size: var(--fs-lg);
-    white-space: nowrap;
+  .close {
+    position: absolute;
+    top: 0;
+    right: 10ch;
+    z-index: 2;
+    width: 3ch;
+    background: var(--bg-raised);
   }
-  .progress {
+  /* Steps: ✓ done in green, the one you are on in reverse video, the rest faint, joined by ────. */
+  .steps {
     display: flex;
-    flex: 1;
-    justify-content: center;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
+    flex-wrap: wrap;
     list-style: none;
+    white-space: pre;
+  }
+  .steps > li + li::before {
+    color: var(--line);
+    content: ' ──── ';
   }
   .step-btn {
-    gap: 7px;
-    height: 26px;
-    padding: 0 10px 0 6px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    background: none;
-    border-color: transparent;
-    border-radius: var(--r);
-    box-shadow: none;
+    font-weight: 400;
   }
   .step-btn:disabled {
-    opacity: 1;
     color: var(--fg-faint);
   }
-  .step-btn .num {
-    display: grid;
-    place-items: center;
-    width: 18px;
-    height: 18px;
-    font-size: 10.5px;
-    border: 1px solid currentColor;
-    border-radius: 50%;
-  }
   .now .step-btn {
-    color: var(--fg-strong);
-    background: var(--bg-active);
-  }
-  .now .num {
+    padding: 0 1ch;
     color: var(--on-accent);
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
+    font-weight: 700;
+    background: var(--accent);
   }
   .done .step-btn {
-    color: var(--fg);
+    color: var(--green);
   }
-  .done .num {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  .done .step-btn::before {
+    content: '✓ ';
+  }
+  .done .step-btn:is(:hover, :focus-visible) {
+    color: var(--on-accent);
   }
   .body {
     display: grid;
     flex: 1;
     align-content: start;
-    gap: 22px;
+    gap: var(--lh);
     min-height: 0;
-    padding: 22px 24px;
+    padding-right: 1ch;
     overflow: auto;
   }
   fieldset {
-    margin: 0;
-    padding: 0;
     border: 0;
   }
   .field {
     display: grid;
-    gap: 8px;
   }
   legend {
-    margin-bottom: 8px;
     padding: 0;
   }
+  .prompt-row {
+    display: flex;
+    gap: 1ch;
+    white-space: nowrap;
+  }
   .big {
-    height: 36px;
-    font-size: var(--fs-lg);
+    margin: var(--lh) 0;
   }
-  .hint,
-  .lead {
+  .hint {
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.55;
-  }
-  .lead {
-    color: var(--fg);
-    font-size: var(--fs-md);
   }
   .faint {
     color: var(--fg-faint);
   }
   .problem {
     color: var(--red);
-    font-size: var(--fs-sm);
   }
-  .warn,
-  .ok-text {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+  .problem::before {
+    content: '✖ ';
+  }
+  .warn {
+    display: block;
     color: var(--yellow);
-    font-size: var(--fs-sm);
   }
   .ok-text {
+    display: block;
     color: var(--green);
   }
   .review {
     display: grid;
-    gap: var(--s3);
-  }
-  .review .lead {
-    display: grid;
-    gap: 6px;
+    gap: var(--lh);
   }
   .choices {
     display: grid;
-    gap: 10px;
+    gap: var(--lh) 2ch;
   }
   .two {
     grid-template-columns: 1fr 1fr;
@@ -467,31 +442,13 @@
     grid-template-columns: repeat(3, 1fr);
   }
   .choice {
-    position: relative;
     display: grid;
     align-content: start;
-    gap: 6px;
-    padding: 12px 14px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
-    cursor: pointer;
-    transition:
-      border-color var(--t-fast) var(--ease),
-      background var(--t-fast) var(--ease);
   }
-  .choice:hover {
-    border-color: var(--line-strong);
+  .choice.on > :global(.fr) {
+    color: var(--accent);
   }
-  .choice.on {
-    background: color-mix(in srgb, var(--accent-strong) 12%, var(--bg-raised));
-    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  }
-  .choice:has(input:focus-visible) {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+  /* The radio is the whole card: hidden, but focusable (focus lifts the frame). */
   .choice input {
     position: absolute;
     opacity: 0;
@@ -499,53 +456,41 @@
   }
   .c-title {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: 1ch;
     color: var(--fg-strong);
-    font-weight: 600;
+    font-weight: 700;
   }
-  .c-title :global(svg) {
+  .c-title :global(.ic) {
     color: var(--accent);
   }
   .c-title .mono {
     margin-left: auto;
-    font-size: 11px;
     font-weight: 400;
   }
   .c-note {
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.45;
   }
   .gets {
-    display: grid;
-    gap: 3px;
-    margin: 4px 0 0;
-    padding: 0;
+    margin-top: var(--lh);
     list-style: none;
-    font-size: var(--fs-sm);
   }
   .gets li {
     display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    line-height: 1.4;
+    gap: 1ch;
   }
-  .gets :global(svg) {
-    flex: none;
-    margin-top: 2px;
+  .gets :global(.ic) {
     color: var(--green);
   }
   .pkgs {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
+    gap: 0 1ch;
+    margin-top: var(--lh);
   }
   .cmd {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-start;
+    gap: 2ch;
   }
   .cmd code.wrap {
     flex: 1;
@@ -554,105 +499,72 @@
   .nw {
     white-space: nowrap;
   }
-  .cmd code {
-    padding: 6px 10px;
-    color: var(--fg-strong);
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-  }
-  textarea {
-    font-size: 12px;
-    resize: vertical;
-  }
-  .install {
-    display: grid;
-    gap: 6px;
-  }
-  .install code,
+  code,
   .snippet {
-    padding: 6px 10px;
+    padding: 0 1ch;
     color: var(--fg-strong);
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    background: var(--bg-input);
   }
   .snippet {
     flex: 1;
-    margin: 0;
-    font: 12px/1.55 var(--mono);
+    white-space: pre;
+    overflow: auto;
   }
-  .files {
+  textarea {
+    height: calc(var(--lh) * 7);
+  }
+  .install {
     display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
-    min-height: 300px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
   }
+  /* The files, as editor tabs over the selected one. */
   .file-list {
-    margin: 0;
-    padding: 6px;
+    display: flex;
+    flex-wrap: wrap;
     list-style: none;
-    background: var(--bg-deep);
-    border-right: 1px solid var(--border);
   }
   .file-list button {
-    justify-content: flex-start;
-    width: 100%;
+    padding: 0 2ch 0 1ch;
     color: var(--fg-muted);
     font-weight: 400;
-    background: none;
-    border-color: transparent;
   }
   .file-list button.on {
     color: var(--fg-strong);
+    font-weight: 700;
     background: var(--bg-active);
   }
-  .file-list button :global(svg) {
+  .file-list button :global(.ic) {
     color: var(--green);
   }
-  .file-view {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
+  .file-list button:is(:hover, :focus-visible) :global(.ic) {
+    color: inherit;
   }
   .fv-head {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
     justify-content: space-between;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: 0 2ch;
+    padding: 0 1ch;
     color: var(--fg-strong);
-    font-size: 12px;
-    border-bottom: 1px solid var(--border);
+    background: var(--bg-active);
   }
   .file-view pre {
-    flex: 1;
-    max-height: 340px;
-    margin: 0;
-    padding: 10px 12px;
+    max-height: calc(var(--lh) * 20);
+    padding: 0 1ch;
     overflow: auto;
     color: var(--fg);
-    font: 12px/1.55 var(--mono);
+    background: var(--bg-input);
   }
   footer {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 20px 14px;
-    background: var(--bg-raised);
-    border-top: 1px solid var(--border);
-    border-radius: 0 0 var(--r-lg) var(--r-lg);
+    flex: none;
+    align-items: baseline;
+    gap: 2ch;
+    margin-top: var(--lh);
   }
   @media (max-width: 760px) {
     .three,
     .two {
       grid-template-columns: 1fr;
-    }
-    .progress .step-btn {
-      font-size: 0;
     }
   }
 </style>

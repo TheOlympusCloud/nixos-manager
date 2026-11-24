@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type SecretFile, type SecretMachine, type SecretsStatus } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { fleet } from '../lib/fleet.svelte'
   import { go } from '../lib/router.svelte'
   import { cominSecret, reportSecret, secretNameProblem } from '../lib/secrets'
@@ -115,8 +116,8 @@
   const storeReports = () => run('report', () => api.storeReportTokens(), 'Stored each machine’s report token as its secret')
 </script>
 
-<section class="card block" aria-labelledby="set-secrets">
-  <h2 id="set-secrets">Secrets</h2>
+<section class="card block" aria-labelledby="set-secrets" use:frame={{ title: 'Secrets' }}>
+  <h2 id="set-secrets" class="sr-only">Secrets</h2>
   <p class="muted">
     Passwords, tokens and keys for the machines, kept with sops-nix in the repository's <span class="mono">secrets/</span>, encrypted for this server and the machines
     that get them. Each machine decrypts its own with its SSH host key into <span class="mono">/run/secrets/&lt;name&gt;</span>. A change here is a change of the working copy:
@@ -124,34 +125,34 @@
   </p>
 
   {#if !st}
-    {#if error}<p class="error" role="alert">{error}</p>{:else}<span class="skel" style:width="60%"></span>{/if}
+    {#if error}<p class="error-text" role="alert">{error}</p>{:else}<span class="skel" style:width="40ch"></span>{/if}
   {:else if st.missing.length}
-    <p class="error" role="alert">
-      Not found on the server: <span class="mono">{st.missing.join(', ')}</span>. The Nix package and the Docker image bring sops, age and ssh-to-age; a server run otherwise needs them
+    <p class="error-text" role="alert">
+      ✖ Not found on the server: <span class="mono">{st.missing.join(', ')}</span>. The Nix package and the Docker image bring sops, age and ssh-to-age; a server run otherwise needs them
       on its PATH.
     </p>
   {:else}
     <div class="field">
       <span class="label">This server's key</span>
-      <span class="mono small wrap">{st.recipient}</span>
-      <span class="muted small">Back up <span class="mono">{st.keyFile}</span>: without it nobody can change these secrets (the machines keep theirs). Never put it in the repository.</span>
+      <span class="mono wrap">{st.recipient}</span>
+      <span class="muted">Back up <span class="mono">{st.keyFile}</span>: without it nobody can change these secrets (the machines keep theirs). Never put it in the repository.</span>
     </div>
 
     {#if st.stale}
-      <p class="warn" role="status">
-        Some secrets are not encrypted for exactly the machines' keys (a key or a file changed outside this page).
+      <p class="t-warn" role="status">
+        ▲ Some secrets are not encrypted for exactly the machines' keys (a key or a file changed outside this page).
         <button class="small" onclick={() => run('reencrypt', () => api.reencryptSecrets(), 'Encrypted the secrets again for the machines’ keys')} disabled={!!busy}>Re-encrypt</button>
       </p>
     {/if}
 
     <h3>Machine keys</h3>
-    <table>
+    <table class="data">
       <thead><tr><th>Machine</th><th>SSH host key</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>
         {#each st.machines as m (m.name)}
           <tr>
-            <td>{m.name}{#if fleet.model && !inFlake.has(m.name)}<span class="badge err" title="Remove its key so it no longer opens the shared secrets">not in the flake</span>{/if}</td>
-            <td>{#if m.error}<span class="error-text">{m.error}</span>{:else}<span class="mono small" title={m.key}>{m.fingerprint}</span>{/if}</td>
+            <td><b>{m.name}</b>{#if fleet.model && !inFlake.has(m.name)}<span class="badge err" title="Remove its key so it no longer opens the shared secrets">not in the flake</span>{/if}</td>
+            <td>{#if m.error}<span class="error-text">{m.error}</span>{:else}<span class="mono" title={m.key}>{m.fingerprint}</span>{/if}</td>
             <td class="act">
               <button class="small" onclick={() => ((keyFor = m.name), (keyText = ''))}>Change</button>
               <button class="small ghost" onclick={() => removeKey(m.name)} disabled={!!busy}>Remove</button>
@@ -160,8 +161,8 @@
         {/each}
         {#each withoutKey as h (h)}
           <tr>
-            <td>{h}</td>
-            <td class="muted small">No key: gets no secrets</td>
+            <td><b>{h}</b></td>
+            <td class="t-warn">▲ No key: gets no secrets</td>
             <td class="act"><button class="small" onclick={() => ((keyFor = h), (keyText = ''))}>Add key</button></td>
           </tr>
         {/each}
@@ -169,18 +170,18 @@
       </tbody>
     </table>
     {#if st.proposed.length}
-      <div class="sub" role="note">
-        <strong>Keys waiting for approval</strong>
-        <span class="muted small">
+      <div class="sub" role="note" use:frame={{ title: 'Keys waiting for approval' }} data-tone="warn">
+        <strong class="sr-only">Keys waiting for approval</strong>
+        <span class="muted">
           In <span class="mono">secrets/hosts/</span> but not approved here (they came with a pull or an edit): nothing is encrypted for them until you approve one, and
           Re-encrypt writes back the approved key of a machine that has one.
         </span>
         <ul class="plain">
           {#each st.proposed as m (m.name)}
             <li>
-              <span>{m.name}</span>
-              {#if m.error}<span class="error-text small">{m.error}</span>{:else}<span class="mono small">{m.fingerprint}</span>{/if}
-              {#if keyed.has(m.name)}<span class="badge">differs from its approved key</span>{/if}
+              <b>{m.name}</b>
+              {#if m.error}<span class="error-text">{m.error}</span>{:else}<span class="mono">{m.fingerprint}</span>{/if}
+              {#if keyed.has(m.name)}<span class="badge warn">differs from its approved key</span>{/if}
               <span class="spacer"></span>
               {#if !m.error}<button class="small" onclick={() => approve(m)} disabled={!!busy}>Approve</button>{/if}
             </li>
@@ -189,10 +190,10 @@
       </div>
     {/if}
     {#if keyFor}
-      <form class="sub" onsubmit={saveKey}>
+      <form class="sub" onsubmit={saveKey} use:frame={{ kind: 'dash', animate: true }}>
         <label class="label" for="machine-key">SSH host key of {keyFor}</label>
         <textarea id="machine-key" class="mono" rows="2" bind:value={keyText} placeholder="ssh-ed25519 AAAA… root@{keyFor}" spellcheck="false" autocomplete="off" required></textarea>
-        <span class="muted small">
+        <span class="muted">
           On the machine: <span class="mono">cat /etc/ssh/ssh_host_ed25519_key.pub</span>. From here, <span class="mono">ssh-keyscan -t ed25519 {keyFor}</span> works too, but compare its
           fingerprint with the machine's (<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>): whoever holds this key gets the secrets.
         </span>
@@ -208,11 +209,11 @@
       <div class="file">
         <div class="file-head">
           <strong>{f.host ? `${f.host} only` : 'Every machine with a key'}</strong>
-          <span class="mono small muted">{f.path}</span>
+          <span class="mono muted">{f.path}</span>
           {#if f.locked}<span class="badge err" title="Encrypted without this server's key: restore the key it was made with">this server cannot open it</span>{/if}
           {#if f.host && !keyed.has(f.host)}<span class="badge" title="Add its key, or delete the file">no key for {f.host}</span>{/if}
         </div>
-        {#if f.error}<p class="error-text small">{f.error}</p>{/if}
+        {#if f.error}<p class="error-text">{f.error}</p>{/if}
         <ul>
           {#each f.names as n (n)}
             {@const k = `${f.host}/${n}`}
@@ -235,7 +236,7 @@
       <p class="muted">No secrets yet.</p>
     {/each}
 
-    <form class="sub" onsubmit={saveSecret}>
+    <form class="sub" onsubmit={saveSecret} use:frame={'dash'}>
       <div class="grid">
         <div class="field">
           <label class="label" for="secret-for">For</label>
@@ -247,7 +248,7 @@
         <div class="field">
           <label class="label" for="secret-name">Name</label>
           <input id="secret-name" class="mono" bind:value={name} placeholder="wifi-password" spellcheck="false" autocomplete="off" aria-describedby="secret-name-hint" />
-          <span class="small" class:error-text={!!nameProblem} class:muted={!nameProblem} id="secret-name-hint">{nameProblem || `On the machine: /run/secrets/${name.trim() || '<name>'}`}</span>
+          <span class:error-text={!!nameProblem} class:muted={!nameProblem} id="secret-name-hint">{nameProblem || `On the machine: /run/secrets/${name.trim() || '<name>'}`}</span>
         </div>
       </div>
       <label class="label" for="secret-value">Value</label>
@@ -258,9 +259,9 @@
     </form>
 
     <h3>Setup</h3>
-    <form class="sub" onsubmit={saveComin}>
+    <form class="setup" onsubmit={saveComin}>
       <strong>Private repository</strong>
-      <span class="muted small">
+      <span class="muted">
         comin on each machine pulls with a read-only Forgejo token, kept as <span class="mono">{cominSecret}</span> for every machine with a key
         ({common?.names.includes(cominSecret) ? 'saved' : 'not set'}). In Forgejo: <strong>Settings → Applications → Generate new token</strong>, as a user who can read the repository,
         with the <strong>repository</strong> permission <strong>Read</strong>. The starter fleet's <span class="mono">modules/common.nix</span> points comin at it; a machine needs it
@@ -271,9 +272,9 @@
         <button type="submit" disabled={!comin.trim() || !!busy}>{busy === 'comin' ? 'Saving…' : 'Save token'}</button>
       </div>
     </form>
-    <div class="sub">
+    <div class="setup">
       <strong>Report tokens</strong>
-      <span class="muted small">
+      <span class="muted">
         Each machine's own report token (Deployments) as its secret <span class="mono">{reportSecret}</span>, instead of copying it over SSH; the starter fleet's
         <span class="mono">modules/secrets.nix</span> points the report hook at it. <strong>New tokens for every machine</strong> stores the new ones again for the machines that have theirs here.
         {#if st.machines.length}Stored for: {st.machines.filter((m) => hasReportToken(m.name)).map((m) => m.name).join(', ') || 'none yet'}.{/if}
@@ -283,123 +284,90 @@
       </div>
     </div>
   {/if}
-  {#if error && st}<p class="error" role="alert">{error}</p>{/if}
+  {#if error && st}<p class="error-text" role="alert">{error}</p>{/if}
 </section>
 
 <style>
-  .block {
-    display: grid;
-    min-width: 0;
-    gap: 12px;
-    padding: var(--s4) var(--s5) var(--s5);
+  /* One blank row between blocks; a heading sits right on what it names. */
+  .block > * + * {
+    margin-top: var(--lh);
   }
-  h2 {
-    font-size: var(--fs-lg);
+  .block > h2 + p,
+  .block > h3 + * {
+    margin-top: 0;
   }
-  h3 {
-    margin: 8px 0 0;
-    font-size: var(--fs-md);
-  }
-  p {
-    margin: 0;
-    line-height: 1.55;
+  .block > h3 {
+    margin-top: calc(var(--lh) * 2);
   }
   .wrap {
     overflow-wrap: anywhere;
   }
   .field,
-  .sub {
+  .sub,
+  .setup {
     display: grid;
-    gap: 4px;
+    align-content: start;
     min-width: 0;
   }
-  .sub {
-    gap: 8px;
-    padding: var(--s3);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+  .sub > * + *,
+  .setup > .row {
+    margin-top: var(--lh);
+  }
+  .sub > :is(.sr-only, label) + * {
+    margin-top: 0;
+  }
+  textarea[rows] {
+    height: auto;
   }
   .grid {
     display: grid;
-    grid-template-columns: minmax(160px, 1fr) minmax(200px, 2fr);
-    gap: var(--s2) var(--s3);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  th,
-  td {
-    padding: 6px 8px 6px 0;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: middle;
-  }
-  th {
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    font-weight: 500;
+    grid-template-columns: minmax(28ch, 1fr) minmax(28ch, 2fr);
+    gap: var(--lh) 2ch;
   }
   td .badge {
-    margin-left: 8px;
+    margin-left: 2ch;
   }
   .act {
+    width: 1%;
     text-align: right;
     white-space: nowrap;
   }
-  .file {
-    display: grid;
-    gap: 4px;
+  .file + .file {
+    margin-top: var(--lh);
   }
   .file-head {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px;
+    gap: 0 2ch;
   }
   .file ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid var(--border);
+    margin-top: var(--lh);
   }
-  .file li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .plain {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
+  .file li,
   .plain li {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
+    align-items: baseline;
+    gap: 0 2ch;
+    padding: 0 1ch;
+  }
+  .file li:hover {
+    background: var(--bg-hover);
+  }
+  .plain {
+    margin-top: var(--lh);
   }
   .value {
     flex: 1;
     min-width: 0;
-    resize: vertical;
   }
   .row,
   .actions {
     display: flex;
-    gap: 8px;
+    gap: 2ch;
   }
   .row input {
     flex: 1;
     min-width: 0;
-  }
-  .warn {
-    color: var(--yellow);
-  }
-  .error {
-    color: var(--red);
   }
 </style>

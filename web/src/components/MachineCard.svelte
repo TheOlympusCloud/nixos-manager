@@ -13,34 +13,34 @@
 </script>
 
 <div class="mc" class:err={!!host.error}>
+  <!-- A framed container puts the name and the system on its frame line and hides this row (MachinesView). -->
   <div class="top">
-    <span class="dot {status}" aria-hidden="true"></span>
     <span class="name" title={host.name}>{host.name}</span>
-    {#if host.system}<span class="badge arch mono" title={host.system}>{arch(host.system)}</span>{/if}
+    {#if host.system}<span class="arch mono" title={host.system}>{arch(host.system)}</span>{/if}
   </div>
   {#if host.error}
     <p class="errline" title={host.error}>{firstLine(host.error)}</p>
-    <span class="badge err foot-badge"><Icon name="alert" size={12} />Does not evaluate</span>
+    <span class="badge err foot-badge">Does not evaluate</span>
   {:else}
     <div class="meta">
-      NixOS {host.release}{#if host.hostName && host.hostName !== host.name}<span class="sep">·</span>{host.hostName}{/if}
-    </div>
-    <div class="counts num">
-      <span title="Packages"><Icon name="package" size={13} />{host.packages.length}</span>
-      <span title="Services, programs and other features"><Icon name="services" size={13} />{host.features.length}</span>
-      <span title="Users"><Icon name="users" size={13} />{host.users.length}</span>
-    </div>
-    <div class="foot">
+      <span class="dot {status}" aria-hidden="true"></span>
+      <span class="grow">NixOS {host.release}{#if host.hostName && host.hostName !== host.name}<span class="sep">·</span>{host.hostName}{/if}</span>
       <span class="avatars">
         {#each homes as u (u.name)}<span class="av" title="{u.name} (home-manager)">{initial(u.name)}</span>{/each}
       </span>
-      <span class="spacer"></span>
+    </div>
+    <div class="counts num">
+      <span title="Packages"><Icon name="package" /> {host.packages.length}</span>
+      <span title="Services, programs and other features"><Icon name="services" /> {host.features.length}</span>
+      <span title="Users"><Icon name="users" /> {host.users.length}</span>
+    </div>
+    <div class="foot">
       {#if pending}
         <span class="badge busy">Re-evaluating</span>
       {:else if host.managedFile}
-        <span class="badge ok" title="Packages and options can be changed by clicking ({host.managedFile})">Editable here</span>
+        <span class="badge ok here" title="Packages and options can be changed by clicking ({host.managedFile})">Editable here</span>
       {:else}
-        <span class="badge" title="It does not load a managed.json, so it is changed in its Nix files">Code only</span>
+        <span class="badge code" title="It does not load a managed.json, so it is changed in its Nix files">Code only</span>
       {/if}
     </div>
   {/if}
@@ -50,16 +50,13 @@
   .mc {
     display: flex;
     flex-direction: column;
-    gap: 6px;
     height: 100%;
-    padding: 12px 14px;
     color: var(--fg);
     text-align: left;
   }
   .top {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: 2ch;
     min-width: 0;
   }
   .name {
@@ -67,64 +64,58 @@
     min-width: 0;
     overflow: hidden;
     color: var(--fg-strong);
-    font-size: var(--fs-lg);
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .arch {
-    font-size: 10.5px;
+    color: var(--fg-muted);
   }
   .meta {
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
+    display: flex;
+    gap: 1ch;
+    min-width: 0;
+    white-space: nowrap;
   }
   .sep {
-    margin: 0 5px;
-  }
-  .counts {
-    display: flex;
-    gap: 14px;
-    color: var(--fg);
-    font-size: var(--fs-sm);
-  }
-  .counts span {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-  .counts :global(svg) {
-    color: var(--fg-muted);
-  }
-  .foot {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: auto;
+    margin: 0 1ch;
   }
   .avatars {
     display: flex;
-    padding-right: 4px; /* the last avatar's negative margin */
+    gap: 1ch;
   }
+  /* A home-manager user: its initial in reverse video. */
   .av {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    margin-right: -4px;
-    color: var(--fg-strong);
-    font-size: 10.5px;
-    font-weight: 600;
-    background: color-mix(in srgb, var(--g-programs) 40%, var(--bg-active));
-    border: 2px solid var(--bg-raised);
-    border-radius: 50%;
+    padding: 0 1ch;
+    color: var(--on-accent);
+    font-weight: 700;
+    background: var(--accent);
+  }
+  .counts {
+    display: flex;
+    gap: 2ch;
+    white-space: nowrap;
+  }
+  .foot {
+    display: flex;
+    gap: 2ch;
+    margin-top: auto;
+  }
+  .badge.here::before {
+    content: '✎ ';
+  }
+  .badge.code {
+    padding: 0;
+    color: var(--fg-muted);
+    background: none;
+  }
+  .badge.code::before {
+    content: 'λ ';
   }
   .errline {
     display: -webkit-box;
     overflow: hidden;
-    color: color-mix(in srgb, var(--red) 80%, var(--fg-strong));
-    font: 11.5px/1.45 var(--mono);
+    color: var(--red);
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;

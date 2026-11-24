@@ -3,6 +3,7 @@
   import { fleet, managedValue, setOption, unsetOption, useValues, valueOf } from '../../lib/fleet.svelte'
   import { codeLink } from '../../lib/router.svelte'
   import { effective } from '../../lib/values'
+  import { frame } from '../../lib/ascii'
   import Icon from '../Icon.svelte'
   import SourceTag from '../SourceTag.svelte'
 
@@ -47,8 +48,8 @@
 </script>
 
 <div class="grid">
-  <section class="card block">
-    <h2><Icon name="shield" size={16} />Firewall</h2>
+  <section class="card block" use:frame={{ title: 'Firewall' }}>
+    <h2 class="sr-only"><Icon name="shield" /> Firewall</h2>
     <p class:off={!host.ports.firewall} class="fw">{host.ports.firewall ? 'On: only the ports below accept connections.' : 'Off: every port is reachable.'}</p>
     <div class="ports">
       <span class="label">TCP</span>
@@ -59,21 +60,21 @@
     <p class="muted small">Every open port as evaluated, whoever opened it: services with <span class="mono">openFirewall</span>, hand-written Nix, or the list below.</p>
   </section>
 
-  <section class="card block">
+  <section class="card block" use:frame={{ title: 'Allowed TCP ports' }}>
     <div class="b-head">
-      <h2><Icon name="globe" size={16} />Allowed TCP ports</h2>
+      <h2 class="sr-only"><Icon name="globe" /> Allowed TCP ports</h2>
+      <p class="muted small opt"><span class="mono">{name}</span></p>
       {#if eff?.state === 'value'}<SourceTag source={eff.source} pending={eff.pending} />{/if}
     </div>
-    <p class="muted small"><span class="mono">{name}</span></p>
     {#if vals.error}
       <p class="error-text small" role="alert">{vals.error}</p>
     {:else if !eff}
-      <div class="skels" aria-busy="true"><span class="skel" style:width="55%"></span><span class="skel" style:width="35%"></span></div>
+      <div class="skels" aria-busy="true"><span class="skel" style:width="30ch"></span><span class="skel" style:width="20ch"></span></div>
     {:else}
       <div class="chips">
         {#each ports as p (p)}
           <span class="chip mono num"
-            >{p}{#if canEdit}<button class="x" aria-label="Close port {p}" title="Close {p}" disabled={busy} onclick={() => save(ports.filter((x) => x !== p), `Closed TCP port ${p} on ${host.name}`)}><Icon name="x" size={11} /></button>{/if}</span>
+            >{p}{#if canEdit}<button class="x icon" aria-label="Close port {p}" title="Close {p}" disabled={busy} onclick={() => save(ports.filter((x) => x !== p), `Closed TCP port ${p} on ${host.name}`)}><Icon name="x" /></button>{/if}</span>
         {:else}
           <span class="muted small">No TCP ports in this list.</span>
         {/each}
@@ -84,6 +85,7 @@
         <p class="muted small note">Reset here: the list that applies now shows once {host.name} is evaluated again.</p>
       {:else if editable}
         <form class="add" onsubmit={add}>
+          <b class="prompt" aria-hidden="true">›</b>
           <input class="mono num" type="number" min="1" max="65535" placeholder="Port, e.g. 8080" aria-label="TCP port to open" bind:value={port} aria-invalid={!!portProblem} />
           <button type="submit" disabled={port == null || !!portProblem || busy}>Open port</button>
           {#if eff.state === 'value' && eff.source.kind === 'here'}<button type="button" class="ghost" disabled={busy} onclick={reset} title="Remove the list from {host.managedFile}">Reset</button>{/if}
@@ -99,93 +101,72 @@
 
 <section class="section">
   <h2>File systems</h2>
-  <div class="table-wrap">
-    <table class="data">
-      <thead><tr><th>Mount point</th><th>Type</th><th>Device</th></tr></thead>
-      <tbody>
-        {#each host.fileSystems as fs (fs.mountPoint)}
-          <tr><td class="mono strong">{fs.mountPoint}</td><td>{fs.fsType}</td><td class="mono muted">{fs.device}</td></tr>
-        {:else}
-          <tr><td colspan="3" class="muted">No file systems declared.</td></tr>
-        {/each}
-      </tbody>
-    </table>
-  </div>
+  <table class="data">
+    <thead><tr><th>Mount point</th><th>Type</th><th>Device</th></tr></thead>
+    <tbody>
+      {#each host.fileSystems as fs (fs.mountPoint)}
+        <tr><td class="mono strong">{fs.mountPoint}</td><td>{fs.fsType}</td><td class="mono muted">{fs.device}</td></tr>
+      {:else}
+        <tr><td colspan="3" class="muted">No file systems declared.</td></tr>
+      {/each}
+    </tbody>
+  </table>
 </section>
 
 <style>
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    gap: var(--s3);
+    grid-template-columns: repeat(auto-fit, minmax(48ch, 1fr));
+    gap: var(--lh) 2ch;
   }
   .block {
     display: grid;
     align-content: start;
-    gap: 12px;
-    padding: 14px 16px;
+    gap: var(--lh);
   }
   .b-head {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 0 2ch;
   }
-  h2 {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--fs-md);
+  .opt {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
-  h2 :global(svg) {
-    color: var(--fg-muted);
-  }
-  .block > .muted.small:first-of-type {
-    margin-top: -6px;
-  }
+  /* The state is a glyph and a word. */
   .fw {
     color: var(--green);
+  }
+  .fw::before {
+    content: '● ';
   }
   .fw.off {
     color: var(--yellow);
   }
+  .fw.off::before {
+    content: '▲ ';
+  }
   .ports {
     display: grid;
-    grid-template-columns: 44px 1fr;
-    gap: 10px;
-    align-items: center;
-  }
-  .skels {
-    display: grid;
-    gap: 10px;
+    grid-template-columns: 4ch 1fr;
+    gap: 0 2ch;
   }
   .add {
     display: flex;
-    gap: 8px;
+    align-items: baseline;
+    gap: 0 2ch;
+  }
+  .add .prompt {
+    margin-right: -1ch;
   }
   .add input {
-    width: 180px;
+    width: 20ch;
   }
   .problem {
     color: var(--red);
-    font-size: var(--fs-sm);
-  }
-  .note {
-    line-height: 1.5;
-  }
-  .table-wrap {
-    overflow: clip;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
   }
   table.data th {
-    top: 41px;
-  }
-  tbody tr:last-child td {
-    border-bottom: 0;
-  }
-  .strong {
-    color: var(--fg-strong);
+    top: calc(var(--lh) * 2); /* below the machine tabs */
   }
 </style>

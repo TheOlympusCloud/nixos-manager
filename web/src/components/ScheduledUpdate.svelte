@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type UpdateSchedule, type UpdateStatus } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { plural } from '../lib/format'
   import { fetchModelDiff, type ModelDiff } from '../lib/modeldiff'
   import { app, refreshJobs, refreshStatus } from '../lib/state.svelte'
@@ -128,29 +129,29 @@
   })
 </script>
 
-<section class="section" aria-labelledby="sched-head">
+<section class="section" aria-labelledby="sched-head" use:frame={{ title: 'Scheduled update' }}>
   <div class="head">
-    <h2 id="sched-head">Scheduled update</h2>
-    <span class="muted small">Every input, updated on the <span class="mono">flake-update</span> branch and checked. Nothing reaches the machines until you merge it.</span>
+    <h2 id="sched-head" class="sr-only">Scheduled update</h2>
+    <span class="muted">Every input, updated on the <span class="mono">flake-update</span> branch and checked. Nothing reaches the machines until you merge it.</span>
     <span class="spacer"></span>
     <button onclick={run} disabled={!st || running || !!busy} title="Update every input now, on top of what the machines deploy, push it to flake-update and check it">
-      <Icon name="refresh" size={14} />{busy === 'run' ? 'Starting…' : 'Update now'}
+      <Icon name="refresh" /> {busy === 'run' ? 'Starting…' : 'Update now'}
     </button>
   </div>
   {#if st}
-    <div class="card body">
+    <div class="body">
       <div class="schedule">
         <Switch checked={st.schedule.enabled} label="Update the inputs on a schedule" busy={busy === 'schedule'} disabled={!!busy && busy !== 'schedule'} onchange={(on) => schedule({ enabled: on })} />
         <label class="sr-only" for="sched-day">Day</label>
         <select id="sched-day" value={String(st.schedule.day)} disabled={!st.schedule.enabled || !!busy} onchange={(e) => schedule({ day: Number(e.currentTarget.value) })}>
           {#each scheduleDays as d (d.value)}<option value={String(d.value)}>{d.label}</option>{/each}
         </select>
-        <span>at</span>
+        <span class="muted">at</span>
         <label class="sr-only" for="sched-hour">Hour</label>
         <select id="sched-hour" value={String(st.schedule.hour)} disabled={!st.schedule.enabled || !!busy} onchange={(e) => schedule({ hour: Number(e.currentTarget.value) })}>
           {#each hours as h (h)}<option value={String(h)}>{hourText(h)}</option>{/each}
         </select>
-        <span class="muted small">
+        <span class="muted">
           {st.zone}, the server's clock{#if st.next}; next {new Date(st.next).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{/if}
         </span>
       </div>
@@ -158,21 +159,21 @@
       {#if up && line}
         <div class="latest tone-{line.tone}" aria-live="polite">
           <div class="line">
-            <span class="dot"></span>
+            <span class="dot {line.tone === 'bad' ? 'err' : line.tone === 'muted' ? 'off' : line.tone}"></span>
             <strong>{line.title}</strong>
-            <span class="muted small">{up.scheduled ? 'Scheduled' : 'Started by hand'} {ago(up.started)}{#if up.commit}&nbsp;· <span class="mono">{up.commit.slice(0, 7)}</span> on flake-update{/if}</span>
+            <span class="muted">{up.scheduled ? 'Scheduled' : 'Started by hand'} {ago(up.started)}{#if up.commit}&nbsp;· <span class="mono">{up.commit.slice(0, 7)}</span> on flake-update{/if}</span>
           </div>
           {#if line.detail}
-            {#if up.state === 'error'}<pre class="detail mono small">{line.detail}</pre>{:else}<p class="detail small">{line.detail}</p>{/if}
+            {#if up.state === 'error'}<pre class="detail mono">{line.detail}</pre>{:else}<p class="detail">{line.detail}</p>{/if}
           {/if}
           <div class="actions">
             {#if up.state === 'ready' && !st.outdated}
-              <button class="primary" onclick={merge} disabled={!!busy}><Icon name="merge" size={14} />{busy === 'merge' ? 'Merging…' : `Merge into ${up.branch}`}</button>
+              <button class="primary" onclick={merge} disabled={!!busy}><Icon name="merge" /> {busy === 'merge' ? 'Merging…' : `Merge into ${up.branch}`}</button>
             {/if}
             {#if up.state === 'ready' || up.state === 'failed' || up.state === 'error'}
-              <button class="ghost" onclick={discard} disabled={!!busy}><Icon name="trash" size={14} />Discard</button>
+              <button onclick={discard} disabled={!!busy}><Icon name="trash" /> Discard</button>
             {/if}
-            {#if logJob}<button class="link small" onclick={() => (logOpen = !logOpen)} aria-expanded={logOpen}>{logOpen ? 'Hide the log' : 'Show the log'}</button>{/if}
+            {#if logJob}<button class="link" onclick={() => (logOpen = !logOpen)} aria-expanded={logOpen}>{logOpen ? 'Hide the log' : 'Show the log'}</button>{/if}
           </div>
           {#if logOpen && logJob}<div class="log">{#key logJob}<JobLog jobId={logJob} compact />{/key}</div>{/if}
           {#if up.commit && (up.state === 'ready' || up.state === 'failed')}
@@ -180,80 +181,50 @@
           {/if}
         </div>
       {:else}
-        <p class="muted small">No update has run yet.</p>
+        <p class="muted">No update has run yet.</p>
       {/if}
     </div>
   {/if}
-  {#if error}<p class="error-text small" role="alert">{error}</p>{/if}
+  {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 </section>
 
 <style>
-  .head {
+  .head,
+  .schedule,
+  .line,
+  .actions {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 10px;
-    margin-bottom: 10px;
-  }
-  .head h2 {
-    font-size: var(--fs-lg);
-  }
-  .body {
-    display: grid;
-    gap: var(--s3);
-    padding: var(--s3) var(--s4);
+    gap: 0 2ch;
   }
   .schedule {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+    gap: 0 1ch;
   }
   .schedule select {
     width: auto;
   }
+  .body,
   .latest {
     display: grid;
-    gap: 8px;
-    padding-top: var(--s3);
-    border-top: 1px solid var(--border);
+    gap: var(--lh) 0;
+  }
+  .body,
+  .error-text {
+    margin-top: var(--lh);
   }
   .line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
-  .tone-ok {
-    --c: var(--green);
-  }
-  .tone-busy {
-    --c: var(--accent);
-  }
-  .tone-bad {
-    --c: var(--red);
-  }
-  .detail {
-    margin: 0;
-    line-height: 1.5;
+    gap: 0 1ch;
   }
   pre.detail {
-    max-height: 160px;
+    max-height: calc(var(--lh) * 9);
     overflow: auto;
     white-space: pre-wrap;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
   }
   .log {
     display: flex;
     flex-direction: column;
-    height: 240px;
+    height: calc(var(--lh) * 12);
     overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
   }
 </style>

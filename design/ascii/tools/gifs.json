@@ -1,0 +1,37 @@
+[
+ {
+  "name": "gif-boot",
+  "hash": "boot",
+  "query": "hold",
+  "frames": 84,
+  "gifw": 960
+ },
+ {
+  "name": "gif-intro",
+  "hash": "intro",
+  "frames": 160,
+  "gifw": 960,
+  "each": "(f)=>{const v=document.getElementById('view');const max=v.scrollHeight-innerHeight*2.2;v.scrollTop=Math.max(0,(f-10)/148)*max}"
+ },
+ {
+  "name": "gif-fleet",
+  "hash": "fleet",
+  "frames": 96,
+  "gifw": 960,
+  "each": "(f)=>{const c=document.getElementById('canvas');const over=(s)=>c.querySelector(s).dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));if(f===34)over('[data-node=homeserver]');if(f===56)over('[data-node=tailscale]');if(f===74)c.querySelector('[data-node=tailscale]').click()}"
+ },
+ {
+  "name": "gif-console",
+  "hash": "machines",
+  "frames": 150,
+  "gifw": 960,
+  "each": "(f)=>{const go=(h)=>location.hash=h;if(f===22)go('#/machines/workstation');if(f===50)go('#/machines/workstation/essentials');if(f===66)go('#/machines/workstation/packages');if(f===84)go('#/health');if(f===108)go('#/deployments');if(f===134)U.theme('print')}"
+ },
+ {
+  "name": "gif-overlays",
+  "hash": "changes",
+  "frames": 130,
+  "gifw": 960,
+  "each": "(f)=>{if(f===10)U.palette();if(f>=24&&f<27){const i=document.querySelector('.palette input');i.value='pack'.slice(0,(f-23)*2);i.dispatchEvent(new Event('input'))}if(f===44)U.closeAll();if(f===48)U.demo.danger();if(f===74)U.closeAll();if(f===78)U.demo.busy();if(f===86)U.demo.error();if(f===94)U.demo.saved();if(f===112)U.wizard(1)}"
+ }
+]

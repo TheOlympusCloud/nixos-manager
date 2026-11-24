@@ -36,4 +36,9 @@
   .code :global(.cm-mergeView .cm-editor) {
     min-height: 0;
   }
+  /* The two sides of a compare stand one filled column apart. */
+  .code :global(.cm-mergeViewEditors) {
+    gap: 0 1ch;
+    background: var(--bg-hover);
+  }
 </style>

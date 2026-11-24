@@ -19,6 +19,7 @@
   import { link, machineLink, replace, route } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { ago } from '../lib/util'
+  import { bigText, flash, frame, ink } from '../lib/ascii'
 
   let alive = true
   onMount(() => () => (alive = false))
@@ -127,8 +128,7 @@
       const el = doc?.querySelector<HTMLElement>('#' + CSS.escape(fileAnchor(path)))
       if (!el) return
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      el.classList.add('flash')
-      setTimeout(() => el.classList.remove('flash'), 900)
+      flash(el, path) // reverse video for two ticks of the clock
     })
   })
 
@@ -144,10 +144,10 @@
 </script>
 
 <div class="cv">
-  <aside class="side">
-    <div class="side-tabs" role="tablist" aria-label="Commit or checks">
-      <button role="tab" aria-selected={side === 'commit'} class:on={side === 'commit'} onclick={() => (side = 'commit')}>Commit {#if count}<span class="n num">{count}</span>{/if}</button>
-      <button role="tab" aria-selected={side === 'checks'} class:on={side === 'checks'} onclick={() => (side = 'checks')}>Checks</button>
+  <aside class="side" use:frame={{ title: side === 'commit' ? 'Commit' : 'Checks' }}>
+    <div class="tabs" role="tablist" aria-label="Commit or checks" use:ink={side}>
+      <button class="bare" role="tab" aria-selected={side === 'commit'} class:on={side === 'commit'} onclick={() => (side = 'commit')}>Commit {#if count}<small class="num">{count}</small>{/if}</button>
+      <button class="bare" role="tab" aria-selected={side === 'checks'} class:on={side === 'checks'} onclick={() => (side = 'checks')}>Checks</button>
     </div>
     <div class="side-body" hidden={side !== 'commit'}><ChangesPanel /></div>
     <div class="side-body" hidden={side !== 'checks'}><ChecksPanel visible={side === 'checks'} /></div>
@@ -156,13 +156,13 @@
   <section class="pane" aria-label="Changes">
     {#if job}
       <div class="log-bar">
-        <button class="ghost" onclick={() => (app.inspect = null)}><Icon name="left" size={14} />Back to the changes</button>
+        <button class="ghost" onclick={() => (app.inspect = null)}><Icon name="left" /> Back to the changes</button>
       </div>
-      <div class="log">{#key job}<JobLog jobId={job} />{/key}</div>
+      <div class="log" use:frame={'square'}>{#key job}<JobLog jobId={job} />{/key}</div>
     {:else}
       <div class="doc" bind:this={doc}>
         <header class="doc-head">
-          <h1>Changes</h1>
+          <h1 class="big" aria-label="Changes" use:bigText={'Changes'}></h1>
           <p class="sub num">
             {#if count}
               {plural(count, 'changed file')}, {staged} staged{#if files}<span class="sep">·</span><span class="a">+{adds}</span>&nbsp;<span class="r">−{dels}</span>&nbsp;lines{/if}
@@ -176,7 +176,7 @@
           {@const promoteWhy = count ? 'Commit or discard the changes first.' : unpushed ? `Push first: ${trial.host} has not tried ${plural(unpushed, 'commit')} yet.` : ''}
           <section class="block" aria-labelledby="ch-trial">
             <h2 id="ch-trial">Trying on {trial.host}</h2>
-            <div class="trial">
+            <div class="trial" use:frame>
               <p class="muted small">
                 What is pushed to <span class="mono">{trial.testing}</span> deploys on {trial.host} only, with switch-to-configuration test: a reboot brings back what
                 <span class="mono">{trial.main}</span> gave it.
@@ -201,7 +201,7 @@
         <section class="block" aria-labelledby="ch-machines">
           <h2 id="ch-machines">On the machines</h2>
           {#if !count}
-            <p class="calm"><Icon name="tick" size={15} />No machine changes.</p>
+            <p class="calm"><Icon name="tick" /> No machine changes.</p>
           {:else if diffError && !diff}
             <p class="error-text">{diffError}</p>
           {:else}
@@ -214,9 +214,9 @@
           {#if filesError}
             <p class="error-text">{filesError}</p>
           {:else if files === null}
-            <div class="skel-files" aria-hidden="true">{#each [0, 1, 2] as k (k)}<span class="skel" style:width="{72 - k * 14}%"></span>{/each}</div>
+            <div class="skel-files" aria-hidden="true">{#each [0, 1, 2] as k (k)}<span class="skel" style:width="{60 - k * 12}ch"></span>{/each}</div>
           {:else if !files.length}
-            <div class="clean">
+            <div class="clean" use:frame>
               <p>No file differs from the last commit.</p>
               {#if last}
                 <p class="muted small">
@@ -234,69 +234,42 @@
 </div>
 
 <style>
+  /* The side (commit or checks) and the document, like the prototype's .split. */
   .cv {
-    display: grid;
-    grid-template-columns: 340px 1fr;
+    display: flex;
+    gap: 1ch;
     height: 100%;
+    padding: var(--lh) 1ch;
+  }
+  .side {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    width: 44ch;
+    min-height: 0;
   }
   /* Phones: the side panel above the content, one scroll for both. */
   @media (max-width: 760px) {
     .cv {
-      grid-template-columns: minmax(0, 1fr);
-      align-content: start;
+      flex-direction: column;
       overflow-y: auto;
     }
     .side {
-      border-right: 0;
-      border-bottom: 1px solid var(--border);
+      width: auto;
     }
   }
-  .side {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    background: var(--bg-side);
-    border-right: 1px solid var(--border);
-  }
-  .side-tabs {
-    display: flex;
-    flex: none;
-    gap: 4px;
-    padding: 6px 8px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .side-tabs button {
-    height: 36px;
-    color: var(--fg-muted);
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-  }
-  .side-tabs button:hover:not(:disabled) {
+  /* Tabs are words, not [ buttons ]: strong under the pointer. */
+  .tabs > button:hover:not(:disabled) {
     color: var(--fg-strong);
     background: none;
-  }
-  .side-tabs button.on {
-    color: var(--fg-strong);
-    border-bottom-color: var(--accent);
-  }
-  .n {
-    padding: 0 6px;
-    font-size: var(--fs-xs);
-    line-height: 17px;
-    background: var(--bg-active);
-    border-radius: 9px;
   }
   .side-body {
     flex: 1;
     min-height: 0;
   }
-  .side-body[hidden] {
-    display: none;
-  }
   .pane {
     display: flex;
+    flex: 1;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
@@ -305,25 +278,19 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: var(--s5) var(--s5) var(--s6);
   }
   .doc-head {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 6px 14px;
-    max-width: 1180px;
-    margin-bottom: var(--s4);
-  }
-  .doc-head h1 {
-    font-size: var(--fs-xl);
-    letter-spacing: -0.01em;
+    gap: 0 3ch;
+    margin-bottom: var(--lh);
   }
   .sub {
     color: var(--fg-muted);
   }
   .sep {
-    margin: 0 6px;
+    margin: 0 1ch;
   }
   .a {
     color: var(--green);
@@ -332,79 +299,48 @@
     color: var(--red);
   }
   .block {
-    max-width: 1180px;
+    max-width: 140ch;
   }
   .block + .block {
-    margin-top: var(--s5);
+    margin-top: var(--lh);
   }
   .block h2 {
-    margin-bottom: 10px;
-    font-size: var(--fs-lg);
+    margin-bottom: var(--lh);
   }
   .block :global(.diff) {
     padding: 0;
   }
-  .skel-files {
-    display: grid;
-    gap: 12px;
-    padding: 16px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-  }
   .trial {
     display: grid;
-    gap: 10px;
-    padding: 14px 16px;
-    background: color-mix(in srgb, var(--purple) 5%, var(--surface));
-    border: 1px solid color-mix(in srgb, var(--purple) 30%, var(--border));
-    border-radius: var(--r-lg);
-  }
-  .trial p {
-    margin: 0;
+    gap: var(--lh);
   }
   .trial-state {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 10px;
+    align-items: baseline;
+    gap: 0 2ch;
   }
   .trial .row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 0 2ch;
   }
   .trial pre {
-    margin: 0;
-    font: 12px/1.5 var(--mono);
+    padding: 0 1ch;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    background: var(--bg-input);
   }
   .calm {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: 1ch;
   }
-  .calm :global(svg) {
+  .calm :global(.ic) {
     color: var(--green);
   }
-  .clean {
-    display: grid;
-    gap: 6px;
-    padding: 14px 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
-  }
   .log-bar {
-    display: flex;
     flex: none;
-    align-items: center;
-    min-height: 40px;
-    padding: 4px 8px;
-    background: var(--bg-side);
-    border-bottom: 1px solid var(--border);
+    margin-bottom: var(--lh);
   }
   .log {
     display: flex;

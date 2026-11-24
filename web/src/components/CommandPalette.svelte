@@ -6,12 +6,14 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { api, type OptionInfo } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { openPackageSearch } from '../lib/dialogs.svelte'
   import { fleet, healthy } from '../lib/fleet.svelte'
   import { highlight, rank, type Match } from '../lib/palette'
   import { pullOrPush } from '../lib/repo.svelte'
   import { codeLink, go, link, machineLink, type View } from '../lib/router.svelte'
   import { app, checkStaged, logout, startJob } from '../lib/state.svelte'
+  import Dither from './cell/Dither.svelte'
   import Icon, { type IconName } from './Icon.svelte'
 
   type Item = { id: string; group: string; label: string; detail?: string; keywords?: string; icon: IconName; mono?: boolean; run: () => void }
@@ -196,11 +198,13 @@
   }
 </script>
 
-<dialog bind:this={dialog} class="palette" aria-label="Command palette" onclose={() => palette.open && close()} onclick={(e) => e.target === dialog && close()}>
+<dialog bind:this={dialog} class="palette screen" aria-label="Command palette" onclose={() => palette.open && close()} onclick={(e) => e.target === dialog && close()}>
+  <Dither />
   {#if palette.open}
-    <div class="box">
+    <!-- The frame's foot is the old key hints line (it was aria-hidden too). -->
+    <div class="box modal" use:frame={{ kind: 'double', shadow: true, animate: true, tag: 'Esc', foot: `↑↓ move · Enter open · Esc close · Options from ${optionHost || 'the first machine'}` }}>
       <div class="search">
-        <Icon name="search" size={16} />
+        <b class="prompt">λ ›</b>
         <input
           bind:this={input}
           bind:value={query}
@@ -214,8 +218,8 @@
           placeholder="Search machines, packages, options, files, actions…"
           spellcheck="false"
           autocomplete="off" />
-        <kbd>Esc</kbd>
       </div>
+      <div class="rule"></div>
       <ul class="results" id="pal-list" role="listbox" aria-label="Results" bind:this={list}>
         {#each results as r, i (r.group + r.id)}
           {#if i === 0 || results[i - 1].group !== r.group}
@@ -223,7 +227,7 @@
           {/if}
           <!-- svelte-ignore a11y_click_events_have_key_events (the input handles the keys: aria-activedescendant) -->
           <li id="pal-{i}" class="opt" role="option" aria-selected={i === cursor} onmousemove={() => (cursor = i)} onclick={() => pick(r)}>
-            <span class="ico"><Icon name={r.icon} size={15} /></span>
+            <span class="ico"><Icon name={r.icon} /></span>
             <span class="label" class:mono={r.mono}>
               {#each highlight(r.label, r.match.hits) as part, k (k)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
             </span>
@@ -234,126 +238,64 @@
         {/each}
         {#if optionNote}<li class="none" role="presentation">{optionNote}</li>{/if}
       </ul>
-      <div class="foot" aria-hidden="true">
-        <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
-        <span><kbd>Enter</kbd> open</span>
-        <span><kbd>Esc</kbd> close</span>
-        <span class="spacer"></span>
-        <span>Options from {optionHost || 'the first machine'}</span>
-      </div>
     </div>
   {/if}
 </dialog>
 
 <style>
-  .palette {
-    width: min(640px, 94vw);
-    max-height: min(560px, 80vh);
-    margin: 12vh auto auto;
-    padding: 0;
-    overflow: hidden;
-    color: var(--fg);
-    background: var(--bg-raised);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-3);
-  }
-  .palette[open] {
-    animation: pal-in 260ms var(--ease);
-  }
-  @keyframes pal-in {
-    from {
-      opacity: 0;
-      transform: translateY(-14px) scale(0.965);
-    }
-  }
-  .palette::backdrop {
-    background: var(--scrim);
-  }
   .box {
-    display: flex;
-    flex-direction: column;
-    max-height: min(560px, 80vh);
+    align-self: start;
+    width: 84ch;
+    margin-top: calc(var(--lh) * 6);
   }
   .search {
     display: flex;
-    flex: none;
-    align-items: center;
-    gap: 10px;
-    padding: 0 14px;
-    color: var(--fg-muted);
-    border-bottom: 1px solid var(--border);
+    gap: 1ch;
+    white-space: nowrap;
   }
-  .search input {
-    height: 50px;
-    padding: 0;
-    font-size: var(--fs-lg);
-    background: none;
-    border: 0;
-    box-shadow: none;
-  }
-  .search input:focus {
-    box-shadow: none;
-  }
+  /* A fixed height, so the box does not jump as results come and go; the list scrolls, not the framed box. */
   .results {
-    flex: 1;
-    min-height: 0;
-    margin: 0;
-    padding: 6px;
+    height: min(calc(var(--lh) * 22), round(down, calc(100vh - var(--lh) * 14), var(--lh)));
     overflow: auto;
     list-style: none;
   }
   .group {
-    padding: 10px 10px 4px;
-    color: var(--fg-faint);
-    font-size: var(--fs-xs);
-    font-weight: 600;
+    margin-top: var(--lh);
+    color: var(--fg-muted);
   }
   .group:first-child {
-    padding-top: 4px;
+    margin-top: 0;
   }
   .opt {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 34px;
-    padding: 4px 10px;
-    border-radius: var(--r);
+    gap: 1ch;
+    padding: 0 1ch;
+    white-space: nowrap;
     cursor: pointer;
-    transition: background 90ms var(--ease);
+  }
+  .opt:hover {
+    background: var(--bg-hover);
   }
   .opt[aria-selected='true'] {
-    background: color-mix(in srgb, var(--accent) 13%, var(--bg-hover));
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-  .opt[aria-selected='true'] .ico {
-    color: var(--accent);
-    transform: scale(1.1);
+    color: var(--on-accent);
+    font-weight: 700;
+    background: var(--accent);
   }
   .ico {
-    transition: transform var(--t) var(--ease);
-  }
-  .ico {
-    display: grid;
     flex: none;
-    place-items: center;
-    width: 18px;
-    color: var(--fg-muted);
+    width: 2ch;
+    color: var(--accent);
   }
   .label {
     flex: none;
     max-width: 62%;
     overflow: hidden;
-    color: var(--fg-strong);
+    color: var(--accent);
     text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .label.mono {
-    font-size: 12.5px;
   }
   mark {
-    color: var(--accent);
-    font-weight: 600;
+    color: var(--fg-strong);
+    font-weight: 700;
     background: none;
   }
   .detail {
@@ -361,28 +303,19 @@
     min-width: 0;
     overflow: hidden;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
     text-align: right;
     text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .opt[aria-selected='true'] :is(.ico, .label, .detail) {
+    color: inherit;
+  }
+  /* A hit in the picked row is filled a step brighter, so it still shows in reverse video. */
+  .opt[aria-selected='true'] mark {
+    color: inherit;
+    background: var(--accent-strong);
   }
   .none {
-    padding: 12px 10px;
+    padding: 0 1ch;
     color: var(--fg-muted);
-  }
-  .foot {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 14px;
-    padding: 8px 14px;
-    color: var(--fg-faint);
-    font-size: var(--fs-xs);
-    border-top: 1px solid var(--border);
-  }
-  .foot span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
   }
 </style>
