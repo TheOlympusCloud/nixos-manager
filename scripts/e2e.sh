@@ -43,6 +43,8 @@ esac
 # The flake is called as { flakeRef = "path:<src>?narHash=…"; … }.
 flake=$(printf '%s\n' "$*" | sed -n 's/.* flakeRef = "path:\([^"?]*\)?.*/\1/p')
 case "$*" in
+  *"nixmgr:iso"*) out=$(printf '%s\n' "$*" | sed -n 's/.* --out-link \([^ ]*\) .*/\1/p'); d=$(mktemp -d "$(dirname "$0")/../iso-XXXXXX")
+    mkdir "$d/iso"; echo "e2e installer" > "$d/iso/nixos-minimal-x86_64-linux.iso"; ln -s "$d" "$out" ;;
   *" hash path "*) echo "sha256-fake" ;;
   *"nixmgr:host"*) drv=$(sha256sum < "$flake/hosts/example/default.nix" | cut -c1-32)
     echo '{"name":"example","hostName":"example","system":"x86_64-linux","release":"26.05","stateVersion":"26.05","toplevel":"/nix/store/'"$drv"'-nixos-system-example-26.05.drv","boot":"","systemPath":"/nix/store/'"$drv"'-nixos-system-example-26.05","units":{"example.service":{"hash":"'"$drv"'","reload":{},"flags":{}}},"etc":{"example.conf":"'"$drv"'"},"managedFile":"hosts/example/managed.json","packages":[{"name":"git","version":"2.51.0","files":["hosts/example/managed.json"]}],"features":[],"users":[],"ports":{"tcp":[22],"udp":[],"firewall":true},"fileSystems":[],"files":["flake.nix"],"checks":{"comin":true,"cominBranches":[{"url":"https://forgejo.example.lan/pablo/nixos-config.git","main":"main","testing":"testing-example"}]}}' ;;
@@ -156,6 +158,28 @@ api POST /api/push -d '{}' > /dev/null
 [ "$(git -C "$work/remote.git" log -1 --format='%an <%ae>|%cn <%ce>' main)" = "E2E Person <e2e@example.invalid>|E2E Person <e2e@example.invalid>" ] || fail "wrong commit identity"
 git -C "$work/remote.git" log -1 --format='%(trailers:key=Via,valueonly)' main | grep -Eq '^web session [0-9a-f]{8}$' || fail "commit lacks the Via trailer"
 echo "ok   committed and pushed as the configured person, via the web session"
+
+# An installer ISO of a machine with a disk layout, built from what is pushed,
+# then downloaded whole. Stubbed only: the real one is a whole NixOS installer.
+if [ "${E2E_STUB_NIX:-}" = 1 ]; then
+  [ "$(code POST /api/machines -d '{"name":"pc","system":"x86_64-linux","role":"minimal","disk":"ext4","device":"/dev/vda"}')" = 200 ] || fail "create pc"
+  [ "$(code POST /api/isos -d '{"host":"pc"}')" = 200 ] && fail "an ISO of a machine that is not pushed"
+  api POST /api/stage -d '{"paths":["hosts/pc"]}' > /dev/null
+  api POST /api/commit -d '{"message":"feat: pc","force":true}' > /dev/null
+  [ "$(code POST /api/push -d '{"force":true}')" = 200 ] || fail "push pc"
+  [ "$(code POST /api/isos -d '{"host":"example"}')" = 400 ] || fail "an ISO of a machine with neither disk layout nor hardware configuration"
+  iso=$(api POST /api/isos -d '{"host":"pc"}' | json '["id"]') || fail "build the ISO of pc"
+  isostate() { api GET /api/isos | python3 -c "import sys, json; print(next((i['$1'] for i in json.load(sys.stdin)['isos'] if i['id'] == '$iso'), ''))"; }
+  for _ in $(seq 300); do
+    case "$(isostate state)" in ready | failed) break ;; esac
+    sleep 0.1
+  done
+  [ "$(isostate state)" = ready ] || fail "the ISO of pc: $(api GET /api/isos)"
+  api GET "/api/isos/$iso/download" -o "$work/pc.iso"
+  [ "$(sha256sum < "$work/pc.iso" | cut -d' ' -f1)" = "$(isostate sha256)" ] || fail "the download is not the ISO listed"
+  [ "$(isostate commit)" = "$(git -C "$work/remote.git" rev-parse main)" ] || fail "the ISO is not of the pushed commit"
+  echo "ok   installer ISO of pc: built from what is pushed, listed with its SHA-256, downloaded"
+fi
 
 file=hosts/example/default.nix
 hash=$(api GET "/api/file?path=$file" | json '["hash"]')
