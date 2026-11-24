@@ -48,16 +48,16 @@ An MCP server gives automation the same features.
 - **Any package, your way**: every package of a machine, NixOS's defaults and
   hand-written ones included, can be removed, replaced or rebuilt with other
   arguments, attributes, version, source or patches, or with a Nix file of its
-  own; **Reset to default** puts it back. See [Customise any
-  package](#customise-any-package).
+  own; **Reset to default** puts it back, and **Copy to…** makes the same
+  change on other machines. See [Customise any package](#customise-any-package).
 - **Every machine at once**: add, remove, replace or customise a package, and
   a user's home packages, for every machine in one click, in
   `modules/managed.json`; each machine's own `managed.json` still wins. See
   [Every machine at once](#every-machine-at-once).
 - **home-manager**: per machine and user, turn it on, add and remove packages,
   set any home-manager option from a search, keep dotfiles, and write a module
-  of your own, all checked, committed and deployed like the rest. See
-  [Homes with home-manager](#homes-with-home-manager).
+  of your own, all checked, committed and deployed like the rest, and copy a
+  home to other machines. See [Homes with home-manager](#homes-with-home-manager).
 - **Real values**: an option's effective value on each machine and the file
   that sets it, compared across the fleet, with "copy to" other machines.
 - **New machines**: a wizard creates `hosts/<name>/` with a role preset
@@ -1201,7 +1201,7 @@ Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `compare_option`, `search_packages`, `search_options`, `add_packages`,
 `remove_packages`, `edit_packages` (any package removed by name, and a
 home-manager user's packages), `set_package_override`, `set_home_manager`,
-`update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
+`copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
 package and option tools take host `*` for every machine
 (`modules/managed.json`). File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
@@ -1407,6 +1407,29 @@ NixOS module (the starter fleet loads it on every machine, with
 Changes, checks and pushes show each home's packages, programs and files that
 move, next to the system's. **Stop managing here** removes what is set here for
 the user; the files stay until you delete them.
+
+### Copy to other machines
+
+**Copy to…**, in a package's **Customise** drawer and on the **Home** tab,
+writes what this machine has to the machines you pick, each in its own
+`managed.json` and folder:
+
+- a package's change: its `packageOverrides` entry, the patch files it names
+  and `packages/<attribute>.nix`;
+- a user's home: the packages and removed packages in `home.<user>` (joined
+  with the machine's own), the options in `settings.home-manager.users.<user>`
+  except `home.stateVersion`, `home/<user>/custom.nix` and the files in
+  `home/<user>/files/`. Only machines with the user and home-manager are
+  offered. Where the user has no home yet, home-manager is turned on there at
+  that machine's release, as **Turn on** does.
+
+A copy never overwrites. A machine that already has another value for anything
+copied (another change to the package, an option set differently, a file with
+other content, a package the home adds that it removes) is left untouched, and
+the result names what differs. What a machine already has the same is skipped.
+Home-manager configuration written by hand outside the machine's folder is not
+copied. To change something on every machine for good, use
+[Every machine](#every-machine-at-once) instead. MCP: `copy_to_machines`.
 
 ### Upgrading a fleet's managed.nix
 
