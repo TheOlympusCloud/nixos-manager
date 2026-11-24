@@ -5,7 +5,7 @@
   import { addHomePackages, excludePackages, fleet, openOrCreate, removeHomePackages, restorePackages, setHome } from '../../lib/fleet.svelte'
   import { pathName } from '../../lib/options'
   import { dotfilesDir, homeNixFile, homeNixTemplate, homeRows, homeStateVersion, type PackageRow } from '../../lib/packages'
-  import { codeLink, machineLink } from '../../lib/router.svelte'
+  import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import { app, refresh } from '../../lib/state.svelte'
   import { confirmBox, report } from '../../lib/ui.svelte'
   import { managedOptions, showValue } from '../../lib/values'
@@ -199,7 +199,7 @@
       <div class="head">
         <h3 id="hf-title">Files in ~</h3>
       </div>
-      <p class="muted small">Kept in <span class="mono">{filesDir}</span> and linked into {user}'s home (<span class="mono">home.file</span>; <span class="mono">.config/…</span> is <span class="mono">xdg.configFile</span>).</p>
+      <p class="muted small">Kept in <span class="mono">{filesDir}</span> and linked into {user}'s home (<span class="mono">home.file</span>; <span class="mono">.config/…</span> is <span class="mono">xdg.configFile</span>). They are copied to the Nix store, which every user of the machine can read: never keep a token or password here (<span class="mono">.netrc</span>, <span class="mono">.config/gh/hosts.yml</span>…); keep it in <a href={link('settings')}>Secrets</a>.</p>
       <ul class="files">
         {#each dotfiles as f (f)}
           <li>

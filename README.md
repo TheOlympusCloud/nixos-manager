@@ -1296,8 +1296,11 @@ hand-written file, or a click here.
 - **Remove** takes it out of the machine by name, wherever it is added:
   `removedPackages` in `managed.json`. The Nix that adds it stays as it is, and
   **Restore** gives it back. A package NixOS needs for a working system (`bash`,
-  `coreutils`…) asks before it goes.
-- **Replace** removes it the same way and installs another package you pick.
+  `coreutils`…) asks before it goes. What `managed.json` itself installs is
+  never taken out by a removed name, and adding a removed name back clears it.
+- **Replace** removes it the same way and installs another package you pick,
+  even one of the same name: replacing `nodejs_20` with `nodejs_24` keeps
+  `nodejs_24`.
 - **Customise** changes how it is built on the machine, by attribute, in
   `packageOverrides`:
   - arguments for `.override` (`withVimKeys = true`) and attributes for
@@ -1346,7 +1349,10 @@ NixOS module (the starter fleet loads it on every machine, with
 - **Files in ~**: files in `hosts/<name>/home/<user>/files/` are linked at the
   same path in the user's home (`home.file`; `.config/…` is where
   `xdg.configFile` puts files). The tab creates one and opens it in Code; it
-  also lists what home-manager's modules link there.
+  also lists what home-manager's modules link there. These files are copied to
+  the Nix store, which every user of the machine can read: never keep a token
+  or password there (`.netrc`, `.config/gh/hosts.yml`…); use
+  [Secrets](#secrets).
 - **Nix for \<user\>**: `hosts/<name>/home/<user>/custom.nix`, a home-manager
   module of the user's own.
 

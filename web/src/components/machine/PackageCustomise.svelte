@@ -83,7 +83,7 @@
 
 <div class="pc">
   <p class="muted">
-    Changes how <span class="mono">{attr}</span> is built on {host.name}, for everything there that uses it (home-manager included). Nix then builds it instead of downloading it. Values are JSON, as
+    Changes how <span class="mono">{attr}</span> is built on {host.name}, for everything there that uses it (home-manager too, when it shares the system's packages: <span class="mono">useGlobalPkgs</span>). Nix then builds it instead of downloading it. Values are JSON, as
     <span class="mono">managed.json</span> keeps them.
   </p>
 
