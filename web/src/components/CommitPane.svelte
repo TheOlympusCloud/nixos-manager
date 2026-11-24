@@ -9,6 +9,7 @@
   import DiffView from './DiffView.svelte'
   import Icon from './Icon.svelte'
   import MachineImpact from './MachineImpact.svelte'
+  import { bigText } from '../lib/ascii'
 
   /** One commit: what it did to the machines, then its files. */
   let { rev }: { rev: string } = $props()
@@ -48,11 +49,12 @@
 <div class="cp">
   <header class="head">
     <div class="title">
+      <pre class="big" aria-hidden="true" use:bigText={(commit?.sha ?? rev).slice(0, 7)}></pre>
       <h2>{subject || `Commit ${rev.slice(0, 7)}`}</h2>
       {#if commit}
         <p class="meta">
-          <button class="sha mono" title={copied ? 'Copied' : 'Copy the full hash'} onclick={async () => (copied = await copyText(commit!.sha))}>
-            {commit.sha.slice(0, 7)}<Icon name={copied ? 'tick' : 'copy'} size={12} />
+          <button class="sha mono link" title={copied ? 'Copied' : 'Copy the full hash'} onclick={async () => (copied = await copyText(commit!.sha))}>
+            {commit.sha.slice(0, 7)} <Icon name={copied ? 'tick' : 'copy'} />
           </button>
           <span>{commit.author}</span>
           <time datetime={commit.date} title={new Date(commit.date).toLocaleString()}>{ago(commit.date)}</time>
@@ -60,8 +62,8 @@
       {/if}
     </div>
     {#if commit}
-      <button class="revert" disabled={!!repo.busy} onclick={() => revertCommit(commit!.sha, subject)} title="Stage the opposite of this commit, to review and commit">
-        <Icon name="undo" size={14} />{repo.busy === 'revert' ? 'Reverting…' : 'Revert this commit'}
+      <button class="revert danger" disabled={!!repo.busy} onclick={() => revertCommit(commit!.sha, subject)} title="Stage the opposite of this commit, to review and commit">
+        <Icon name="undo" /> {repo.busy === 'revert' ? 'Reverting…' : 'Revert this commit'}
       </button>
     {/if}
   </header>
@@ -76,9 +78,9 @@
         {#if impactError}<p class="error-text small">{impactError}</p>{:else}<MachineImpact {diff} {computing} {settings} commit />{/if}
       </section>
       <section class="block" aria-labelledby="cp-files">
-        <h3 id="cp-files">Files{#if commit}<span class="n num">{files.length}</span>{/if}</h3>
+        <h3 id="cp-files">Files{#if commit}<span class="count num">{files.length}</span>{/if}</h3>
         {#if !commit}
-          <div class="skel-files" aria-hidden="true">{#each [0, 1] as k (k)}<span class="skel" style:width="{66 - k * 18}%"></span>{/each}</div>
+          <div class="skel-files" aria-hidden="true">{#each [0, 1] as k (k)}<span class="skel" style:width="{54 - k * 14}ch"></span>{/each}</div>
         {:else}
           <DiffView {files} empty="This commit changes no file." />
         {/if}
@@ -97,37 +99,28 @@
   .head {
     display: flex;
     flex: none;
-    align-items: flex-start;
-    gap: var(--s3);
-    padding: var(--s4) var(--s5) var(--s3);
-    border-bottom: 1px solid var(--border);
+    align-items: flex-end;
+    gap: 2ch;
+    margin-bottom: var(--lh);
   }
   .title {
     flex: 1;
     min-width: 0;
   }
+  /* The subject, under the hash in the pixel face: bold, not a ▌ section heading. */
   h2 {
-    font-size: var(--fs-xl);
-    letter-spacing: -0.01em;
     overflow-wrap: anywhere;
+    text-transform: none;
+  }
+  h2::before {
+    content: none;
   }
   .meta {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 12px;
-    margin-top: 6px;
+    align-items: baseline;
+    gap: 0 2ch;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .sha {
-    height: 22px;
-    padding: 0 6px;
-    gap: 5px;
-    color: var(--fg);
-    font-size: 11.5px;
-    background: var(--bg-raised);
-    border-color: var(--border);
   }
   .revert {
     flex: none;
@@ -135,50 +128,35 @@
   .scroll-body {
     flex: 1;
     min-height: 0;
-    padding: var(--s4) var(--s5) var(--s6);
     overflow: auto;
   }
   .message {
     max-width: 80ch;
-    margin: 0 0 var(--s4);
-    color: var(--fg);
-    font: 13px/1.6 var(--sans);
+    margin-bottom: var(--lh);
     white-space: pre-wrap;
   }
   .block {
-    max-width: 1180px;
+    max-width: 140ch;
   }
   .block + .block {
-    margin-top: var(--s5);
+    margin-top: var(--lh);
   }
+  /* Section headings, as the global h2: bold caps after an accent ▌. */
   h3 {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    font-size: var(--fs-lg);
+    align-items: baseline;
+    gap: 1ch;
+    margin-bottom: var(--lh);
+    text-transform: uppercase;
   }
-  .n {
-    padding: 0 7px;
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    font-weight: 500;
-    line-height: 18px;
-    background: var(--bg-active);
-    border-radius: 9px;
+  h3::before {
+    color: var(--accent);
+    content: '▌';
   }
   .block :global(.diff) {
     padding: 0;
   }
-  .skel-files {
-    display: grid;
-    gap: 12px;
-    padding: 16px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-  }
   .pad {
-    padding: 16px 0;
+    padding: var(--lh) 0;
   }
 </style>

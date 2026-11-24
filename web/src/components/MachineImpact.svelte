@@ -4,6 +4,7 @@
   import { impactGroups, impactLine, revDistance, shortRev, splitImpact, withSettings, type SettingChange } from '../lib/impact'
   import type { ModelDiff } from '../lib/modeldiff'
   import { codeLink, machineLink } from '../lib/router.svelte'
+  import { frame } from '../lib/ascii'
   import Icon from './Icon.svelte'
 
   /**
@@ -39,14 +40,14 @@
 
 <div class="impact" aria-busy={computing}>
   {#if !diff}
-    <div class="rows" aria-hidden="true">
-      {#each [0, 1] as k (k)}<div class="row skel-row"><span class="skel" style:width="14%"></span><span class="skel" style:width="{52 - k * 14}%"></span></div>{/each}
+    <div class="list" aria-hidden="true">
+      {#each [0, 1] as k (k)}<div class="row skel-row"><span class="skel" style:width="12ch"></span><span class="skel" style:width="{48 - k * 12}ch"></span></div>{/each}
     </div>
     {#if computing}<p class="note"><span class="dot busy"></span>Evaluating both versions…</p>{/if}
   {:else}
     {#if diff.headError}
-      <div class="notice" role="alert">
-        <Icon name="alert" size={15} />
+      <div class="notice" role="alert" data-tone="err" use:frame>
+        <Icon name="alert" />
         <div>
           <p><strong>{said.headBroken}</strong>, so every machine is compared with nothing.</p>
           <p class="err-line mono">{firstLine(diff.headError)}</p>
@@ -55,20 +56,20 @@
     {/if}
     {#if diff.error}
       {@const file = errorFile(diff.error)}
-      <div class="notice" role="alert">
-        <Icon name="alert" size={15} />
+      <div class="notice" role="alert" data-tone="err" use:frame>
+        <Icon name="alert" />
         <div>
           <p><strong>{said.broken}</strong>, so it cannot be compared with {said.base}.</p>
           <p class="err-line mono">{firstLine(diff.error)}</p>
-          {#if file && !commit && !push}<a class="fix-link" href={codeLink(file)}><Icon name="code" size={13} />Open {file}</a>{/if}
+          {#if file && !commit && !push}<a class="fix-link" href={codeLink(file)}><Icon name="code" /> Open {file}</a>{/if}
         </div>
       </div>
     {:else}
       {#if inputs.length}
-        <ul class="rows inputs" aria-label="Flake inputs">
+        <ul class="list inputs" aria-label="Flake inputs">
           {#each inputs as c (c.name)}
             <li class="row input-row">
-              <span class="mark up"><Icon name="input" size={13} /></span>
+              <span class="mark up"><Icon name="input" /></span>
               <span class="name mono">{c.name}</span>
               <span class="line">
                 {#if c.status === 'updated'}
@@ -80,23 +81,23 @@
                   Removed
                 {/if}
               </span>
-              {#if c.compareUrl}<a class="ext" href={c.compareUrl} target="_blank" rel="noreferrer noopener">Commits<Icon name="external" size={12} /></a>{/if}
+              {#if c.compareUrl}<a class="ext" href={c.compareUrl} target="_blank" rel="noreferrer noopener">Commits <Icon name="external" /></a>{/if}
             </li>
           {/each}
         </ul>
       {/if}
 
       {#if split.changed.length}
-        <ul class="rows" aria-label="Machines">
+        <ul class="list" aria-label="Machines">
           {#each split.changed as d (d.host)}
             {@const groups = impactGroups(d)}
             <li class="row machine" class:open={isOpen(d.host)}>
               <!-- type=button: in the push dialog this sits in a form, where a button would push -->
-              <button type="button" class="head" aria-expanded={isOpen(d.host)} onclick={() => (open[d.host] = !isOpen(d.host))} disabled={!groups.length}>
-                <span class="mark {dot[d.status]}"><Icon name="server" size={13} /></span>
+              <button type="button" class="head bare" aria-expanded={isOpen(d.host)} onclick={() => (open[d.host] = !isOpen(d.host))} disabled={!groups.length}>
+                <span class="mark {dot[d.status]}"><Icon name="server" /></span>
                 <span class="name">{d.host}</span>
                 <span class="line" title={impactLine(d)}>{impactLine(d)}</span>
-                {#if groups.length}<span class="chev"><Icon name="down" size={14} /></span>{/if}
+                {#if groups.length}<span class="chev"><Icon name={isOpen(d.host) ? 'dir-down' : 'dir-right'} /></span>{/if}
               </button>
               {#if isOpen(d.host) && groups.length}
                 <div class="details">
@@ -118,7 +119,7 @@
           {/each}
         </ul>
       {:else if !inputs.length}
-        <p class="calm"><Icon name="tick" size={15} />{quiet || said.calm}</p>
+        <p class="calm"><Icon name="tick" /> {quiet || said.calm}</p>
       {/if}
 
       {#if split.broken.length || (split.unchanged.length && split.changed.length)}
@@ -138,55 +139,35 @@
 <style>
   .impact {
     display: grid;
-    gap: 10px;
-  }
-  .rows {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
-  }
-  .row + .row {
-    border-top: 1px solid var(--border);
   }
   .head,
   .input-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    align-items: baseline;
+    gap: 2ch;
     width: 100%;
-    min-height: 40px;
-    padding: 6px 12px;
+    padding: 0 1ch;
   }
   .head {
     height: auto;
     color: var(--fg);
     font-weight: 400;
     text-align: left;
-    background: none;
-    border: 0;
-    border-radius: var(--r-lg);
   }
-  .head:hover:not(:disabled) {
+  /* A row: a fill under the pointer (reverse video stays for keyboard focus). */
+  .head:hover:not(:disabled),
+  .input-row:hover {
+    color: var(--fg);
     background: var(--bg-hover);
-    border-color: transparent;
   }
   .head:disabled {
-    opacity: 1;
+    color: var(--fg);
+    cursor: default;
   }
   .mark {
     --c: var(--fg-muted);
-    display: grid;
     flex: none;
-    place-items: center;
-    width: 24px;
-    height: 24px;
     color: var(--c);
-    background: color-mix(in srgb, var(--c) 13%, transparent);
-    border-radius: 6px;
   }
   .mark.add {
     --c: var(--green);
@@ -200,23 +181,19 @@
   }
   .name {
     flex: none;
-    min-width: 96px;
+    min-width: 14ch;
     color: var(--fg-strong);
-    font-weight: 600;
-  }
-  .name.mono {
-    font-weight: 500;
+    font-weight: 700;
   }
   .line {
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    color: var(--fg);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .arrow {
-    margin: 0 6px;
+    margin: 0 1ch;
     color: var(--fg-muted);
   }
   .strong {
@@ -225,42 +202,28 @@
   .chev {
     flex: none;
     color: var(--fg-muted);
-    transition: transform var(--t-fast) var(--ease);
-  }
-  .open .chev {
-    transform: rotate(180deg);
   }
   .ext {
-    display: inline-flex;
     flex: none;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--fs-sm);
-    text-decoration: none;
   }
-  .ext:hover {
-    text-decoration: underline;
-  }
+  /* Under the machine's name: a label column, then the chips. */
   .details {
     display: grid;
-    grid-template-columns: 88px minmax(0, 1fr);
-    gap: 8px 12px;
-    padding: 2px 14px 14px 46px;
+    grid-template-columns: 14ch minmax(0, 1fr);
+    gap: 0 2ch;
+    padding: 0 1ch var(--lh) 4ch;
   }
   .details .chip {
     max-width: 100%;
-    overflow-wrap: anywhere;
   }
   @media (max-width: 640px) {
     .details {
       grid-template-columns: minmax(0, 1fr);
-      padding-left: 14px;
+      padding-left: 1ch;
     }
   }
   .g-label {
-    padding-top: 2px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
   }
   .k-up {
     --c: var(--accent);
@@ -271,14 +234,15 @@
   .k-del {
     --c: var(--red);
   }
+  .chip:is(.k-up, .k-add, .k-del) {
+    background: color-mix(in srgb, var(--c) 14%, transparent);
+  }
   .open-machine,
   .hint {
     grid-column: 2;
     justify-self: start;
-    font-size: var(--fs-sm);
   }
   .hint {
-    margin: 0;
     color: var(--fg-muted);
   }
   @media (max-width: 640px) {
@@ -289,59 +253,40 @@
   }
   .notice {
     display: flex;
-    gap: 10px;
-    padding: 12px 14px;
-    color: var(--fg);
-    background: color-mix(in srgb, var(--red) 6%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--red) 32%, var(--border));
-    border-radius: var(--r-lg);
+    gap: 2ch;
   }
-  .notice > :global(svg) {
-    flex: none;
-    margin-top: 2px;
+  .notice > :global(.ic) {
     color: var(--red);
   }
   .notice div {
-    display: grid;
-    gap: 4px;
     min-width: 0;
   }
   .err-line {
     overflow: hidden;
-    color: color-mix(in srgb, var(--red) 65%, var(--fg-strong));
-    font-size: 12px;
+    color: var(--red);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .fix-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    width: fit-content;
-    font-size: var(--fs-sm);
-  }
   .calm {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--fg);
+    gap: 1ch;
   }
-  .calm :global(svg) {
+  .calm :global(.ic) {
     color: var(--green);
   }
   .note {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
+  }
+  .note:not(:has(.dot))::before {
+    color: var(--accent);
+    content: '‣ ';
+  }
+  .note .dot {
+    margin-right: 1ch;
   }
   .skel-row {
     display: flex;
-    gap: 16px;
-    align-items: center;
-    height: 40px;
-    padding: 0 12px;
+    gap: 2ch;
+    padding: 0 1ch;
   }
 </style>

@@ -70,7 +70,7 @@
   <div class="view-bar">
     <div class="title">
       <strong>{job?.commit ? `${jobTitle(job)} · ${jobId}` : `${kinds[job?.kind ?? ''] ?? 'Job'} ${jobId}`}</strong>
-      <span class="state s-{jobState || 'queued'}" role="status">{jobState || 'connecting'}{running ? '…' : ''}</span>
+      <span class="state s-{jobState || 'queued'} {running ? 'badge busy' : ''}" role="status">{jobState || 'connecting'}{running ? '…' : ''}</span>
     </div>
     {#if job?.targets?.length}<div class="muted small">also dry-built: {job.targets.join(', ')}</div>{/if}
     {#if job?.commit}<div class="muted small">commit <span class="mono">{job.commit.slice(0, 12)}</span>, compared with the last checked commit before it</div>{/if}
@@ -94,40 +94,43 @@
   .title {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: 2ch;
   }
   .state {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    white-space: nowrap;
   }
   .s-passed {
     color: var(--green);
   }
+  .s-passed::before {
+    content: '● ';
+  }
   .s-failed {
     color: var(--red);
   }
-  .s-running {
-    color: var(--blue);
-  }
-  .s-queued {
-    color: var(--fg-muted);
+  .s-failed::before {
+    content: '✖ ';
   }
   .summary {
-    margin: 0;
-    padding: 8px 14px 8px 30px;
-    font-size: 12px;
-    border-bottom: 1px solid var(--border);
+    flex: none;
+    padding: var(--lh) 1ch 0;
+  }
+  .summary li::before {
+    color: var(--accent);
+    content: '‣ ';
   }
   .log {
     flex: 1;
     min-height: 0;
-    margin: 0;
-    padding: 10px 14px 24px;
+    padding: var(--lh) 1ch 0;
     overflow: auto;
-    font: 12px/1.5 var(--mono);
+    color: var(--fg-muted);
     white-space: pre-wrap;
     word-break: break-word;
-    background: var(--bg-deep);
+  }
+  /* Focus is a fill, not reverse video: a whole log in accent would be unreadable. */
+  .log:focus-visible {
+    color: var(--fg);
+    background: var(--bg-hover);
   }
 </style>

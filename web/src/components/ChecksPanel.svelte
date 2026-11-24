@@ -90,12 +90,12 @@
     </div>
 
     <div class="actions">
-      <button class="primary" onclick={checkStaged}><Icon name="play" size={12} /> Check staged changes</button>
+      <button class="primary" onclick={checkStaged}><Icon name="play" /> Check staged changes</button>
       <p class="muted small">
         Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with the newest pushed commit
         that passed a check (every machine while none has){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
       </p>
-      <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs<Icon name="right" size={12} /></a>
+      <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs <Icon name="right" /></a>
     </div>
 
     <div class="section-head">
@@ -106,7 +106,7 @@
       {#each jobs as j (j.id)}
         <li class="item" class:selected={app.inspect?.kind === 'job' && app.inspect.id === j.id}>
           <button class="item-main job" onclick={() => showJob(j)}>
-            <span class="state s-{j.state}">{j.state}</span>
+            <span class="state s-{j.state} {j.state === 'running' ? 'badge busy' : ''}">{j.state}</span>
             <span class="name" title={j.commit ? `Check of commit ${j.commit}` : undefined}>{jobTitle(j)}</span>
             <span class="dir">{j.tree ? short(j.tree) : ''} {ago(j.started)}</span>
           </button>
@@ -120,32 +120,29 @@
 
 <style>
   .staged {
-    margin: 12px 12px 8px;
-    padding: 8px 10px;
-    font-size: 12px;
+    margin-bottom: var(--lh);
     color: var(--yellow);
-    background: var(--bg-deep);
-    border-radius: 4px;
   }
   .staged.ok {
     color: var(--green);
   }
-  .targets {
-    padding: 2px 12px 6px;
+  .staged:not(:has(.muted))::before {
+    content: '▲ ';
   }
-  .targets p {
-    margin: 4px 0;
+  .staged.ok::before {
+    content: '● ';
+  }
+  .section-head {
+    padding: 0;
   }
   .target {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
+    gap: 1ch;
     cursor: pointer;
   }
   .kind {
-    min-width: 46px;
-    font-size: 11px;
+    flex: none;
+    width: 6ch;
     color: var(--fg-muted);
   }
   .k-nixos {
@@ -161,57 +158,40 @@
   }
   .sel {
     display: flex;
-    gap: 10px;
-    margin-top: 4px;
+    gap: 2ch;
   }
   .actions {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 6px 12px 12px;
-  }
-  .actions p {
-    margin: 0;
-  }
-  .actions .primary {
-    height: 32px;
-  }
-  .inputs-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 4px;
-    text-decoration: none;
-  }
-  .inputs-link:hover {
-    text-decoration: underline;
-  }
-  .job {
-    gap: 8px;
+    align-items: flex-start;
+    gap: var(--lh);
+    margin-top: var(--lh);
   }
   .state {
-    min-width: 54px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    flex: none;
+    min-width: 9ch;
+    white-space: nowrap;
   }
   .s-passed {
     color: var(--green);
   }
+  .s-passed::before {
+    content: '● ';
+  }
   .s-failed {
     color: var(--red);
   }
-  .s-running {
-    color: var(--blue);
+  .s-failed::before {
+    content: '✖ ';
   }
   .s-queued {
     color: var(--fg-muted);
   }
+  .s-queued::before {
+    content: '○ ';
+  }
   .error {
     color: var(--red);
     white-space: pre-wrap;
-  }
-  .small {
-    font-size: 12px;
   }
 </style>

@@ -24,7 +24,7 @@
 
 <style>
   .push-impact {
-    max-height: 56vh;
+    max-height: calc(var(--lh) * 24);
     overflow: auto;
   }
 </style>
