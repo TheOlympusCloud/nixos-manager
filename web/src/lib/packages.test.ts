@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Managed } from './api'
-import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeRows, homeStateVersion, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, systemRows, takesFromInputs } from './packages'
+import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homePathProblem, homeRows, homeStateVersion, linksSecrets, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, secretTemplatesDir, systemRows, takesFromInputs } from './packages'
 import { host } from './testmodel'
 
 const mf = 'hosts/pc/managed.json'
@@ -171,6 +171,23 @@ describe('another nixpkgs', () => {
   it('needs managed.nix 4', () => {
     expect([3, 4].map((v) => takesFromInputs(host('pc', { managedVersion: v })))).toEqual([false, true])
     expect(takesFromInputs(host('code', { managedFile: null, managedVersion: 4 }))).toBe(false)
+  })
+})
+
+describe('secrets in homes', () => {
+  it('needs managed.nix 5', () => {
+    expect([4, 5].map((v) => linksSecrets(host('pc', { managedVersion: v })))).toEqual([false, true])
+    expect(linksSecrets(host('code', { managedFile: null, managedVersion: 5 }))).toBe(false)
+  })
+  it('keeps files with secrets next to the machine\'s managed.json', () => {
+    expect(secretTemplatesDir(host('pc', { managedFile: 'machines/pc/managed.json' }), 'pablo')).toBe('machines/pc/home/pablo/templates/')
+  })
+  it('takes a new path inside ~ that nothing else sets', () => {
+    const taken = ['.netrc', '.config/gh/hosts.yml']
+    expect(['', ' .config/rclone/rclone.conf '].map((p) => homePathProblem(p, taken))).toEqual(['', ''])
+    for (const bad of ['/etc/passwd', '~/.netrc', '../x', 'a//b', './a', 'a/']) expect(homePathProblem(bad, taken)).toMatch(/inside the home folder/)
+    expect(homePathProblem('.git/config', taken)).toMatch(/\.git/)
+    expect(homePathProblem('.netrc', taken)).toBe('That file is already here.')
   })
 })
 

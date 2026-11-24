@@ -223,8 +223,8 @@ export type Managed = {
   removedPackages?: string[]
   /** How packages are changed, by attribute, for everything on the machine. */
   packageOverrides?: Record<string, PackageOverride>
-  /** The home-manager users this file manages. */
-  home?: Record<string, { packages: string[]; removedPackages: string[] }>
+  /** The home-manager users this file manages; secrets links a secret of the machine at a path in ~ (managed.nix 5). */
+  home?: Record<string, { packages: string[]; removedPackages: string[]; secrets?: Record<string, string> }>
   settings: Record<string, unknown>
 }
 /** A source to build instead: a URL, or a GitHub repository (owner/repo) at a revision. An empty hash: the check prints the right one. */
@@ -375,6 +375,8 @@ export const api = {
     post<Managed>(`/api/hosts/${encodeURIComponent(host)}/package-overrides`, { attr, override, base_hash }),
   /** stateVersion only when turning it on for a user without home-manager. */
   editHome: (host: string, edit: { user: string; enable: boolean; stateVersion?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home`, edit),
+  /** Links a secret as the file at path in the user's home; without secret, the link goes. */
+  linkHomeSecret: (host: string, edit: { user: string; path: string; secret?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home-secrets`, edit),
   /** Copies how a package is changed (packageOverride) or a user's home from the machine to others, never overwriting. */
   copy: (host: string, req: { packageOverride?: string; home?: string; to: string[] }) => post<CopyResult[]>(`/api/hosts/${encodeURIComponent(host)}/copy`, req),
   /** Writes this server's modules/managed.nix over the repository's (base_hash '' when it has none). */

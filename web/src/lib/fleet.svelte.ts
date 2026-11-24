@@ -199,6 +199,13 @@ export const setPackageOverride = (host: string, attr: string, o: PackageOverrid
 export const setHome = (host: string, user: string, enable: boolean, stateVersion?: string) =>
   write(host, () => api.editHome(host, { user, enable, stateVersion }), enable ? `home-manager is on for ${user} on ${host}` : `${user}'s home on ${host} is no longer set here`)
 
+/** Links a secret of the machine as the file at path in a user's home: it becomes theirs. */
+export const linkHomeSecret = (host: string, user: string, path: string, secret: string) =>
+  write(host, () => api.linkHomeSecret(host, { user, path, secret }), `~/${path} of ${user} on ${targetName(host)} is the secret ${secret}`)
+/** Takes the link at path away; the secret stays. */
+export const unlinkHomeSecret = (host: string, user: string, path: string, was: string) =>
+  write(host, () => api.linkHomeSecret(host, { user, path }), `~/${path} of ${user} on ${targetName(host)} is no longer linked`, { label: 'Undo', run: () => linkHomeSecret(host, user, path, was) })
+
 /**
  * Copies a package's customisation (packageOverride) or a user's home from a machine to
  * others, in one toast for all of them. Resolves with the machines it copied to.

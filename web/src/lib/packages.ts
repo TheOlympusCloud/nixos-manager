@@ -9,6 +9,8 @@ export const SHARED_FILE = 'modules/managed.json'
 export const appliesShared = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 3
 /** Whether the machine's modules/managed.nix takes a package from another nixpkgs (version 4). */
 export const takesFromInputs = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 4
+/** Whether the machine's modules/managed.nix puts secrets in homes (version 5). */
+export const linksSecrets = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 5
 
 /** One row of a packages table. */
 export type PackageRow = {
@@ -39,6 +41,17 @@ export const packageFile = (host: Host, attr: string) => `${machineDir(host)}/pa
 export const hostNixFile = (host: Host) => `${machineDir(host)}/custom.nix`
 export const homeNixFile = (host: Host, user: string) => `${machineDir(host)}/home/${user}/custom.nix`
 export const dotfilesDir = (host: Host, user: string) => `${machineDir(host)}/home/${user}/files/`
+/** Files with secrets: each @secret:<name>@ in them is filled in on the machine. */
+export const secretTemplatesDir = (host: Host, user: string) => `${machineDir(host)}/home/${user}/templates/`
+
+/** Why path cannot be a new file in ~ ('' when it can, or is empty): it stays inside the home and is none of taken. */
+export function homePathProblem(path: string, taken: string[]): string {
+  const f = path.trim()
+  if (!f) return ''
+  if (f.startsWith('/') || f.startsWith('~') || f.split('/').some((s) => s === '..' || s === '' || s === '.')) return 'A path inside the home folder, such as .config/starship.toml.'
+  if (f.split('/').some((s) => s.toLowerCase() === '.git')) return 'A .git folder cannot be kept in the repository.'
+  return taken.includes(f) ? 'That file is already here.' : ''
+}
 
 /** The attribute of a package name in managed.json's lists or overrides: nodejs → nodejs_22. */
 export function attrOf(host: Host, name: string, attrs: string[]): string | undefined {
