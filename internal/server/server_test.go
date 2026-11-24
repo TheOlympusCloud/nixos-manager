@@ -981,6 +981,13 @@ func TestCreateMachineOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/machines", spec, &res); code != 200 || len(res.Files) != 4 || res.Files[2] != "hosts/pc/disk-config.nix" {
 		t.Fatalf("create with a disk layout: %d %+v", code, res)
 	}
+	spec = map[string]any{"name": "old", "system": "x86_64-linux", "role": "minimal", "boot": "bios", "device": "/dev/sda"}
+	if code := e.do(t, "POST", "/api/machines", spec, &res); code != 200 {
+		t.Fatalf("create with GRUB on BIOS: %d %+v", code, res)
+	}
+	if def, _, _ := e.svc.Read("hosts/old/default.nix"); !strings.Contains(def, `boot.loader.grub.device = "/dev/sda";`) {
+		t.Fatalf("default.nix:\n%s", def)
+	}
 	var er struct{ Error string }
 	if code := e.do(t, "POST", "/api/hostkey", map[string]string{"address": "pc; reboot"}, &er); code != 400 || !strings.Contains(er.Error, "address") {
 		t.Fatalf("host key of a bad address: %d %q", code, er.Error)

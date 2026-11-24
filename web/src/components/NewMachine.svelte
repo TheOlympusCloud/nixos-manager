@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, type MachineDisk, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
+  import { api, type MachineBoot, type MachineDisk, type MachinePlatform, type MachineRole, type MachineSpec } from '../lib/api'
   import { bigText, frame } from '../lib/ascii'
   import { createMachine, fleet } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
   import { installCommand } from '../lib/install'
-  import { architectures, deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
+  import { architectures, bootLoaders, deviceProblem, diskoInputSnippet, disks, hardwareCheck, hasDiskoInput, machineNameProblem, platforms, previewFiles, roles } from '../lib/machines'
   import { go, machineLink } from '../lib/router.svelte'
   import { app } from '../lib/state.svelte'
   import { toast } from '../lib/ui.svelte'
@@ -14,7 +14,7 @@
   import Dither from './cell/Dither.svelte'
   import Icon from './Icon.svelte'
 
-  /** The new-machine wizard: name, architecture, role, first user, platform and hardware or disk layout, then a preview of the files. */
+  /** The new-machine wizard: name, architecture, role, first user, platform and boot loader and hardware or disk layout, then a preview of the files. */
   let { onclose }: { onclose: () => void } = $props()
 
   let el: HTMLDialogElement
@@ -48,8 +48,11 @@
   let hardware = $state('')
   // nixos-anywhere installs it on a disko layout, instead of NixOS installed by hand.
   let anywhere = $state(false)
+  let boot = $state<MachineBoot>('uefi')
   let disk = $state<MachineDisk>('ext4')
   let device = $state('')
+  // Its own state: a disk typed for GRUB must never pre-fill the disk nixos-anywhere erases.
+  let grubDevice = $state('')
   let creating = $state(false)
   let flakeText = $state<string | null>(null)
   const autoFlake = $derived(flakeText === null ? null : flakeText.includes('readDir ./hosts'))
@@ -64,7 +67,10 @@
   const lxc = $derived(platform === 'proxmox-lxc')
   const hw = $derived(lxc || anywhere ? {} : hardwareCheck(hardware))
   const layout = $derived(!lxc && anywhere)
+  // Installed by hand on BIOS: GRUB goes on a disk. GRUB's BIOS target is x86 only.
+  const grubBIOS = $derived(!lxc && !anywhere && system === 'x86_64-linux' && boot === 'bios')
   const devProblem = $derived(deviceProblem(device.trim()))
+  const grubProblem = $derived(deviceProblem(grubDevice.trim()))
   const spec = $derived<MachineSpec>({
     name: name.trim(),
     system,
@@ -72,7 +78,11 @@
     platform,
     ...(packages ? { packages } : {}),
     ...(uName ? { user: { name: uName, keys: 'keys' in parsedKeys ? parsedKeys.keys : [], wheel, home } } : {}),
-    ...(layout ? { disk, device: device.trim() } : !lxc && hardware.trim() ? { hardware } : {}),
+    ...(layout
+      ? { disk, device: device.trim() }
+      : lxc
+        ? {}
+        : { boot: grubBIOS ? 'bios' : 'uefi', ...(grubBIOS ? { device: grubDevice.trim() } : {}), ...(hardware.trim() ? { hardware } : {}) }),
   })
   const noDiskoInput = $derived(layout && flakeText !== null && !hasDiskoInput(flakeText))
   // shortcut: any mention counts; a flake without home-manager's module fails to evaluate the machine, which says so.
@@ -81,7 +91,13 @@
   let openName = $state('managed.json')
   const shown = $derived(files.find((f) => f.path.endsWith('/' + openName)) ?? files[files.length - 1])
   const canNext = $derived(
-    step === 0 ? !!name.trim() && !nameProblem : step === 2 ? !userProblem && !keysProblem : step === 3 ? !hw.error && (!layout || (!!device.trim() && !devProblem)) : true,
+    step === 0
+      ? !!name.trim() && !nameProblem
+      : step === 2
+        ? !userProblem && !keysProblem
+        : step === 3
+          ? !hw.error && (!layout || (!!device.trim() && !devProblem)) && (!grubBIOS || (!!grubDevice.trim() && !grubProblem))
+          : true,
   )
 
   onMount(() => {
@@ -279,7 +295,7 @@
               <label class="choice lift" class:on={!anywhere} use:frame={{ kind: !anywhere ? 'heavy' : 'round', lift: true }}>
                 <input type="radio" name="install" value={false} bind:group={anywhere} />
                 <span class="c-title"><Icon name="terminal" /> Installed by hand</span>
-                <span class="c-note">From the NixOS installer, as usual. Its hardware configuration goes below.</span>
+                <span class="c-note">From the NixOS installer, as usual. Its boot loader and hardware configuration go below.</span>
               </label>
               <label class="choice lift" class:on={anywhere} use:frame={{ kind: anywhere ? 'heavy' : 'round', lift: true }}>
                 <input type="radio" name="install" value={true} bind:group={anywhere} />
@@ -317,6 +333,37 @@
             {/if}
           </label>
         {:else if !lxc}
+          {#if system === 'x86_64-linux'}
+            <fieldset class="field">
+              <legend class="label">Boot loader</legend>
+              <div class="choices two">
+                {#each bootLoaders as b (b.boot)}
+                  <label class="choice lift" class:on={boot === b.boot} use:frame={{ kind: boot === b.boot ? 'heavy' : 'round', lift: true }}>
+                    <input type="radio" name="boot" value={b.boot} bind:group={boot} />
+                    <span class="c-title"><Icon name="disk" /> {b.label}</span>
+                    <span class="c-note">{b.note}</span>
+                  </label>
+                {/each}
+              </div>
+              <span class="hint">As the installer set it up: <span class="mono">grep boot.loader /etc/nixos/configuration.nix</span> on the machine tells.</span>
+            </fieldset>
+            {#if grubBIOS}
+              <label class="field">
+                <span class="label">Disk GRUB is on</span>
+                <input class="mono" bind:value={grubDevice} placeholder="/dev/sda" spellcheck="false" autocomplete="off" aria-invalid={!!grubProblem} aria-describedby="grub-hint" />
+                {#if grubProblem}
+                  <span class="problem" id="grub-hint">{grubProblem}</span>
+                {:else}
+                  <span class="hint" id="grub-hint">The installer's <span class="mono">boot.loader.grub.device</span>: a whole disk such as <span class="mono">/dev/sda</span>, not a partition.</span>
+                {/if}
+              </label>
+            {/if}
+          {:else}
+            <div class="field">
+              <span class="label">Boot loader</span>
+              <span class="hint">systemd-boot, on UEFI: GRUB's BIOS target is x86_64 only.</span>
+            </div>
+          {/if}
           <div class="field">
             <span class="label">Hardware configuration <span class="faint">(optional)</span></span>
             <p class="lead">

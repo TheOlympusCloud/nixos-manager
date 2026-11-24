@@ -20,7 +20,8 @@ type MachineSpec struct {
 	Hardware string `json:"hardware,omitempty"` // nixos-generate-config output; a placeholder when empty
 	Platform string `json:"platform,omitempty" jsonschema:"hardware (default: a physical machine), proxmox-lxc (a NixOS container on Proxmox: no hardware configuration) or proxmox-vm (a Proxmox virtual machine: QEMU guest support plus the hardware configuration)"`
 	Disk     string `json:"disk,omitempty" jsonschema:"a disk layout for disko, for a machine nixos-anywhere installs (hardware or proxmox-vm only): ext4, or btrfs (subvolumes for /, /home and /nix). nixos-anywhere then writes hardware-configuration.nix, so leave hardware out. Empty: NixOS is installed by hand"`
-	Device   string `json:"device,omitempty" jsonschema:"with a disk layout, the disk nixos-anywhere erases and installs on, such as /dev/sda, /dev/nvme0n1 or /dev/disk/by-id/..."`
+	Device   string `json:"device,omitempty" jsonschema:"the disk, such as /dev/sda, /dev/nvme0n1 or /dev/disk/by-id/...: with a disk layout, the one nixos-anywhere erases and installs on; with boot bios, the one GRUB is installed on"`
+	Boot     string `json:"boot,omitempty" jsonschema:"the boot loader of a machine installed by hand (no disk layout, not a Proxmox LXC), as the NixOS installer set it up: uefi (default: systemd-boot) or bios (GRUB, on device; x86_64 only)"`
 	// Packages, when set (an empty list included), replace the role's preset packages.
 	Packages []string `json:"packages,omitempty" jsonschema:"nixpkgs attributes managed.json starts with, instead of the role's preset packages"`
 	// User, when set, is the machine's first user, written to managed.json. No role creates one.
@@ -124,13 +125,14 @@ func gcSettings() map[string]any {
 	}
 }
 
-// %[3]s is the import of disk-config.nix, for a machine with a disk layout.
+// %[3]s is the import of disk-config.nix, for a machine with a disk layout, %[4]s the boot
+// loader of a machine installed by hand.
 const defaultNixTemplate = `{ ... }:
 {
   imports = [
     ./hardware-configuration.nix%[3]s
   ];
-
+%[4]s
   networking.hostName = %[1]q;
 
   # The NixOS release this machine was first installed with. Keep it as it is when upgrading.
@@ -162,7 +164,7 @@ const proxmoxVMTemplate = `{ modulesPath, ... }:
     ./hardware-configuration.nix%[3]s
     (modulesPath + "/profiles/qemu-guest.nix")
   ];
-
+%[4]s
   # Lets Proxmox show the VM's address and shut it down cleanly
   # (turn on "QEMU Guest Agent" in the VM's Options).
   services.qemuGuest.enable = true;
@@ -179,12 +181,25 @@ const hardwarePlaceholder = `# Placeholder: replace with the output of nixos-gen
 { lib, ... }:
 {
   nixpkgs.hostPlatform = lib.mkDefault %q;
-  boot.loader.grub.device = "nodev";
   fileSystems."/" = {
     device = "/dev/disk/by-label/nixos";
     fsType = "ext4";
   };
 }
+`
+
+// The boot loader of a machine installed by hand, as the NixOS installer sets it up:
+// nixos-generate-config's hardware configuration has none.
+const bootUEFI = `
+  # systemd-boot on UEFI, as the NixOS installer sets it up.
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+`
+
+// %q is the disk GRUB is installed on.
+const bootBIOS = `
+  # GRUB on BIOS, installed on this disk.
+  boot.loader.grub.device = %q;
 `
 
 // The hardware file of a machine with a disk layout until nixos-anywhere
@@ -294,6 +309,10 @@ var diskLayouts = map[string]string{"ext4": ext4Root, "btrfs": btrfsRoot}
 // diskDevice is a disk's path: plain characters only, as it goes into Nix and is shown in a shell command.
 var diskDevice = regexp.MustCompile(`^/dev/[A-Za-z0-9][A-Za-z0-9._:+/-]*$`)
 
+func validDevice(d string) bool {
+	return diskDevice.MatchString(d) && !strings.Contains(d, "..") && len(d) <= 200
+}
+
 const diskoInputSnippet = `disko = {
   url = "github:nix-community/disko";
   inputs.nixpkgs.follows = "nixpkgs";
@@ -343,17 +362,38 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 	}
 	root, disko := diskLayouts[spec.Disk]
 	switch {
-	case spec.Disk == "" && spec.Device != "":
-		return MachineCreated{}, errorf(ErrInvalid, "a disk is only used with a disk layout")
+	case spec.Disk == "" && spec.Device != "" && spec.Boot != "bios":
+		return MachineCreated{}, errorf(ErrInvalid, "a disk is only used with a disk layout, or for GRUB with boot bios")
 	case spec.Disk == "":
 	case !disko:
 		return MachineCreated{}, errorf(ErrInvalid, "unknown disk layout %q (ext4 or btrfs)", spec.Disk)
 	case lxc:
 		return MachineCreated{}, errorf(ErrInvalid, "a Proxmox LXC has no disk to lay out")
-	case !diskDevice.MatchString(spec.Device) || strings.Contains(spec.Device, "..") || len(spec.Device) > 200:
+	case !validDevice(spec.Device):
 		return MachineCreated{}, errorf(ErrInvalid, "the disk to install on is a path in /dev, such as /dev/sda or /dev/disk/by-id/…")
 	case strings.TrimSpace(spec.Hardware) != "":
 		return MachineCreated{}, errorf(ErrInvalid, "with a disk layout, nixos-anywhere writes the hardware configuration: leave it out")
+	}
+	if spec.Boot == "" && !lxc && !disko {
+		spec.Boot = "uefi"
+	}
+	boot := ""
+	switch {
+	case spec.Boot == "":
+	case lxc || disko:
+		return MachineCreated{}, errorf(ErrInvalid, "only a machine installed by hand takes a boot loader: a Proxmox LXC has none, and a disk layout sets its own")
+	case spec.Boot == "uefi" && spec.Device == "":
+		boot = bootUEFI
+	case spec.Boot == "uefi":
+		return MachineCreated{}, errorf(ErrInvalid, "systemd-boot takes no disk: leave it out")
+	case spec.Boot != "bios":
+		return MachineCreated{}, errorf(ErrInvalid, "unknown boot loader %q (uefi or bios)", spec.Boot)
+	case spec.System != "x86_64-linux":
+		return MachineCreated{}, errorf(ErrInvalid, "GRUB boots BIOS on x86_64 only: boot an aarch64 machine with uefi")
+	case !validDevice(spec.Device):
+		return MachineCreated{}, errorf(ErrInvalid, "GRUB needs the disk it is installed on, a path in /dev such as /dev/sda")
+	default:
+		boot = fmt.Sprintf(bootBIOS, spec.Device)
 	}
 	dir := "hosts/" + spec.Name
 	hardware := spec.Hardware
@@ -389,7 +429,7 @@ func (s *Service) CreateMachine(spec MachineSpec) (MachineCreated, error) {
 		return MachineCreated{}, err
 	}
 	files := []struct{ path, content string }{
-		{dir + "/default.nix", fmt.Sprintf(template, spec.Name, spec.System, diskImport)},
+		{dir + "/default.nix", fmt.Sprintf(template, spec.Name, spec.System, diskImport, boot)},
 		{dir + "/hardware-configuration.nix", hardware},
 		{dir + "/managed.json", managed.String()},
 	}

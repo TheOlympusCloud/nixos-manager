@@ -203,7 +203,9 @@ export type MachineRole = 'minimal' | 'server' | 'desktop'
 export type MachinePlatform = 'hardware' | 'proxmox-lxc' | 'proxmox-vm'
 /** A disko disk layout, for a machine nixos-anywhere installs. */
 export type MachineDisk = 'ext4' | 'btrfs'
-/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). */
+/** The boot loader of a machine installed by hand: systemd-boot on UEFI, or GRUB on BIOS (x86_64 only, on device). */
+export type MachineBoot = 'uefi' | 'bios'
+/** disk and device go together: the layout and the disk nixos-anywhere erases (then hardware stays empty). With boot bios, device is GRUB's disk. */
 export type MachineSpec = {
   name: string
   system: 'x86_64-linux' | 'aarch64-linux'
@@ -216,6 +218,7 @@ export type MachineSpec = {
   packages?: string[]
   /** The first user, written to managed.json: no role creates one. */
   user?: MachineUser
+  boot?: MachineBoot
 }
 /** keys: authorized_keys lines; wheel: an administrator (sudo); home: home-manager on for them. */
 export type MachineUser = { name: string; keys?: string[]; wheel?: boolean; home?: boolean }
