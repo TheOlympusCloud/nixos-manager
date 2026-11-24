@@ -146,7 +146,14 @@ async function writeNow(host: string, fn: () => Promise<Managed>, done: string, 
   return true
 }
 
-export const addPackages = (host: string, attrs: string[]) => write(host, () => api.editPackages(host, { add: attrs }), `Added ${list(attrs)} to ${host}`)
+/** Adding a removed name clears its removal (EditPackages), so its other copies come back: say so. */
+function added(host: string, attrs: string[], user?: string) {
+  const removed = user ? fleet.managed[host]?.home?.[user]?.removedPackages : fleet.managed[host]?.removedPackages
+  const back = attrs.filter((a) => removed?.includes(a))
+  const whose = user ? `${user}'s home on ${host}` : host
+  return `Added ${list(attrs)} to ${whose}` + (back.length ? `. ${list(back)} ${back.length > 1 ? 'are' : 'is'} no longer removed by name, so what else adds ${back.length > 1 ? 'them' : 'it'} comes back too` : '')
+}
+export const addPackages = (host: string, attrs: string[]) => write(host, () => api.editPackages(host, { add: attrs }), added(host, attrs))
 /** Removing is one click, so the toast offers to put the packages back. */
 export const removePackages = (host: string, attrs: string[]) =>
   write(host, () => api.editPackages(host, { remove: attrs }), `Removed ${list(attrs)} from ${host}`, { label: 'Undo', run: () => addPackages(host, attrs) })
@@ -174,7 +181,7 @@ export const excludePackages = (host: string, names: string[], user?: string): P
 /** Gives back packages taken out by name: what NixOS or the Nix files add comes back. */
 export const restorePackages = (host: string, names: string[], user?: string): Promise<boolean> =>
   editPackages(host, { user, restore: names }, `Put ${list(names)} back on ${where(host, user)}`)
-export const addHomePackages = (host: string, user: string, attrs: string[]) => editPackages(host, { user, add: attrs }, `Added ${list(attrs)} to ${where(host, user)}`)
+export const addHomePackages = (host: string, user: string, attrs: string[]) => editPackages(host, { user, add: attrs }, added(host, attrs, user))
 export const removeHomePackages = (host: string, user: string, attrs: string[]) =>
   editPackages(host, { user, remove: attrs }, `Removed ${list(attrs)} from ${where(host, user)}`, { label: 'Undo', run: () => addHomePackages(host, user, attrs) })
 /** How a package is changed on the machine; null puts it back as nixpkgs has it. */
