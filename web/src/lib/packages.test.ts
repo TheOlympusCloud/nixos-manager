@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Managed } from './api'
-import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeDir, homeEditingLine, homePathProblem, homeRows, homeStateVersion, linksSecrets, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, secretTemplatesDir, standaloneRows, systemRows, takesFromInputs } from './packages'
+import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeDir, homeEditable, homeEditingLine, homeNameOk, homePathProblem, homeRows, homeStateVersion, linksSecrets, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, secretTemplatesDir, standaloneRows, systemRows, takesFromInputs } from './packages'
 import { host } from './testmodel'
 
 const mf = 'hosts/pc/managed.json'
@@ -228,10 +228,16 @@ describe('standalone homes', () => {
     expect(homeEditingLine('pablo')).toBe('(import ./modules/managed-home.nix ./homes/pablo/managed.json)')
     expect(homeEditingLine('pablo@laptop')).toBe('(import ./modules/managed-home.nix (./homes + "/pablo@laptop/managed.json"))')
   })
-  it('keep their files next to the managed.json they load', () => {
+  it('are editable only where they load the managed.json edits go to', () => {
     const home = { name: 'pablo@laptop', packages: [], programs: [], files: [], managedFile: null }
-    expect(homeDir(home)).toBe('homes/pablo@laptop')
-    expect(homeDir({ ...home, managedFile: 'homes/laptop/managed.json' })).toBe('homes/laptop')
+    expect(homeDir(home.name)).toBe('homes/pablo@laptop')
+    expect(homeEditable(home)).toBe(false)
+    expect(homeEditable({ ...home, managedFile: 'homes/pablo@laptop/managed.json' })).toBe(true)
+    // Loaded from another folder: edits would go to a file nothing reads.
+    expect(homeEditable({ ...home, managedFile: 'home/pablo/managed.json' })).toBe(false)
+    // A name the server refuses, even with the file it would be.
+    expect(homeNameOk('pablo laptop')).toBe(false)
+    expect(homeEditable({ ...home, name: 'pablo laptop', managedFile: 'homes/pablo laptop/managed.json' })).toBe(false)
   })
   it('list packages as the evaluation has them and as managed.json changes them', () => {
     const home = { name: 'laptop', packages: ['bat', 'nodejs'], programs: [], files: [], managedFile: 'homes/laptop/managed.json', managedPackages: { nodejs_22: 'nodejs' } }

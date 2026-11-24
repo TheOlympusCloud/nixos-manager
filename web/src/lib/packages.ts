@@ -11,8 +11,12 @@ export const HOME_MODULE = 'modules/managed-home.nix'
 /** The line a standalone home's modules need for its managed.json; a name a Nix path cannot hold goes in a string. */
 export const homeEditingLine = (name: string) =>
   `(import ./${HOME_MODULE} ${/^[A-Za-z0-9._+-]+$/.test(name) ? `./homes/${name}/managed.json` : `(./homes + ${JSON.stringify(`/${name}/managed.json`)})`})`
+/** A homeConfigurations name that can be edited here, as the server accepts it: a folder name in homes/. */
+export const homeNameOk = (name: string) => /^[A-Za-z0-9_][A-Za-z0-9_.@+-]{0,99}$/.test(name)
 /** Where a standalone home's own files go: homes/pablo@laptop. */
-export const homeDir = (home: Home) => (home.managedFile ? home.managedFile.replace(/\/[^/]*$/, '') : `homes/${home.name}`)
+export const homeDir = (name: string) => `homes/${name}`
+/** Whether edits here reach the home: they go to homes/<name>/managed.json, so it must load that file. */
+export const homeEditable = (home: Home) => homeNameOk(home.name) && home.managedFile === `${homeDir(home.name)}/managed.json`
 
 /** Whether the machine's modules/managed.nix applies modules/managed.json (version 3). */
 export const appliesShared = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 3

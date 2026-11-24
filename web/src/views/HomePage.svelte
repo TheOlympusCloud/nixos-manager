@@ -3,7 +3,7 @@
   import { bigText, frame } from '../lib/ascii'
   import { addPackages, errorFile, evaluateAgain, excludePackages, fleet, loadManaged, openOrCreate, removePackages, restorePackages } from '../lib/fleet.svelte'
   import { pathName } from '../lib/options'
-  import { HOME, homeDir, homePathProblem, standaloneNixTemplate, standaloneRows, type PackageRow } from '../lib/packages'
+  import { HOME, homeDir, homeEditable, homeNameOk, homePathProblem, standaloneNixTemplate, standaloneRows, type PackageRow } from '../lib/packages'
   import { codeLink } from '../lib/router.svelte'
   import { app, refresh } from '../lib/state.svelte'
   import { confirmBox, report } from '../lib/ui.svelte'
@@ -21,14 +21,16 @@
   const target = $derived(HOME + name)
   const home = $derived(fleet.model?.homes.find((h) => h.name === name))
   const managed = $derived(fleet.managed[target])
-  const editable = $derived(!!home?.managedFile && !!managed)
+  /** It loads the managed.json edits here are written to. */
+  const here = $derived(!!home && homeEditable(home))
+  const editable = $derived(here && !!managed)
   const pending = $derived(fleet.pending.includes(target) && fleet.computing)
   $effect(() => {
-    if (home?.managedFile && !fleet.managed[target]) loadManaged(target)
+    if (here && !fleet.managed[target]) loadManaged(target)
   })
 
   const rows = $derived(home ? standaloneRows(home, managed) : [])
-  const dir = $derived(home ? homeDir(home) : `homes/${name}`)
+  const dir = $derived(homeDir(name))
   const filesDir = $derived(`${dir}/files/`)
   const nixFile = $derived(`${dir}/custom.nix`)
   const nixExists = $derived(app.entries.some((e) => e.path === nixFile))
@@ -97,11 +99,15 @@
                   <span class="badge err">Does not evaluate</span>
                 {:else if pending}
                   <span class="badge busy">Re-evaluating</span>
-                {:else if home.managedFile}
+                {:else if here}
                   <span class="badge ok here" title="Packages and options can be changed by clicking; they are kept in {home.managedFile}">Editable here</span>
                 {:else}
-                  <span class="badge code" title="{home.name} does not load a managed.json, so it is changed in its Nix files">Code only</span>
-                  {#if !showTurnOn}<button class="link small" onclick={() => (showTurnOn = true)}>Turn on editing</button>{/if}
+                  <span class="badge code" title="{home.name} does not load {dir}/managed.json, so it is changed in its Nix files">Code only</span>
+                  {#if !homeNameOk(home.name)}
+                    <span class="muted small">Only a name of letters, digits and _ . @ + - can be edited here.</span>
+                  {:else if !showTurnOn}
+                    <button class="link small" onclick={() => (showTurnOn = true)}>Turn on editing</button>
+                  {/if}
                 {/if}
               </p>
             </div>
@@ -112,6 +118,11 @@
             {/if}
           </div>
           <p class="muted">A standalone home-manager configuration (<span class="mono">homeConfigurations</span>), for a machine that is not NixOS or not managed here.</p>
+          {#if home.managedFile && !here && homeNameOk(home.name)}
+            <p class="warn small">
+              It loads <span class="mono">{home.managedFile}</span>, but edits here go to <span class="mono">{dir}/managed.json</span>: load that one instead, with the line Turn on editing gives.
+            </p>
+          {/if}
         </header>
 
         {#if home.error}
@@ -125,7 +136,7 @@
             </div>
           </section>
         {:else}
-          {#if !home.managedFile && showTurnOn}<TurnOnEditing host={name} home onclose={() => (showTurnOn = false)} />{/if}
+          {#if !here && showTurnOn}<TurnOnEditing host={name} home onclose={() => (showTurnOn = false)} />{/if}
 
           <section class="block" aria-labelledby="sp-title">
             <div class="head">
@@ -249,6 +260,9 @@
   }
   .badge.code::before {
     content: 'λ ';
+  }
+  .warn {
+    color: var(--yellow);
   }
   .errcard {
     display: grid;

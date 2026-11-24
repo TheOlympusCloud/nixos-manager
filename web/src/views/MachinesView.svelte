@@ -7,6 +7,7 @@
   import { fleet } from '../lib/fleet.svelte'
   import { age, arch, plural } from '../lib/format'
   import { bigText, frame } from '../lib/ascii'
+  import { homeEditable } from '../lib/packages'
   import { homeLink, machineLink, replace, route } from '../lib/router.svelte'
   import { app, startJob } from '../lib/state.svelte'
 
@@ -79,7 +80,7 @@
                 {:else}
                   <p><Icon name="user" /> {plural(home.packages.length, 'package')} · {plural(home.programs.length, 'program')}</p>
                   <div class="chips">{#each home.programs as p (p)}<span class="chip g-programs">{p}</span>{/each}</div>
-                  <p class="state" class:here={!!home.managedFile}>{home.managedFile ? '✎ Editable here' : 'λ Code only'}</p>
+                  <p class="state" class:here={homeEditable(home)}>{homeEditable(home) ? '✎ Editable here' : 'λ Code only'}</p>
                 {/if}
               </a>
             {/each}

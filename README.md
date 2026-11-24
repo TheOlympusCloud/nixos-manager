@@ -1463,7 +1463,9 @@ in `homes/<name>/`:
 - `custom.nix`: a home-manager module of the home's own.
 
 `modules/managed-home.nix` applies them. A home is editable once its modules in
-`flake.nix` load it; **Turn on editing** on its page gives the line and
+`flake.nix` load its `homes/<name>/managed.json` (one loaded from another
+folder stays Code only, as does a name with characters other than letters,
+digits and `_ . @ + -`); **Turn on editing** on its page gives the line and
 creates the module:
 
 ```nix
