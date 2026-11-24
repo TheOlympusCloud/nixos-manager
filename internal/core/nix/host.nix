@@ -34,11 +34,20 @@ let
       file = rel d.file;
     }) (lib.toList (unwrap d.value))
   ) (defs options.environment.systemPackages);
-  packages = lib.mapAttrsToList (n: ds: {
+  defined = lib.mapAttrsToList (n: ds: {
     name = n;
     version = (builtins.head ds).version;
     files = lib.unique (map (d: d.file) ds);
   }) (lib.groupBy (d: d.name) packageDefs);
+  # What the system gets: a package defined but taken out by name (managed.json's
+  # removedPackages) is listed apart. null when it cannot be read: all count as installed.
+  installed =
+    let
+      ns = map pkgName config.environment.systemPackages;
+    in
+    try (builtins.deepSeq ns (lib.genAttrs ns (_: true))) null;
+  packages = if installed == null then defined else builtins.filter (p: installed ? ${p.name}) defined;
+  removedPackages = if installed == null then [ ] else builtins.filter (p: !(installed ? ${p.name})) defined;
 
   enabledIn =
     group:
@@ -74,6 +83,7 @@ let
   hm = if config ? home-manager then try (config.home-manager.users or { }) { } else { };
   # Inside try as a whole: reading a removed option (programs.octant) throws.
   enabledPrograms = ps: builtins.attrNames (lib.filterAttrs (_: p: try (builtins.isAttrs p && (p.enable or false) == true) false) ps);
+  homeFiles = n: lib.filterAttrs (_: f: f.enable or true) (try hm.${n}.home.file { });
   users = lib.mapAttrsToList (n: u: {
     name = n;
     description = u.description or "";
@@ -83,6 +93,12 @@ let
         {
           packages = lib.unique (map pkgName (try hm.${n}.home.packages [ ]));
           programs = enabledPrograms (try hm.${n}.programs { });
+          # What home-manager links into ~, relative to it; programs write some of them.
+          files =
+            let
+              ts = lib.unique (map (f: f.target) (builtins.attrValues (homeFiles n)));
+            in
+            try (builtins.deepSeq ts ts) [ ];
         }
       else
         null;
@@ -173,10 +189,18 @@ let
     _: e:
     lib.nameValuePair (builtins.unsafeDiscardStringContext e.target) (hash "${e.source}\n${e.mode}\n${e.user}\n${e.group}")
   ) (lib.filterAttrs (_: e: e.enable && e.target != "systemd/system") config.environment.etc);
+  # Each home-manager user's files in ~ by target, hashed as /etc is.
+  homeFileHashes = lib.mapAttrs (
+    n: _:
+    lib.mapAttrs' (
+      _: f:
+      lib.nameValuePair (builtins.unsafeDiscardStringContext f.target) (hash "${f.source}\n${toString (f.executable or "")}")
+    ) (homeFiles n)
+  ) hm;
 
   files = lib.filter (f: f != "nixos") (
     lib.unique (
-      lib.concatMap (p: p.files) packages
+      lib.concatMap (p: p.files) defined
       ++ lib.concatMap (f: f.files) features
       ++ lib.concatMap defFiles [
         options.networking.hostName
@@ -195,10 +219,15 @@ in
   inherit
     name
     packages
+    removedPackages
     features
     users
     files
     ;
+  # NixOS's own packages for a working system (bash, coreutils…): removing one needs care.
+  corePackages = try (map pkgName config.environment.corePackages) [ ];
+  # Whether home-manager's NixOS module is loaded, so users can have a home configuration.
+  homeManager = options ? home-manager;
   hostName = try config.networking.hostName "";
   system = machine.pkgs.stdenv.hostPlatform.system;
   release = try config.system.nixos.release "";
@@ -228,7 +257,10 @@ in
   # deepSeq: tryEval alone would not catch an error inside them.
   units = try (builtins.deepSeq units units) null;
   etc = try (builtins.deepSeq etc etc) null;
+  homeFiles = try (builtins.deepSeq homeFileHashes homeFileHashes) null;
   managedFile = if managed == null then null else rel managed;
+  # What its modules/managed.nix can apply: 1 before removed packages, overrides and home-manager.
+  managedVersion = try (config.nixosManager.version or 1) 1;
   inherit managedPackages;
   # The sops-nix secrets it decrypts, never their values; null without sops-nix.
   secrets =
