@@ -3,6 +3,7 @@ package core
 import (
 	"io/fs"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -133,7 +134,13 @@ func TestManagedExcludeAndRestore(t *testing.T) {
 	if c, _, _ := s.Read("hosts/web/managed.json"); !strings.Contains(c, "\"removedPackages\": [\n    \"perl\"\n  ]") {
 		t.Fatalf("file:\n%s", c)
 	}
-	must[ManagedView](t)(s.EditPackages("web", PackageEdit{Restore: []string{"perl"}}))
+	// Adding a removed name back clears its removal; a replacement of another name keeps it.
+	v = must[ManagedView](t)(s.EditPackages("web", PackageEdit{Exclude: []string{"hello", "nodejs"}, Add: []string{"nodejs_24"}}))
+	v = must[ManagedView](t)(s.EditPackages("web", PackageEdit{Add: []string{"hello"}}))
+	if !reflect.DeepEqual(v.RemovedPackages, []string{"nodejs", "perl"}) || !slices.Contains(v.Packages, "hello") {
+		t.Fatalf("after adding hello back %+v", v)
+	}
+	must[ManagedView](t)(s.EditPackages("web", PackageEdit{Restore: []string{"perl", "nodejs"}}))
 	if c, _, _ := s.Read("hosts/web/managed.json"); strings.Contains(c, "removedPackages") {
 		t.Fatalf("an empty removedPackages stays in the file:\n%s", c)
 	}

@@ -49,19 +49,17 @@ export function systemRows(host: Host, managed: Managed | undefined, paths: stri
   const removedNames = new Set(managed?.removedPackages ?? [])
   const core = new Set(host.corePackages ?? [])
   const known = new Set([...host.packages, ...(host.removedPackages ?? [])].map((p) => p.name))
-  const row = (p: Package, extra: Partial<PackageRow> = {}): PackageRow => ({
-    ...p,
-    attr: host.managedFile && p.files.includes(host.managedFile) ? attrOf(host, p.name, attrs) : undefined,
-    overridden: attrOf(host, p.name, changed),
-    core: core.has(p.name),
-    ...extra,
-  })
+  const row = (p: Package, extra: Partial<PackageRow> = {}): PackageRow => {
+    const attr = host.managedFile && p.files.includes(host.managedFile) ? attrOf(host, p.name, attrs) : undefined
+    // A name removed here still installs what managed.json adds (nodejs_20 replaced by nodejs_24).
+    return { ...p, attr, overridden: attrOf(host, p.name, changed), core: core.has(p.name), removed: removedNames.has(p.name) && !attr, ...extra }
+  }
   const pname = (a: string) => host.managedPackages?.[a]
   const pending = attrs
     .filter((a) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? ''))
     .map((a) => ({ name: a, version: '', files: host.managedFile ? [host.managedFile] : [], attr: a, pending: true, overridden: attrOf(host, a, changed) }))
   const rows = [
-    ...host.packages.map((p) => row(p, { removed: removedNames.has(p.name) })),
+    ...host.packages.map((p) => row(p)),
     ...(host.removedPackages ?? []).map((p) => row(p, { removed: true })),
     ...pending,
   ]
@@ -77,7 +75,10 @@ export function homeRows(host: Host, user: string, managed: Managed | undefined)
   const attrs = mine?.packages ?? []
   const removedNames = new Set(mine?.removedPackages ?? [])
   const names = u?.home?.packages ?? []
-  const rows: PackageRow[] = names.map((n) => ({ name: n, version: '', files: [], attr: attrOf(host, n, attrs), removed: removedNames.has(n) }))
+  const rows: PackageRow[] = names.map((n) => {
+    const attr = attrOf(host, n, attrs)
+    return { name: n, version: '', files: [], attr, removed: removedNames.has(n) && !attr }
+  })
   const known = new Set(names)
   const pname = (a: string) => host.managedPackages?.[a]
   for (const a of attrs) if (!known.has(a) && !known.has(pname(a) ?? '') && !known.has(a.split('.').pop()!)) rows.push({ name: a, version: '', files: [], attr: a, pending: true })

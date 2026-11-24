@@ -27,27 +27,37 @@ let
   defs = opt: try (opt.definitionsWithLocations or [ ]) [ ];
   defFiles = opt: lib.unique (map (d: rel d.file) (defs opt));
 
+  # What the system gets, by store path: a definition taken out by name
+  # (managed.json's removedPackages) is not installed, while another of the same
+  # name may be (nodejs_20 replaced by nodejs_24). null when it cannot be read.
+  outPath = p: try (builtins.unsafeDiscardStringContext p.outPath) "";
+  installed =
+    let
+      ps = map outPath config.environment.systemPackages;
+    in
+    try (builtins.deepSeq ps (lib.genAttrs ps (_: true))) null;
   packageDefs = lib.concatMap (
     d: map (p: {
       name = pkgName p;
       version = try (toString (p.version or "")) "";
       file = rel d.file;
+      installed = installed == null || installed ? ${outPath p};
     }) (lib.toList (unwrap d.value))
   ) (defs options.environment.systemPackages);
-  defined = lib.mapAttrsToList (n: ds: {
-    name = n;
-    version = (builtins.head ds).version;
-    files = lib.unique (map (d: d.file) ds);
-  }) (lib.groupBy (d: d.name) packageDefs);
-  # What the system gets: a package defined but taken out by name (managed.json's
-  # removedPackages) is listed apart. null when it cannot be read: all count as installed.
-  installed =
+  byName =
+    ds:
+    lib.mapAttrsToList (n: ds: {
+      name = n;
+      version = (builtins.head ds).version;
+      files = lib.unique (map (d: d.file) ds);
+    }) (lib.groupBy (d: d.name) ds);
+  packages = byName (builtins.filter (d: d.installed) packageDefs);
+  # Names with no copy installed; a name still installed is listed with what installs it.
+  removedPackages =
     let
-      ns = map pkgName config.environment.systemPackages;
+      have = lib.genAttrs (map (p: p.name) packages) (_: true);
     in
-    try (builtins.deepSeq ns (lib.genAttrs ns (_: true))) null;
-  packages = if installed == null then defined else builtins.filter (p: installed ? ${p.name}) defined;
-  removedPackages = if installed == null then [ ] else builtins.filter (p: !(installed ? ${p.name})) defined;
+    builtins.filter (p: !(have ? ${p.name})) (byName (builtins.filter (d: !d.installed) packageDefs));
 
   enabledIn =
     group:
@@ -200,7 +210,7 @@ let
 
   files = lib.filter (f: f != "nixos") (
     lib.unique (
-      lib.concatMap (p: p.files) defined
+      map (d: d.file) packageDefs
       ++ lib.concatMap (f: f.files) features
       ++ lib.concatMap defFiles [
         options.networking.hostName

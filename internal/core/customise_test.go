@@ -57,8 +57,16 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	write(t, s.Repo, "hosts/example/home/pablo/files/.config/nixmgr/test.conf", "dotfile\n")
 	write(t, s.Repo, "hosts/example/home/pablo/custom.nix", "{ home.file.\"nixmgr-custom\".text = \"home custom.nix\"; }\n")
 
-	// ct: two NixOS defaults go, htop gets vim keys, and a new user gets a home.
+	// ct: two NixOS defaults go, htop gets vim keys, a hand-written lua5_3 is replaced
+	// by lua5_4 of the same name (lua), and a new user gets a home.
+	def := fileText(t, s.Repo, "hosts/ct/default.nix")
+	write(t, s.Repo, "hosts/ct/default.nix", strings.Replace(strings.Replace(def, "{ modulesPath, ... }:", "{ modulesPath, pkgs, ... }:", 1),
+		"system.stateVersion", "environment.systemPackages = [ pkgs.lua5_3 ];\n  system.stateVersion", 1))
+	if !strings.Contains(fileText(t, s.Repo, "hosts/ct/default.nix"), "pkgs.lua5_3") {
+		t.Fatalf("ct's default.nix did not take lua5_3:\n%s", def)
+	}
 	edit(s.EditPackages("ct", PackageEdit{Exclude: []string{"rsync", "strace"}}))
+	edit(s.EditPackages("ct", PackageEdit{Exclude: []string{"lua"}, Add: []string{"lua5_4"}}))
 	edit(s.SetPackageOverride("ct", "htop", &PackageOverride{Override: map[string]any{"withVimKeys": true}}, nil))
 	edit(s.SetOption("ct", []string{"users", "users", "anna", "isNormalUser"}, true, nil))
 	edit(s.SetHome("ct", HomeEdit{User: "anna", Enable: true, StateVersion: "26.05"}))
@@ -103,6 +111,8 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	expect(strings.Contains(read(pablo+"/etc/profile.d/hm-session-vars.sh"), `NIXMGR_TEST="managed"`), "pablo's home has the option set by clicking")
 	expect(!exists(ct+"/sw/bin/rsync") && !exists(ct+"/sw/bin/strace") && exists(ct+"/sw/bin/perl") && exists(ct+"/sw/bin/htop"), "ct has no rsync or strace, and keeps perl and htop")
 	expect(exists(ct+"/etc/profiles/per-user/anna/bin/hello"), "anna has hello")
+	lua, err := filepath.EvalSymlinks(ct + "/sw/bin/lua")
+	expect(err == nil && strings.Contains(lua, "-lua-5.4"), "ct runs lua 5.4, the replacement of the same name, not lua 5.3 nor no lua: "+lua)
 
 	// What the console shows of the working copy is what was built.
 	var m *Model
@@ -136,6 +146,12 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	expect(slices.Contains(p.Packages, "hello") && !slices.Contains(p.Packages, "htop"), "the model lists pablo's packages")
 	expect(slices.Contains(p.Files, ".config/nixmgr/test.conf") && slices.Contains(p.Files, "nixmgr-custom"), "the model lists pablo's files")
 	expect(slices.Contains(home(c, "anna").Packages, "hello"), "the model lists anna's hello")
+	for _, p := range c.Packages {
+		if p.Name == "lua" {
+			expect(strings.HasPrefix(p.Version, "5.4") && slices.Equal(p.Files, []string{"hosts/ct/managed.json"}), "the model lists ct's lua as 5.4 from managed.json: "+p.Version+" "+strings.Join(p.Files, ","))
+		}
+	}
+	expect(slices.Contains(pkgNames(c.Packages), "lua") && !slices.Contains(pkgNames(c.RemovedPackages), "lua"), "the model lists lua as installed on ct, not removed")
 
 	// Pushed, comin builds exactly what the check built and the console expects.
 	must[string](t)(s.Commit(ctx, "customise both machines", false))

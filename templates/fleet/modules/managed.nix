@@ -22,8 +22,9 @@ let
   # message, and the fleet view still shows the rest of the machine.
   package = name: lib.attrByPath (attrPath name) (throw "managed.json: package ${name} is not in nixpkgs") pkgs;
   pname = p: p.pname or (builtins.parseDrvName p.name).name;
-  # Removed packages go by name, whoever adds them: NixOS, an input or hand-written Nix.
-  without = names: builtins.filter (p: !(builtins.elem (pname p) names));
+  # Removed packages go by name, whoever adds them (NixOS, an input or hand-written Nix),
+  # except those added here: replacing nodejs_20 with nodejs_24 keeps nodejs_24.
+  without = names: keep: builtins.filter (p: !(builtins.elem (pname p) names) || builtins.elem p keep);
   # Priority on each value, never on a whole attribute set: users.users or
   # services.openssh.settings set here must still merge with hand-written entries.
   # Lists are values, so a list set here replaces the hand-written one.
@@ -117,7 +118,7 @@ let
       _file = file;
       imports = ifExists (dir + "/home/${user}/custom.nix");
       options = lib.optionalAttrs (gone != [ ]) {
-        home.packages = lib.mkOption { apply = without gone; };
+        home.packages = lib.mkOption { apply = without gone (map package (u.packages or [ ])); };
       };
       config = {
         home.packages = map package (u.packages or [ ]);
@@ -163,7 +164,7 @@ in
   }
   # A second declaration may add the apply function NixOS's own lacks.
   // lib.optionalAttrs (removed != [ ]) {
-    environment.systemPackages = lib.mkOption { apply = without removed; };
+    environment.systemPackages = lib.mkOption { apply = without removed (map package (data.packages or [ ])); };
   };
 
   config = lib.mkMerge [

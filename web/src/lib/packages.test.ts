@@ -31,6 +31,16 @@ describe('systemRows', () => {
     expect(by.ripgrep).toMatchObject({ pending: true, attr: 'ripgrep' })
     expect(by.gone).toMatchObject({ removed: true, files: [] })
   })
+  it('keeps a package added here when its name is removed: a replacement of the same name', () => {
+    // nodejs_20 from a hand-written file replaced by nodejs_24: removedPackages has nodejs, and nodejs stays.
+    const node = host('pc', { managedPackages: { nodejs_24: 'nodejs' }, packages: [{ name: 'nodejs', version: '24.1', files: [mf] }] })
+    const rows = systemRows(node, managed({ packages: ['nodejs_24'], removedPackages: ['nodejs'] }), [])
+    expect(rows).toEqual([expect.objectContaining({ name: 'nodejs', version: '24.1', attr: 'nodejs_24', removed: false })])
+    const home = host('pc', { managedPackages: { lua5_4: 'lua' }, users: [{ name: 'pablo', description: '', groups: [], home: { packages: ['lua'], programs: [] } }] })
+    expect(homeRows(home, 'pablo', managed({ home: { pablo: { packages: ['lua5_4'], removedPackages: ['lua'] } } }))).toEqual([
+      expect.objectContaining({ name: 'lua', attr: 'lua5_4', removed: false }),
+    ])
+  })
   it('lists changed packages from managed.json and from their Nix files', () => {
     expect(overriddenAttrs(pc, managed({ packageOverrides: { b: {} } }), ['hosts/pc/packages/a.nix', 'hosts/pc/packages/a.txt', 'hosts/other/packages/c.nix'])).toEqual(['a', 'b'])
     expect(packageFile(pc, 'python3Packages.requests')).toBe('hosts/pc/packages/python3Packages.requests.nix')

@@ -381,7 +381,9 @@ func (s *Service) EditPackages(host string, e PackageEdit) (ManagedView, error) 
 	}
 	edit := func(pkgs, removed *[]string) {
 		*pkgs = append(slices.DeleteFunc(*pkgs, func(p string) bool { return slices.Contains(e.Remove, p) }), e.Add...)
-		*removed = append(slices.DeleteFunc(*removed, func(p string) bool { return slices.Contains(e.Restore, p) }), e.Exclude...)
+		// Adding vim after removing NixOS's vim means vim again. managed.nix keeps what is
+		// added here anyway; this keeps the list from claiming otherwise.
+		*removed = append(slices.DeleteFunc(*removed, func(p string) bool { return slices.Contains(e.Restore, p) || slices.Contains(e.Add, p) }), e.Exclude...)
 	}
 	return s.editManaged(host, nil, func(v *ManagedView) error {
 		if e.User == "" {
