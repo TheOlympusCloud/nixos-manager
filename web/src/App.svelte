@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
+  import Boot from './components/Boot.svelte'
   import CommandPalette, { togglePalette } from './components/CommandPalette.svelte'
   import Dialog from './components/Dialog.svelte'
-  import Icon from './components/Icon.svelte'
   import Login from './components/Login.svelte'
+  import ModeLine from './components/ModeLine.svelte'
   import NavRail from './components/NavRail.svelte'
   import PackageSearch from './components/PackageSearch.svelte'
   import Toasts from './components/Toasts.svelte'
   import TopBar from './components/TopBar.svelte'
+  import { sweep } from './lib/ascii'
   import { pkgSearch } from './lib/dialogs.svelte'
   import { fleet } from './lib/fleet.svelte'
   import { loadInsights } from './lib/health.svelte'
@@ -36,7 +38,7 @@
   const loadFleet = () => import('./views/FleetView.svelte')
   const loadCode = () => import('./views/CodeWorkspace.svelte')
   const loadHistory = () => import('./views/HistoryView.svelte')
-  // The intro plays before login (and again at #/intro); its WebGL scene loads on demand inside it.
+  // The intro plays before login (and again at #/intro); it loads on demand.
   const loadIntro = () => import('./intro/Intro.svelte')
   let loginOpen = $state(false)
   $effect(() => {
@@ -46,6 +48,14 @@
     }
   })
   const leaveIntro = () => go('#/fleet')
+
+  // Every view is repainted top to bottom as you arrive, kept ones included.
+  let content = $state<HTMLElement>()
+  $effect(() => {
+    void route.view
+    void route.parts.join('/')
+    if (content) tick().then(() => content && sweep(content))
+  })
 
   // Once logged in, start the graph layout engine (a 1.4 MB worker) while the model evaluates.
   $effect(() => {
@@ -118,7 +128,7 @@
     <NavRail bind:collapsed />
     <div class="main">
       <TopBar />
-      <main class="content">
+      <main class="content" bind:this={content}>
         {#if visited.fleet}
           <div class="keep" hidden={route.view !== 'fleet'}>
             {#await loadFleet() then { default: FleetView }}<FleetView active={route.view === 'fleet'} />{/await}
@@ -153,17 +163,14 @@
           <SettingsView />
         {/if}
       </main>
+      <ModeLine />
     </div>
   </div>
   {#if route.view === 'intro'}
     {#await loadIntro() then { default: Intro }}<Intro onEnter={leaveIntro} back={leaveIntro} />{/await}
   {/if}
 {:else if !app.needLogin}
-  <div class="boot" role="status">
-    <span class="boot-mark"><Icon name="mark" size={26} /></span>
-    <p>Loading nixos-manager…</p>
-    <button onclick={init}>Retry</button>
-  </div>
+  <Boot />
 {/if}
 
 {#if app.needLogin && !app.info}
@@ -179,13 +186,16 @@
 <style>
   .shell {
     display: flex;
+    gap: 1ch;
     height: 100vh;
+    padding: 0 1ch;
   }
   .main {
     display: flex;
     flex: 1;
     flex-direction: column;
     min-width: 0;
+    height: 100vh;
     isolation: isolate; /* a drawer's scrim inside .content still covers the top bar */
   }
   .content {
@@ -194,66 +204,11 @@
     min-height: 0;
     overflow: clip;
   }
-  /* Every view fades in as you arrive, kept ones included (they restart when shown again). */
-  .content > :global(*) {
-    animation: fade-in 240ms var(--ease) backwards;
-  }
   .keep {
     position: absolute;
     inset: 0;
   }
   .keep[hidden] {
     display: none;
-  }
-  .boot {
-    display: grid;
-    place-content: center;
-    justify-items: center;
-    gap: var(--s3);
-    height: 100vh;
-    color: var(--fg-muted);
-  }
-  .boot > * {
-    animation: rise var(--t-slow) var(--ease) backwards;
-  }
-  .boot > p {
-    animation-delay: 80ms;
-  }
-  .boot > button {
-    animation-delay: 1.6s; /* only worth showing when loading drags on */
-  }
-  .boot-mark {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 56px;
-    height: 56px;
-    color: var(--accent);
-    background: var(--bg-raised);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-1);
-  }
-  .boot-mark :global(svg) {
-    animation: turn 9s linear infinite;
-  }
-  .boot-mark::after {
-    position: absolute;
-    inset: -1px;
-    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-    border-radius: inherit;
-    animation: halo 2.2s var(--ease) infinite;
-    content: '';
-  }
-  @keyframes turn {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  @keyframes halo {
-    to {
-      opacity: 0;
-      transform: scale(1.45);
-    }
   }
 </style>
