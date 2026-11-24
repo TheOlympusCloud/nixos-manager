@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -108,19 +109,57 @@ func TestManagedSharedByEveryMachine(t *testing.T) {
 		"a": map[string]any{
 			"packages": []any{"hello", "perl"}, "home": []any{"cowsay"}, "sessionVariable": "shared",
 			"helloFrom": "shared", "helloPatch": true, "jqFrom": "a",
-			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(3),
+			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(4),
 			"helloFile": []any{"modules/managed.json"},
 		},
 		"b": map[string]any{
 			"packages": []any{"hello", "jq"}, "home": nil, "sessionVariable": nil,
 			"helloFrom": "shared", "helloPatch": true, "jqFrom": "shared",
-			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(3),
+			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(4),
 			"helloFile": []any{"modules/managed.json"},
 		},
 	}
 	for _, m := range []string{"a", "b"} {
 		if !reflect.DeepEqual(got[m], want[m]) {
 			t.Errorf("%s: got %v\nwant %v", m, got[m], want[m])
+		}
+	}
+}
+
+// A package whose override has "from" comes from that flake input, imported for
+// the machine's platform with its nixpkgs.config; the override's other changes
+// apply on top. Without the input, the build fails and says what to do.
+func TestManagedPackageFromAnotherInput(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	eval := func(attr string) ([]byte, error) {
+		return exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+			"eval", "--impure", "--json", "--file", "testdata/managed-from-input.nix", attr).CombinedOutput()
+	}
+	out, err := eval("ok")
+	if err != nil {
+		t.Fatalf("nix eval: %v\n%s", err, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := map[string]any{
+		"installed": []any{"other"},
+		"hello":     []any{"other", "x86_64-linux", "true"},
+		"jq":        []any{"other", "managed"},
+		"rsync":     []any{nil, "managed"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+	for attr, msg := range map[string]string{
+		"missing":  "takes packages from the flake input other, which flake.nix does not have: add it to its inputs, then Lock",
+		"noInputs": "takes packages from the flake input other, but this machine's nixosSystem gets no specialArgs.inputs",
+	} {
+		if out, err := eval(attr); err == nil || !strings.Contains(string(out), msg) {
+			t.Errorf("%s: want a failure saying %q, got %v:\n%s", attr, msg, err, out)
 		}
 	}
 }

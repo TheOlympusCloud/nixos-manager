@@ -50,11 +50,13 @@ type ManagedView struct {
 	Settings map[string]any         `json:"settings"`
 }
 
-// PackageOverride is how managed.nix changes one package: .override with
-// Override, then .overrideAttrs with OverrideAttrs, Version, Src and Patches
-// appended to the package's own. An empty hash builds with lib.fakeHash, so
-// the check fails and prints the right one.
+// PackageOverride is how managed.nix changes one package: taken from the
+// flake input From (another nixpkgs) instead of the machine's own, then
+// .override with Override, then .overrideAttrs with OverrideAttrs, Version,
+// Src and Patches appended to the package's own. An empty hash builds with
+// lib.fakeHash, so the check fails and prints the right one.
 type PackageOverride struct {
+	From          string         `json:"from,omitempty" jsonschema:"a flake input in flake.nix that is another nixpkgs (e.g. nixpkgs-unstable): the package comes from it; managed.nix 4 and specialArgs.inputs"`
 	Override      map[string]any `json:"override,omitempty"`
 	OverrideAttrs map[string]any `json:"overrideAttrs,omitempty"`
 	Version       string         `json:"version,omitempty"`
@@ -259,6 +261,9 @@ func checkOverride(attr string, o PackageOverride) error {
 				return errorf(ErrInvalid, "%s: invalid argument name %q", what, k)
 			}
 		}
+	}
+	if o.From != "" && !inputName.MatchString(o.From) {
+		return errorf(ErrInvalid, "%s: %q is not a flake input name such as nixpkgs-unstable", what, o.From)
 	}
 	if strings.ContainsFunc(o.Version, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return errorf(ErrInvalid, "%s: invalid version", what)

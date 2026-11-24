@@ -392,7 +392,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	}) (core.ManagedView, error) {
 		return svc.EditPackages(in.Host, in.PackageEdit)
 	})
-	tool(s, "set_package_override", "Change how a package (by nixpkgs attribute) is built on a machine, for everything there that uses it: arguments for .override, attributes for .overrideAttrs, a version with its source (a URL or a GitHub repository at a revision), and patches (a URL or a file in the machine's folder). An empty hash makes run_check fail and print the right one. Without override, the package is put back as nixpkgs has it. For anything else, write hosts/<host>/packages/<attribute>.nix with write_file: { pkgs, prev, lib, ... }: pkg: <package>.", func(ctx context.Context, in struct {
+	tool(s, "set_package_override", "Change how a package (by nixpkgs attribute) is built on a machine, for everything there that uses it: from, a flake input that is another nixpkgs (e.g. nixpkgs-unstable, added to flake.nix's inputs and locked with flake_lock) to take it from instead, arguments for .override, attributes for .overrideAttrs, a version with its source (a URL or a GitHub repository at a revision), and patches (a URL or a file in the machine's folder). An empty hash makes run_check fail and print the right one. Without override, the package is put back as nixpkgs has it. For anything else, write hosts/<host>/packages/<attribute>.nix with write_file: { pkgs, prev, lib, ... }: pkg: <package>.", func(ctx context.Context, in struct {
 		Host     string                `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		Attr     string                `json:"attr" jsonschema:"nixpkgs attribute, e.g. htop"`
 		Override *core.PackageOverride `json:"override,omitempty"`
@@ -412,7 +412,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		r, err := svc.Copy(in.Host, in.CopyRequest)
 		return copyOut{r}, err
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 3 needs for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 4 needs for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
 	}) (map[string]string, error) {
 		h, err := svc.UpdateManagedModule(in.BaseHash)

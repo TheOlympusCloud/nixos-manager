@@ -23,8 +23,18 @@
 # - settings apply at priority 95, below the machine's (90) but still above
 #   hand-written values; settings.home-manager.users.<user> applies as home does.
 # The files next to it (custom.nix, packages/, home/) are not read.
+#
+# A packageOverrides entry with "from": "<input>" takes the package from that
+# flake input, another nixpkgs (nixpkgs-unstable, say), instead of the machine's;
+# its other changes apply on top. The input comes from nixosSystem's
+# specialArgs.inputs, as in the starter fleet's flake.nix.
 file:
-{ lib, pkgs, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}@args:
 let
   read = f: if builtins.pathExists f then lib.importJSON f else { };
   data = read file;
@@ -76,6 +86,15 @@ let
     )
   );
   changed = lib.unique (builtins.attrNames overrides ++ builtins.attrNames packageFiles);
+  # The flake inputs that changed packages come from.
+  froms = lib.unique (lib.concatMap (x: lib.optional (x.o ? from) x.o.from) (builtins.attrValues overrides));
+  inputOf =
+    from:
+    if !(args ? inputs) then
+      throw "managed.json takes packages from the flake input ${from}, but this machine's nixosSystem gets no specialArgs.inputs"
+    else
+      args.inputs.${from}
+        or (throw "managed.json takes packages from the flake input ${from}, which flake.nix does not have: add it to its inputs, then Lock");
   # An empty hash is lib.fakeHash: the build fails and prints the right one.
   hashOf = x: if (x.hash or "") == "" then lib.fakeHash else x.hash;
   source =
@@ -147,9 +166,30 @@ let
       acc // { ${h} = put (acc.${h} or prevSet.${h}) prevSet.${h} (builtins.tail path) value; };
   overlay =
     final: prev:
-    builtins.foldl' (
-      acc: attr: put acc prev (attrPath attr) (customise final prev attr (lib.getAttrFromPath (attrPath attr) prev))
-    ) { } changed;
+    let
+      # Each such nixpkgs once per machine, for its platform and with its
+      # nixpkgs.config (allowUnfree…), but not its overlays.
+      # shortcut: built natively for the machine's platform even where the machine
+      # is cross-compiled; pass buildPlatform as well if a fleet cross-compiles.
+      other = lib.genAttrs froms (
+        from:
+        import (inputOf from) {
+          localSystem = { inherit (prev.stdenv.hostPlatform) system; };
+          config = config.nixpkgs.config;
+        }
+      );
+      # The package before its changes: from the machine's nixpkgs or the input's.
+      base =
+        attr:
+        let
+          from = overrides.${attr}.o.from or null;
+        in
+        if from == null then
+          lib.getAttrFromPath (attrPath attr) prev
+        else
+          lib.attrByPath (attrPath attr) (throw "managed.json: package ${attr} is not in the flake input ${from}") other.${from};
+    in
+    builtins.foldl' (acc: attr: put acc prev (attrPath attr) (customise final prev attr (base attr))) { } changed;
 
   homes = data.home or { };
   sharedHomes = shared.home or { };
@@ -213,9 +253,9 @@ in
     };
     nixosManager.version = lib.mkOption {
       type = lib.types.int;
-      default = 3;
+      default = 4;
       internal = true;
-      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json.";
+      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from).";
     };
     nixosManager.packageNames = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;

@@ -1,0 +1,9 @@
+{
+  "packages": ["hello"],
+  "packageOverrides": {
+    "hello": { "from": "other" },
+    "jq": { "from": "other", "overrideAttrs": { "NIXMGR_FROM": "managed" } },
+    "rsync": { "overrideAttrs": { "NIXMGR_FROM": "managed" } }
+  },
+  "settings": {}
+}

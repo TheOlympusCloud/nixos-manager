@@ -211,6 +211,8 @@ func TestPackageOverrides(t *testing.T) {
 		{Patches: []PackagePatch{{}}},
 		{Override: map[string]any{"": 1}},
 		{Version: "1\n2"},
+		{From: "nixpkgs unstable"},
+		{From: "../nixpkgs"},
 	}
 	for _, b := range bad {
 		_, err := s.SetPackageOverride("web", "htop", &b, nil)
@@ -227,6 +229,13 @@ func TestPackageOverrides(t *testing.T) {
 	v = must[ManagedView](t)(s.SetPackageOverride("web", "btop", &PackageOverride{}, nil))
 	if c, _, _ := s.Read("hosts/web/managed.json"); len(v.PackageOverrides) != 0 || strings.Contains(c, "packageOverrides") {
 		t.Fatalf("an empty override stays:\n%s", c)
+	}
+	// Another nixpkgs alone is a change: the package comes from that flake input.
+	must[ManagedView](t)(s.SetPackageOverride("web", "firefox", &PackageOverride{From: "nixpkgs-unstable"}, nil))
+	if c, _, _ := s.Read("hosts/web/managed.json"); !strings.Contains(c, `"firefox": {
+      "from": "nixpkgs-unstable"
+    }`) {
+		t.Fatalf("file:\n%s", c)
 	}
 }
 

@@ -298,11 +298,11 @@ func TestUncheckedCommitInsight(t *testing.T) {
 	}
 }
 
-// managed.nix 2 ignores modules/managed.json, so it is older too; 3 is this console's.
+// managed.nix 3 ignores packages from another flake input, so it is older too; 4 is this console's.
 func TestInsightsManagedVersions(t *testing.T) {
 	m := &Model{Hosts: []Host{
-		{Name: "a", ManagedFile: managed("a"), ManagedVersion: 2, Ports: Ports{Firewall: true}},
-		{Name: "b", ManagedFile: managed("b"), ManagedVersion: 3, Ports: Ports{Firewall: true}},
+		{Name: "a", ManagedFile: managed("a"), ManagedVersion: 3, Ports: Ports{Firewall: true}},
+		{Name: "b", ManagedFile: managed("b"), ManagedVersion: 4, Ports: Ports{Firewall: true}},
 	}}
 	old := ""
 	for _, in := range Insights(m, nil, "", nil, time.Now()) {
