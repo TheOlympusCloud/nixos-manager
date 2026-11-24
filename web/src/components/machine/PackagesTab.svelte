@@ -71,7 +71,7 @@
       message:
         (from.length ? `${p.name} is added by ${from.join(', ')}, which stays as it is: ` : `${p.name} is one of NixOS's defaults: `) +
         (everywhere
-          ? `it is taken out of every machine's packages by name, in ${SHARED_FILE}. A machine whose own managed.json adds it keeps it. Restore puts it back.`
+          ? `it is taken out of every machine's packages by name, in ${SHARED_FILE}. A machine whose own managed.json adds it keeps it${p.attr ? `, as ${host.name} does` : ''}. Restore puts it back.`
           : `it is taken out of ${host.name}'s packages by name, in ${host.managedFile}. Restore puts it back.`) +
         (p.core ? ` NixOS needs ${p.name} for a working system: without it ${everywhere ? 'a machine' : host.name} may not boot or let anyone log in.` : ''),
       ok: 'Remove',

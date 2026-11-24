@@ -289,7 +289,7 @@ func checkOverride(attr string, o PackageOverride) error {
 			return errorf(ErrInvalid, "%s: a patch is a URL or a file, not both", what)
 		case p.File != "":
 			if c, err := cleanPath(p.File); err != nil || c != p.File || strings.HasPrefix(p.File, "../") {
-				return errorf(ErrInvalid, "%s: a patch file is a path inside the machine's folder, such as patches/fix.patch", what)
+				return errorf(ErrInvalid, "%s: a patch file is a path inside the folder of its managed.json (a machine's, or modules/), such as patches/fix.patch", what)
 			}
 			if p.Hash != "" {
 				return errorf(ErrInvalid, "%s: a patch file needs no hash", what)

@@ -84,7 +84,9 @@
       title: `Remove ${p.name} from ${user}'s home${t === SHARED ? ' on every machine' : ''}?`,
       message:
         `${p.name} comes from ${p.sharedAttr ? SHARED_FILE : `${user}'s home-manager configuration (a module or a program)`}, which stays as it is: it is taken out of ${user}'s packages by name, ` +
-        (t === SHARED ? `in ${SHARED_FILE}, on every machine whose managed.json has ${user}'s home.` : `in ${host.managedFile}.`) +
+        (t === SHARED
+          ? `in ${SHARED_FILE}, on every machine whose managed.json has ${user}'s home.${p.attr ? ` ${host.name} adds it itself, so it stays there.` : ''}`
+          : `in ${host.managedFile}.`) +
         ' Restore puts it back.',
       ok: 'Remove',
     })

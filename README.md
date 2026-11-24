@@ -1362,6 +1362,8 @@ both files set something, the machine's own wins:
 - Packages and removed packages are joined. A name a machine removes takes a
   shared package out of that machine; a name removed for every machine never
   takes out what either file adds, so adding it on one machine keeps it there.
+  A machine cannot restore a shared removal or reset a shared change on its
+  own: it adds the package, or sets a change of its own, which then wins.
 - A machine's own change to a package replaces the shared one whole. A shared
   patch file is a path in `modules/`.
 - A user's shared home packages reach the machines whose `managed.json` has that
