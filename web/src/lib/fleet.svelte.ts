@@ -201,7 +201,7 @@ export const setHome = (host: string, user: string, enable: boolean, stateVersio
 
 /**
  * Copies a package's customisation (packageOverride) or a user's home from a machine to
- * others, in one toast for all of them. Resolves with the machines it changed.
+ * others, in one toast for all of them. Resolves with the machines it copied to.
  */
 export async function copyToMachines(from: string, req: { packageOverride?: string; home?: string; to: string[] }, what: string): Promise<string[]> {
   let results
@@ -219,7 +219,8 @@ export async function copyToMachines(from: string, req: { packageOverride?: stri
   const { text, ok } = copySummary(what, results)
   toast(text, ok ? 'ok' : 'error', ok ? undefined : 'Not copied everywhere', changed.length ? { label: 'View changes', run: () => go('#/changes') } : undefined)
   if (changed.length) await refreshStatus()
-  return changed
+  // Files written before a failed managed.json changed the working copy, but the machine was not copied.
+  return results.filter((r) => r.changed && !r.error).map((r) => r.host)
 }
 
 /**
