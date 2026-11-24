@@ -14,11 +14,13 @@
   import { fleet } from './lib/fleet.svelte'
   import { loadInsights } from './lib/health.svelte'
   import { preloadLayout } from './lib/layout'
+  import { HOME } from './lib/packages'
   import { go, route, type View } from './lib/router.svelte'
   import { activeTab, app, fileTabs, formatTab, init, refresh, saveTab, syncOpenTabs } from './lib/state.svelte'
   import ChangesView from './views/ChangesView.svelte'
   import DeploymentsView from './views/DeploymentsView.svelte'
   import HealthView from './views/HealthView.svelte'
+  import HomePage from './views/HomePage.svelte'
   import InputsView from './views/InputsView.svelte'
   import MachinePage from './views/MachinePage.svelte'
   import MachinesView from './views/MachinesView.svelte'
@@ -142,7 +144,9 @@
         {/if}
         {#if route.view === 'machines'}
           {#if route.parts[0]}
-            {#key route.parts[0]}<MachinePage host={route.parts[0]} tab={route.parts[1] ?? 'overview'} />{/key}
+            {#key route.parts[0]}
+              {#if route.parts[0].startsWith(HOME)}<HomePage name={route.parts[0].slice(HOME.length)} />{:else}<MachinePage host={route.parts[0]} tab={route.parts[1] ?? 'overview'} />{/if}
+            {/key}
           {:else}
             <MachinesView />
           {/if}

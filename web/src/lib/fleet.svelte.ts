@@ -1,7 +1,7 @@
 // The evaluated fleet (stale while a new evaluation runs) and editing by clicking.
 import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
 import { fillPath, optionSegments, pathName } from './options'
-import { SHARED, SHARED_FILE, copySummary } from './packages'
+import { HOME, HOME_MODULE, SHARED, SHARED_FILE, copySummary } from './packages'
 import { codeLink, go } from './router.svelte'
 import { refresh, refreshStatus } from './state.svelte'
 import { confirmBox, report, toast, type ToastAction } from './ui.svelte'
@@ -95,11 +95,13 @@ export function scheduleModel() {
 }
 
 export const hostByName = (name: string): Host | undefined => fleet.model?.hosts.find((h) => h.name === name)
+/** The standalone home an edit target names (home:<name>), if it is one. */
+export const homeByTarget = (target: string) => (target.startsWith(HOME) ? fleet.model?.homes.find((h) => HOME + h.name === target) : undefined)
 export const healthy = () => (fleet.model?.hosts ?? []).filter((h) => !h.error)
 
 /** A machine's name in messages, or "every machine" for SHARED (modules/managed.json). */
-export const targetName = (host: string) => (host === SHARED ? 'every machine' : host)
-const fileOf = (host: string) => (host === SHARED ? SHARED_FILE : `${host}'s managed file`)
+export const targetName = (host: string) => (host === SHARED ? 'every machine' : host.startsWith(HOME) ? host.slice(HOME.length) : host)
+const fileOf = (host: string) => (host === SHARED ? SHARED_FILE : `${targetName(host)}'s managed file`)
 
 const loadingManaged = new Map<string, Promise<void>>()
 /** Read a machine's managed file (SHARED: modules/managed.json); callers asking while a read is in flight share it. */
@@ -253,10 +255,10 @@ export async function openOrCreate(path: string, template: string): Promise<bool
 
 /**
  * Writes this server's modules/managed.nix over the repository's (an older one lacks
- * features), or creates it, once confirmed.
+ * features), or creates it, once confirmed. home: modules/managed-home.nix, for standalone homes.
  */
-export async function updateManagedModule(): Promise<boolean> {
-  const path = 'modules/managed.nix'
+export async function updateManagedModule(home = false): Promise<boolean> {
+  const path = home ? HOME_MODULE : 'modules/managed.nix'
   let base: string
   try {
     base = await api.file(path).then(
@@ -274,11 +276,15 @@ export async function updateManagedModule(): Promise<boolean> {
             "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users, the Nix files next to managed.json and modules/managed.json, set for every machine. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
           ok: 'Update it',
         }
-      : { title: `Create ${path}?`, message: "It is this nixos-manager's module that applies each machine's managed.json. Review it in Changes before you commit.", ok: 'Create it' },
+      : {
+          title: `Create ${path}?`,
+          message: `It is this nixos-manager's module that applies each ${home ? 'standalone home' : 'machine'}'s managed.json. Review it in Changes before you commit.`,
+          ok: 'Create it',
+        },
   )
   if (!ok) return false
   try {
-    await api.updateManagedModule(base)
+    await api.updateManagedModule(base, home)
   } catch (e) {
     return report(e, `Could not write ${path}`), false
   }

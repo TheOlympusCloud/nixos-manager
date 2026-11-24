@@ -112,7 +112,19 @@ export type Checks = {
   autoOptimise: boolean
   zram: boolean
 }
-export type Home = { name: string; packages: string[]; programs: string[]; error?: string | null }
+/** A standalone home-manager configuration (homeConfigurations.<name>). */
+export type Home = {
+  name: string
+  packages: string[]
+  programs: string[]
+  /** What it links into ~, relative to it. */
+  files: string[]
+  /** "homes/<name>/managed.json" when it loads modules/managed-home.nix, else null (Code only); edited as home:<name>. */
+  managedFile: string | null
+  /** managed.json attribute -> package name. */
+  managedPackages?: Record<string, string>
+  error?: string | null
+}
 export type Input = { name: string; type: string; url: string; rev: string; lastModified: number }
 export type Model = { tree: string; hosts: Host[]; homes: Home[]; inputs: Input[]; error?: string }
 export type ModelReply = { state: 'ready'; model: Model } | { state: 'computing'; job: string }
@@ -379,8 +391,8 @@ export const api = {
   linkHomeSecret: (host: string, edit: { user: string; path: string; secret?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home-secrets`, edit),
   /** Copies how a package is changed (packageOverride) or a user's home from the machine to others, never overwriting. */
   copy: (host: string, req: { packageOverride?: string; home?: string; to: string[] }) => post<CopyResult[]>(`/api/hosts/${encodeURIComponent(host)}/copy`, req),
-  /** Writes this server's modules/managed.nix over the repository's (base_hash '' when it has none). */
-  updateManagedModule: (base_hash: string) => post<{ hash: string }>('/api/managed-module', { base_hash }),
+  /** Writes this server's modules/managed.nix (home: modules/managed-home.nix) over the repository's (base_hash '' when it has none). */
+  updateManagedModule: (base_hash: string, home = false) => post<{ hash: string }>('/api/managed-module', { base_hash, home }),
   editSetting: (host: string, edit: SettingEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/settings`, edit),
   searchPackages: (q: string, limit = 50) => get<SearchReply<PackageHit>>('/api/search/packages', { q, limit }),
   searchOptions: (host: string, q: string, opts: { limit?: number; exact?: boolean } = {}) =>

@@ -7,7 +7,7 @@
   import { featureKey, isRepoFile, type GNode } from '../../lib/graph'
   import { graphUi, toggleExpanded } from '../../lib/graphui.svelte'
   import { groupLabel } from '../../lib/matrix'
-  import { codeLink, link, machineLink } from '../../lib/router.svelte'
+  import { codeLink, homeLink, link, machineLink } from '../../lib/router.svelte'
   import { startJob } from '../../lib/state.svelte'
   import { copyText } from '../../lib/util'
   import { sourceOf } from '../../lib/values'
@@ -210,6 +210,9 @@
         <h3>{plural(home.packages.length, 'package')}</h3>
         <div class="chips">{#each home.packages as p (p)}<span class="chip mono">{p}</span>{/each}</div>
       {/if}
+      <div class="actions">
+        <a class="btn primary" href={homeLink(home.name)}><Icon name="user" /> Open home page</a>
+      </div>
     {:else if node.kind === 'input'}
       {@const i = node.input}
       <dl class="facts kv">

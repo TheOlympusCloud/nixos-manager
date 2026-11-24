@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Managed } from './api'
-import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homePathProblem, homeRows, homeStateVersion, linksSecrets, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, secretTemplatesDir, systemRows, takesFromInputs } from './packages'
+import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeDir, homeEditingLine, homePathProblem, homeRows, homeStateVersion, linksSecrets, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, secretTemplatesDir, standaloneRows, systemRows, takesFromInputs } from './packages'
 import { host } from './testmodel'
 
 const mf = 'hosts/pc/managed.json'
@@ -220,5 +220,27 @@ describe('copy to other machines', () => {
     })
     expect(copySummary('htop', [{ host: 'a', changed: false }, { host: 'b', changed: false }]).text).toBe('a, b already have it.')
     expect(copySummary('htop', [{ host: 'a', changed: true, error: 'hosts/a/managed.json changed since it was loaded' }])).toEqual({ text: 'Not copied to a: hosts/a/managed.json changed since it was loaded.', ok: false })
+  })
+})
+
+describe('standalone homes', () => {
+  it('give the line for flake.nix, with a string where a Nix path cannot hold the name', () => {
+    expect(homeEditingLine('pablo')).toBe('(import ./modules/managed-home.nix ./homes/pablo/managed.json)')
+    expect(homeEditingLine('pablo@laptop')).toBe('(import ./modules/managed-home.nix (./homes + "/pablo@laptop/managed.json"))')
+  })
+  it('keep their files next to the managed.json they load', () => {
+    const home = { name: 'pablo@laptop', packages: [], programs: [], files: [], managedFile: null }
+    expect(homeDir(home)).toBe('homes/pablo@laptop')
+    expect(homeDir({ ...home, managedFile: 'homes/laptop/managed.json' })).toBe('homes/laptop')
+  })
+  it('list packages as the evaluation has them and as managed.json changes them', () => {
+    const home = { name: 'laptop', packages: ['bat', 'nodejs'], programs: [], files: [], managedFile: 'homes/laptop/managed.json', managedPackages: { nodejs_22: 'nodejs' } }
+    const m = managed({ path: 'homes/laptop/managed.json', packages: ['nodejs_22', 'jq'], removedPackages: ['nano'] })
+    expect(standaloneRows(home, m).map((r) => [r.name, r.attr ?? '', !!r.pending, !!r.removed])).toEqual([
+      ['bat', '', false, false],
+      ['jq', 'jq', true, false],
+      ['nano', '', false, true],
+      ['nodejs', 'nodejs_22', false, false],
+    ])
   })
 })

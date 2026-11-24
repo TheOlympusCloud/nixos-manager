@@ -1,10 +1,19 @@
 // Customising packages: the rows of a machine's (or a home's) packages, and
 // the text forms of a package override.
-import type { CopyResult, Host, Input, Managed, Package, PackageOverride } from './api'
+import type { CopyResult, Home, Host, Input, Managed, Package, PackageOverride } from './api'
 
 /** Edits take this in place of a machine name to change modules/managed.json, set for every machine. */
 export const SHARED = '*'
 export const SHARED_FILE = 'modules/managed.json'
+/** Edits take this and a homeConfigurations name in place of a machine name to change a standalone home: home:pablo@laptop. */
+export const HOME = 'home:'
+export const HOME_MODULE = 'modules/managed-home.nix'
+/** The line a standalone home's modules need for its managed.json; a name a Nix path cannot hold goes in a string. */
+export const homeEditingLine = (name: string) =>
+  `(import ./${HOME_MODULE} ${/^[A-Za-z0-9._+-]+$/.test(name) ? `./homes/${name}/managed.json` : `(./homes + ${JSON.stringify(`/${name}/managed.json`)})`})`
+/** Where a standalone home's own files go: homes/pablo@laptop. */
+export const homeDir = (home: Home) => (home.managedFile ? home.managedFile.replace(/\/[^/]*$/, '') : `homes/${home.name}`)
+
 /** Whether the machine's modules/managed.nix applies modules/managed.json (version 3). */
 export const appliesShared = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 3
 /** Whether the machine's modules/managed.nix takes a package from another nixpkgs (version 4). */
@@ -54,7 +63,7 @@ export function homePathProblem(path: string, taken: string[]): string {
 }
 
 /** The attribute of a package name in managed.json's lists or overrides: nodejs → nodejs_22. */
-export function attrOf(host: Host, name: string, attrs: string[]): string | undefined {
+export function attrOf(host: Pick<Host, 'managedPackages'>, name: string, attrs: string[]): string | undefined {
   const pname = (a: string) => host.managedPackages?.[a]
   return attrs.find((a) => a === name) ?? attrs.find((a) => pname(a) === name) ?? attrs.find((a) => a.split('.').pop() === name)
 }
@@ -75,7 +84,7 @@ type Lists = { attrs: string[]; removed: Set<string>; sharedAttrs: string[]; rem
  * managed.json for the system's packages, whose files say where each comes from;
  * null for a home's, whose packages come without files.
  */
-function rowsOf(host: Host, l: Lists, installed: Package[], removedEval: Package[], ownFile: string | null, extra: (name: string) => Partial<PackageRow>): PackageRow[] {
+function rowsOf(host: Pick<Host, 'managedPackages'>, l: Lists, installed: Package[], removedEval: Package[], ownFile: string | null, extra: (name: string) => Partial<PackageRow>): PackageRow[] {
   const known = new Set([...installed, ...removedEval].map((p) => p.name))
   const pname = (a: string) => host.managedPackages?.[a]
   const unknown = (a: string) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? '')
@@ -125,6 +134,12 @@ export function homeRows(host: Host, user: string, managed: Managed | undefined,
   const theirs = mine ? shared?.home?.[user] : undefined
   const l: Lists = { attrs: mine?.packages ?? [], removed: new Set(mine?.removedPackages ?? []), sharedAttrs: theirs?.packages ?? [], removedShared: new Set(theirs?.removedPackages ?? []) }
   return rowsOf(host, l, (u?.home?.packages ?? []).map((n) => ({ name: n, version: '', files: [] })), [], null, () => ({}))
+}
+
+/** A standalone home's packages, as the evaluation lists them and as its managed.json changes them. */
+export function standaloneRows(home: Home, managed: Managed | undefined): PackageRow[] {
+  const l: Lists = { attrs: managed?.packages ?? [], removed: new Set(managed?.removedPackages ?? []), sharedAttrs: [], removedShared: new Set() }
+  return rowsOf(home, l, home.packages.map((n) => ({ name: n, version: '', files: [] })), [], null, () => ({}))
 }
 
 /** The release a new home starts at (home.stateVersion): the machine's NixOS release, 26.05. */
@@ -243,6 +258,12 @@ export const hostNixTemplate = (host: string) => `# ${host}'s own NixOS settings
 }
 `
 
+export const standaloneNixTemplate = (name: string) => `# ${name}'s own home-manager settings, next to what is set by clicking.
+# Anything home-manager can do goes here; modules/managed-home.nix imports this file.
+{ config, lib, pkgs, ... }:
+{
+}
+`
 export const homeNixTemplate = (user: string, host: string) => `# ${user}'s home-manager settings on ${host}, next to what is set by clicking.
 # Anything home-manager can do goes here; modules/managed.nix imports this file.
 { config, lib, pkgs, ... }:

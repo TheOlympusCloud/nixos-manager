@@ -58,7 +58,7 @@ export const testModel: Model = {
     }),
     host('broken', { error: 'error: infinite recursion encountered\n  at /nix/store/x-source/hosts/broken/default.nix:12:3', files: [], hostName: '' }),
   ],
-  homes: [{ name: 'pablo@laptop', packages: ['neovim'], programs: ['git'] }],
+  homes: [{ name: 'pablo@laptop', packages: ['neovim'], programs: ['git'], files: [], managedFile: null }],
   inputs: [
     { name: 'nixpkgs', type: 'github', url: 'github:NixOS/nixpkgs/nixos-26.05', rev: '9e1f0a2b3c4d', lastModified: 1763400000 },
     { name: 'comin', type: 'github', url: 'github:nlewo/comin', rev: 'c84768279d6c', lastModified: 1762300000 },
