@@ -16,6 +16,8 @@ services:
       # With `tailscale serve` or another proxy on the host, the container sees it as the
       # Docker gateway; name it so login limits count each client (the remote= of login log lines):
       # NIXMGR_TRUSTED_PROXIES: "172.18.0.1"
+      # Checks only evaluate and dry-build; each machine builds itself when comin deploys:
+      # NIXMGR_CHECK_BUILD: "0"
       # Uncomment once the Forgejo repository exists (SSH deploy key with write access):
       # NIXMGR_REMOTE: "ssh://git@forgejo.lan:2222/pablo/nixos-config.git"
     volumes:

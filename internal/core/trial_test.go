@@ -345,3 +345,19 @@ func TestTryOnFinishesWhenTheRequestIsCancelled(t *testing.T) {
 		}
 	}
 }
+
+// A check that only evaluated the machine (checks.build = false) is enough to
+// try the change on it; a machine the change does not touch is still refused.
+func TestTryOnAfterAnEvaluateOnlyCheck(t *testing.T) {
+	ctx := context.Background()
+	s := trialService(t)
+	s.Jobs.EvalOnly = true
+	stageChecked(t, s, "hosts/web", "web kernel=2\n")
+	_, err := s.TryOn(ctx, "db", "try", false)
+	isErr(t, err, ErrInvalid)
+	tr, err := s.TryOn(ctx, "web", "web: try kernel 2", false)
+	ok(t, err)
+	if remoteRef(t, s, "testing-web") != tr.Commit {
+		t.Fatalf("trial %+v not pushed", tr)
+	}
+}

@@ -17,12 +17,15 @@ export type Status = {
   /** The check the staged tree passed: the tree of what is pushed it compared with ('' for none), and the machines it built. */
   staged_check?: CheckPass
 }
-export type CheckPass = { base: string; built: string[] }
+/** evaluatedOnly instead of built: the server's checks do not build (checks.build = false), each machine builds itself. */
+export type CheckPass = { base: string; built: string[]; evaluatedOnly?: string[] }
 /** What a check verified; Nix's figures come from a dry run before the builds. */
 export type CheckSummary = {
   base: string
   changed: string[]
   built: string[]
+  /** The changed machines only evaluated and dry-built, as the server's checks do not build (checks.build = false). */
+  evaluatedOnly?: string[]
   failed?: string[]
   reboot?: string[]
   toBuild: number

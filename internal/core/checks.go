@@ -14,11 +14,13 @@ import (
 )
 
 // CheckPass is a check that passed: the staged tree, the tree that passed a
-// check its machines were compared with, and the machines it built.
+// check its machines were compared with, and the machines it built, or only
+// evaluated when checks do not build (Jobs.EvalOnly).
 type CheckPass struct {
-	Tree  string   `json:"tree"`
-	Base  string   `json:"base"`  // "" when no pushed commit had passed a check: every machine was built
-	Built []string `json:"built"` // every machine whose system differs from Base
+	Tree          string   `json:"tree"`
+	Base          string   `json:"base"`                    // "" when no pushed commit had passed a check: every machine was built
+	Built         []string `json:"built"`                   // every machine whose system differs from Base
+	EvaluatedOnly []string `json:"evaluatedOnly,omitempty"` // instead of Built: each builds itself when comin deploys
 }
 
 // CheckSummary is what a check verified, for the UI and MCP clients. It is
@@ -29,6 +31,9 @@ type CheckSummary struct {
 	Built   []string `json:"built"`            // those that built
 	Failed  []string `json:"failed,omitempty"` // those that did not build or evaluate
 	Reboot  []string `json:"reboot,omitempty"` // changed machines that apply the change only after a reboot
+	// EvaluatedOnly are the changed machines a check evaluated and dry-built
+	// but did not build, as checks do not build (Jobs.EvalOnly).
+	EvaluatedOnly []string `json:"evaluatedOnly,omitempty"`
 	// From a dry run before the builds: what Nix had to build and to download.
 	ToBuild  int    `json:"toBuild"`
 	ToFetch  int    `json:"toFetch"`
@@ -38,9 +43,14 @@ type CheckSummary struct {
 
 // runCheck checks the staged tree: nix flake check, then a real build of every
 // machine whose system differs from the tree a push lands on (by system
-// derivation, as Changes compares), then a dry build of each extra target.
+// derivation, as Changes compares), only a dry one with EvalOnly, then a dry
+// build of each extra target.
 func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 	tree, base := job.tree, job.Req.Base
+	built := "built"
+	if js.EvalOnly {
+		built = "dry-built"
+	}
 	var sum *CheckSummary // once the machines are compared
 	defer func() {
 		job.mu.Lock()
@@ -77,9 +87,9 @@ func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 
 	switch {
 	case base == "" && job.Req.Commit != "":
-		fmt.Fprintln(job, "\nNo commit before it passed a check, so every machine is built.")
+		fmt.Fprintf(job, "\nNo commit before it passed a check, so every machine is %s.\n", built)
 	case base == "":
-		fmt.Fprintln(job, "\nNo pushed commit has passed a check, so every machine is built.")
+		fmt.Fprintf(job, "\nNo pushed commit has passed a check, so every machine is %s.\n", built)
 	case job.Req.Commit != "":
 		fmt.Fprintf(job, "\nComparing every machine with the newest commit before it that passed a check (tree %.12s).\n", base)
 	default:
@@ -97,7 +107,7 @@ func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 		return err
 	}
 	if before.Error != "" {
-		fmt.Fprintln(job, "What it is compared with does not evaluate, so every machine is built.")
+		fmt.Fprintf(job, "What it is compared with does not evaluate, so every machine is %s.\n", built)
 	}
 	sum = &CheckSummary{Base: base, Changed: []string{}, Built: []string{}}
 	hosts := map[string]Host{}
@@ -132,7 +142,7 @@ func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 
 	for _, t := range job.Req.Targets {
 		if slices.ContainsFunc(build, func(h Host) bool { return t == systemAttr(h.Name) }) {
-			fmt.Fprintf(job, "\nSkipping the dry build of %s: it was just built.\n", t)
+			fmt.Fprintf(job, "\nSkipping the dry build of %s: it was just %s.\n", t, built)
 			continue
 		}
 		if err := js.step(ctx, job, src, js.nixArgs("build", "--dry-run", "--no-link", "-L", "--no-update-lock-file", "path:"+src+"#"+t)); err != nil {
@@ -145,14 +155,19 @@ func (js *Jobs) runCheck(ctx context.Context, job *Job) error {
 }
 
 // buildSystems builds each machine's system, after a dry run that tells what
-// Nix builds and downloads. A failed machine does not stop the others.
+// Nix builds and downloads. A failed machine does not stop the others. With
+// EvalOnly it stops after the dry run.
 func (js *Jobs) buildSystems(ctx context.Context, job *Job, src string, build []Host, sum *CheckSummary) error {
 	names := make([]string, len(build))
 	installables := make([]string, len(build))
 	for i, h := range build {
 		names[i], installables[i] = h.Name, systemInstallable(src, h)
 	}
-	fmt.Fprintf(job, "\nBuilding the system of %s: %s.\n", plural(len(build), "changed machine", "changed machines"), strings.Join(names, ", "))
+	what := "Building"
+	if js.EvalOnly {
+		what = "Dry-building"
+	}
+	fmt.Fprintf(job, "\n%s the system of %s: %s.\n", what, plural(len(build), "changed machine", "changed machines"), strings.Join(names, ", "))
 	args := js.nixArgs(append([]string{"build", "--dry-run", "--no-link", "--no-update-lock-file"}, installables...)...)
 	fmt.Fprintf(job, "$ nix %s\n", strings.Join(args[2:], " "))
 	cmd := js.nixCmd(ctx, args...)
@@ -169,6 +184,16 @@ func (js *Jobs) buildSystems(ctx context.Context, job *Job, src string, build []
 	}
 	sum.ToBuild, sum.ToFetch, sum.Download, sum.Unpacked = parseDryRun(out.buf.Bytes())
 	fmt.Fprintln(job, describeDryRun(sum))
+	if js.EvalOnly {
+		for _, h := range build {
+			fmt.Fprintf(job, "%s: not built here; it builds itself when comin deploys (checks.build = false).\n", h.Name)
+			sum.EvaluatedOnly = append(sum.EvaluatedOnly, h.Name)
+			if js.GCRoots != "" { // its root holds a system the machine no longer gets
+				os.Remove(filepath.Join(js.GCRoots, rootName(h.Name)))
+			}
+		}
+		return nil
+	}
 
 	if js.GCRoots != "" {
 		if err := os.MkdirAll(js.GCRoots, 0o700); err != nil {

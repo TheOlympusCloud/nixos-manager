@@ -269,7 +269,7 @@
         <h3>Push webhook <span class="opt">optional</span></h3>
         <p class="muted">
           Forgejo tells this console about every push, so a commit pushed from a laptop or Forgejo's web editor shows here within seconds instead of at the next Pull, and is
-          checked: every machine it changes is built. Its result shows in Changes → Checks, in Health, and with the step below, in Forgejo.
+          checked: every machine it changes is built (only evaluated with <code>checks.build = false</code>). Its result shows in Changes → Checks, in Health, and with the step below, in Forgejo.
         </p>
         <dl class="pairs">
           <dt>Target URL</dt>

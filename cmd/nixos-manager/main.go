@@ -44,6 +44,8 @@ Environment:
   NIXMGR_LISTEN    address to listen on (default 127.0.0.1:8080)
   NIXMGR_NIX, NIXMGR_NIXFMT, NIXMGR_NIXD   tool commands (default nix, nixfmt, nixd)
   NIXMGR_EVAL_JOBS machines evaluated at once (default 2, or 1 on a single CPU; about 1 GB each)
+  NIXMGR_CHECK_BUILD   0: checks evaluate and dry-build the changed machines, which build
+                   themselves when comin deploys (default 1: checks build them here)
   NIXMGR_TRUSTED_PROXIES   reverse proxies besides loopback (addresses or CIDR ranges) whose
                    X-Forwarded-For names the client for the login limits
   TZ               time zone of the update schedule (default the system's, else UTC)
@@ -108,6 +110,10 @@ func run() error {
 			return fmt.Errorf("NIXMGR_EVAL_JOBS: want how many machines to evaluate at once, 1 or more, not %q", v)
 		}
 	}
+	checkBuild, err := strconv.ParseBool(env("NIXMGR_CHECK_BUILD", "1"))
+	if err != nil {
+		return fmt.Errorf("NIXMGR_CHECK_BUILD: want 1 (checks build the changed machines) or 0 (they only evaluate them), not %q", os.Getenv("NIXMGR_CHECK_BUILD"))
+	}
 	data := env("NIXMGR_DATA", "/var/lib/nixos-manager")
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		return err
@@ -137,6 +143,7 @@ func run() error {
 		return err
 	}
 	svc.Jobs.GCRoots = filepath.Join(data, "gcroots") // each machine's last system a check built
+	svc.Jobs.EvalOnly = !checkBuild
 	if svc.ISOs, err = core.OpenISOs(filepath.Join(data, "isos"), svc.Jobs); err != nil {
 		return err
 	}

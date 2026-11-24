@@ -48,7 +48,7 @@ func (s *Service) trialBranches(ctx context.Context, host string) (CominBranches
 // main branch its comin follows, pushed there. The working copy is then on the
 // testing branch, where further commits and pushes go to that machine; Merge
 // promotes them to the main branch. What is tried must have passed a check that
-// built the machine. An earlier trial on the branch with changes the main
+// built the machine, or evaluated it when checks do not build. An earlier trial on the branch with changes the main
 // branch does not have is only replaced with replace. When the push fails,
 // everything is left as it was.
 func (s *Service) TryOn(ctx context.Context, host, message string, replace bool) (Trial, error) {
@@ -99,7 +99,7 @@ func (s *Service) TryOn(ctx context.Context, host, message string, replace bool)
 	if !ok {
 		return t, errorf(ErrNotChecked, "what you try has not passed a check: run the checks first")
 	}
-	if !slices.Contains(pass.Built, host) {
+	if !slices.Contains(pass.Built, host) && !slices.Contains(pass.EvaluatedOnly, host) {
 		return t, errorf(ErrInvalid, "this does not change %s's system: there is nothing to try on it", host)
 	}
 	for _, ref := range []string{"refs/remotes/origin/" + b.Testing, "refs/heads/" + b.Testing} {

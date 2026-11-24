@@ -23,6 +23,9 @@ describe('scheduled updates', () => {
       title: 'Ready to merge into main',
       detail: 'Passed its check, which built 2 machines: pi, web.',
     })
+    expect(updateLine(up({ summary: { base: 'abc', changed: ['pi'], built: [], evaluatedOnly: ['pi'], toBuild: 0, toFetch: 0 } })).detail).toBe(
+      'Passed its check, which evaluated 1 machine without building it here: pi.',
+    )
     expect(updateLine(up({}), true)).toMatchObject({ tone: 'bad', title: 'main moved on since this update' })
     expect(updateLine(up({ state: 'failed', summary: { base: '', changed: ['pi'], built: [], failed: ['pi'], toBuild: 0, toFetch: 0 } })).detail).toBe(
       'pi does not build with it. The log says why.',

@@ -182,9 +182,13 @@ func (f *Forgejo) report(sha string, job *Job, pass *CheckPass, err error) {
 		case err != nil:
 			f.postStatus(ctx, sha, "error", truncate("Not checked: "+err.Error(), 140))
 		case pass != nil:
-			f.postStatus(ctx, sha, "success", passedText(pass.Base, pass.Built))
+			f.postStatus(ctx, sha, "success", passedText(pass.Base, pass.Built, pass.EvaluatedOnly))
 		default:
-			f.postStatus(ctx, sha, "pending", "Checking: nix flake check, then a build of every machine it changes")
+			build := "a build"
+			if f.Jobs.EvalOnly {
+				build = "a dry build"
+			}
+			f.postStatus(ctx, sha, "pending", "Checking: nix flake check, then "+build+" of every machine it changes")
 			<-job.Done()
 			state, desc := checkStatus(job.Info(true))
 			f.postStatus(ctx, sha, state, desc)
@@ -201,17 +205,21 @@ func (f *Forgejo) report(sha string, job *Job, pass *CheckPass, err error) {
 	}
 }
 
-// passedText says what a passed check built, for a commit status.
-func passedText(base string, built []string) string {
+// passedText says what a passed check built, or only evaluated, for a commit status.
+func passedText(base string, built, evaluated []string) string {
+	verb, end := "built", ""
+	if len(evaluated) > 0 { // a check either builds every changed machine or none
+		verb, end, built = "evaluated", "; not built here", evaluated
+	}
 	switch {
 	case base == "":
-		return fmt.Sprintf("Passed: built every machine (%d)", len(built))
+		return fmt.Sprintf("Passed: %s every machine (%d)%s", verb, len(built), end)
 	case len(built) == 0:
 		return "Passed: no machine changes"
 	case len(built) <= 4:
-		return "Passed: built " + strings.Join(built, ", ")
+		return "Passed: " + verb + " " + strings.Join(built, ", ") + end
 	}
-	return fmt.Sprintf("Passed: built the %d machines it changes", len(built))
+	return fmt.Sprintf("Passed: %s the %d machines it changes%s", verb, len(built), end)
 }
 
 // checkStatus is the commit status a finished check gives: success, failure,
@@ -220,7 +228,7 @@ func checkStatus(info JobInfo) (string, string) {
 	sum, last := info.Summary, string(lastLine([]byte(info.Output)))
 	switch {
 	case info.State == "passed" && sum != nil:
-		return "success", passedText(sum.Base, sum.Built)
+		return "success", passedText(sum.Base, sum.Built, sum.EvaluatedOnly)
 	case info.State == "passed":
 		return "success", "Passed"
 	case strings.HasPrefix(last, "stopped:"):

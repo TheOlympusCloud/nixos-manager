@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -153,6 +154,87 @@ func TestCheckBuildsTheMachinesAChangeTouches(t *testing.T) {
 	if info.State != "passed" || len(info.Summary.Changed) != 0 || !strings.Contains(info.Output, "No machine's system changes") {
 		t.Fatalf("check %s %+v:\n%s", info.State, info.Summary, info.Output)
 	}
+}
+
+// The exact nix commands a check of a change to one machine runs: a full
+// build after the dry run, or with checks.build = false none, and no GC root.
+func TestCheckRunsTheseNixCommandsInEachMode(t *testing.T) {
+	for _, evalOnly := range []bool{false, true} {
+		s := buildService(t, true)
+		runCheck(t, s) // what is pushed passes
+		calls := filepath.Join(t.TempDir(), "calls")
+		s.Jobs.Nix = script(t, "nix", strings.Replace(buildNix, "echo \"nix $*\"\n", "printf '%s\\n' \"$*\" >> "+calls+"\necho \"nix $*\"\n", 1))
+		s.Jobs.GCRoots = filepath.Join(t.TempDir(), "gcroots")
+		s.Jobs.EvalOnly = evalOnly
+		write(t, s.Repo, "hosts/web", "web kernel=2\n")
+		info := runCheck(t, s)
+		if info.State != "passed" {
+			t.Fatalf("evalOnly %v: check %s:\n%s", evalOnly, info.State, info.Output)
+		}
+		src := regexp.MustCompile(`path:\S*?/src\b`)
+		got := strings.Split(strings.TrimSpace(src.ReplaceAllString(string(must[[]byte](t)(os.ReadFile(calls))), "path:<src>")), "\n")
+		for i := range got {
+			got[i] = strings.TrimPrefix(got[i], "--extra-experimental-features nix-command flakes ")
+		}
+		web := "path:<src>#" + systemAttr("web")
+		want := []string{
+			"flake check -L --keep-going --no-update-lock-file path:<src>",
+			"build --dry-run --no-link --no-update-lock-file " + web,
+		}
+		if !evalOnly {
+			want = append(want, "build --keep-going --no-update-lock-file --out-link "+filepath.Join(s.Jobs.GCRoots, "web")+" "+web)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("evalOnly %v: nix ran\n%s\nwant\n%s", evalOnly, strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+		sum := info.Summary
+		line := "web: not built here; it builds itself when comin deploys (checks.build = false)."
+		if evalOnly {
+			if !slices.Equal(sum.Changed, []string{"web"}) || len(sum.Built) != 0 || !slices.Equal(sum.EvaluatedOnly, []string{"web"}) || sum.ToBuild != 2 ||
+				!strings.Contains(info.Output, line) || !strings.Contains(info.Output, "Nix builds 2 derivations and downloads 1 path") {
+				t.Fatalf("evaluate only: summary %+v:\n%s", sum, info.Output)
+			}
+			if _, err := os.Lstat(filepath.Join(s.Jobs.GCRoots, "web")); !os.IsNotExist(err) {
+				t.Fatalf("evaluate only made a GC root: %v", err)
+			}
+		} else if !slices.Equal(sum.Built, []string{"web"}) || sum.EvaluatedOnly != nil || strings.Contains(info.Output, "not built here") {
+			t.Fatalf("build: summary %+v:\n%s", sum, info.Output)
+		}
+	}
+}
+
+// After a check that only evaluated, commit and push are accepted as after one
+// that built the machine; the machine's old GC root goes, as it no longer
+// holds the system the machine gets.
+func TestEvaluateOnlyPassAllowsCommitAndPush(t *testing.T) {
+	ctx := context.Background()
+	s := buildService(t, true)
+	s.Jobs.GCRoots = filepath.Join(t.TempDir(), "gcroots")
+	runCheck(t, s) // what is pushed passes, and builds both machines
+	s.Jobs.EvalOnly = true
+	write(t, s.Repo, "hosts/web", "web kernel=2\n")
+	info := runCheck(t, s)
+	if info.State != "passed" {
+		t.Fatalf("check %s:\n%s", info.State, info.Output)
+	}
+	pass, ok := s.Jobs.PassOf(info.Tree)
+	if !ok || len(pass.Built) != 0 || !slices.Equal(pass.EvaluatedOnly, []string{"web"}) {
+		t.Fatalf("pass %+v %v", pass, ok)
+	}
+	if st := must[Status](t)(s.Status(ctx)); !st.StagedChecked || !slices.Equal(st.StagedCheck.EvaluatedOnly, []string{"web"}) {
+		t.Fatalf("status %+v", st)
+	}
+	if _, err := os.Lstat(filepath.Join(s.Jobs.GCRoots, "web")); !os.IsNotExist(err) {
+		t.Fatalf("web's outdated GC root stayed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(s.Jobs.GCRoots, "db")); err != nil {
+		t.Fatalf("db's GC root went: %v", err)
+	}
+	if got := passedText(pass.Base, pass.Built, pass.EvaluatedOnly); got != "Passed: evaluated web; not built here" {
+		t.Fatalf("commit status %q", got)
+	}
+	must[string](t)(s.Commit(ctx, "web: new kernel", false))
+	must[string](t)(s.Push(ctx, false))
 }
 
 // With nothing pushed there is nothing to compare with: every machine is built.

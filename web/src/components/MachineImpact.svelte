@@ -110,7 +110,7 @@
                     </div>
                   {/each}
                   {#if d.status === 'changed' && !d.closure}
-                    <p class="hint">Size and dependency versions show once this server has built both systems; a check builds the machines it changes.</p>
+                    <p class="hint">Size and dependency versions show once this server has built both systems; a check builds the machines it changes, unless the server sets checks.build = false.</p>
                   {/if}
                   {#if !push}<a class="open-machine" href={machineLink(d.host)}>Open {d.host}</a>{/if}
                 </div>

@@ -26,7 +26,7 @@
   )
   // Try on one machine: those the check built, from the branch their comin follows.
   $effect(() => watchDeployments())
-  const tryable = $derived(tryTargets(deploys.overview, app.status?.branch ?? '', app.status?.staged_check?.built ?? []))
+  const tryable = $derived(tryTargets(deploys.overview, app.status?.branch ?? '', [...(app.status?.staged_check?.built ?? []), ...(app.status?.staged_check?.evaluatedOnly ?? [])]))
   let tryHost = $state('')
   const tryOn = $derived(tryable.find((m) => m.host === tryHost) ?? tryable[0])
   const somethingToTry = $derived(staged.length > 0 || (app.status?.ahead ?? 0) > 0)
