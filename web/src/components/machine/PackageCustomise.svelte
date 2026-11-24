@@ -1,8 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { api, type Host, type PackagePatch } from '../../lib/api'
-  import { fleet, openOrCreate, setPackageOverride } from '../../lib/fleet.svelte'
-  import { cleanOverride, formatArgs, packageFile, packageFileTemplate, parseArgs } from '../../lib/packages'
+  import { fleet, openOrCreate, setPackageOverride, targetName } from '../../lib/fleet.svelte'
+  import { SHARED, cleanOverride, formatArgs, overrideSummary, packageFile, packageFileTemplate, parseArgs } from '../../lib/packages'
   import { link } from '../../lib/router.svelte'
   import { app, refresh } from '../../lib/state.svelte'
   import { confirmBox, report } from '../../lib/ui.svelte'
@@ -12,17 +12,23 @@
    * How one package is built on a machine: .override arguments, .overrideAttrs
    * attributes, another version and source, patches, and a Nix file for the rest.
    * The change is an overlay: everything on the machine that uses the package gets it.
+   * target: the machine's name (default) or SHARED, to change it on every machine.
    */
-  let { host, name, attr: given, onclose }: { host: Host; name: string; attr?: string; onclose: () => void } = $props()
+  let { host, target: givenTarget, name, attr: given, onclose }: { host: Host; target?: string; name: string; attr?: string; onclose: () => void } = $props()
 
+  const target = untrack(() => givenTarget ?? host.name)
+  const everywhere = target === SHARED
   let attr = $state(untrack(() => given ?? name))
-  const current = $derived(fleet.managed[host.name]?.packageOverrides?.[attr])
+  const current = $derived(fleet.managed[target]?.packageOverrides?.[attr])
+  /** What modules/managed.json sets, which the machine's own replaces whole. */
+  const theirs = $derived(everywhere ? undefined : fleet.managed[SHARED]?.packageOverrides?.[attr])
   const rawPath = $derived(packageFile(host, attr))
-  const rawExists = $derived(app.entries.some((e) => e.path === rawPath))
+  // modules/managed.nix reads no Nix files next to modules/managed.json.
+  const rawExists = $derived(!everywhere && app.entries.some((e) => e.path === rawPath))
   const changed = $derived(!!current || rawExists)
 
-  // The form starts from what managed.json has for the package when the drawer opens.
-  const start = untrack(() => fleet.managed[host.name]?.packageOverrides?.[attr])
+  // The form starts from what the file has for the package when the drawer opens.
+  const start = untrack(() => fleet.managed[target]?.packageOverrides?.[attr])
   let argsText = $state(formatArgs(start?.override))
   let attrsText = $state(formatArgs(start?.overrideAttrs))
   let version = $state(start?.version ?? '')
@@ -54,13 +60,13 @@
     if (problem) return
     if (!override && !current) return onclose() // nothing set, nothing to clear
     busy = true
-    const ok = await setPackageOverride(host.name, attr, override)
+    const ok = await setPackageOverride(target, attr, override)
     busy = false
     if (ok) onclose()
   }
   async function reset() {
     const ok = await confirmBox({
-      title: `Put ${attr} back as nixpkgs has it on ${host.name}?`,
+      title: `Put ${attr} back as nixpkgs has it on ${targetName(target)}?`,
       message: rawExists ? `This clears what is set here and deletes ${rawPath}.` : 'This clears what is set here.',
       ok: 'Reset to default',
       danger: true,
@@ -68,7 +74,7 @@
     if (!ok) return
     busy = true
     try {
-      if (current && !(await setPackageOverride(host.name, attr, null))) return
+      if (current && !(await setPackageOverride(target, attr, null))) return
       if (rawExists) {
         await api.remove(rawPath).catch((e) => report(e, `Could not delete ${rawPath}`))
         await refresh()
@@ -83,9 +89,12 @@
 
 <div class="pc">
   <p class="muted">
-    Changes how <span class="mono">{attr}</span> is built on {host.name}, for everything there that uses it (home-manager too, when it shares the system's packages: <span class="mono">useGlobalPkgs</span>). Nix then builds it instead of downloading it. Values are JSON, as
+    Changes how <span class="mono">{attr}</span> is built on {everywhere ? `every machine that loads modules/managed.json, unless the machine changes it itself,` : host.name}, for everything there that uses it (home-manager too, when it shares the system's packages: <span class="mono">useGlobalPkgs</span>). Nix then builds it instead of downloading it. Values are JSON, as
     <span class="mono">managed.json</span> keeps them.
   </p>
+  {#if theirs}
+    <p class="muted small"><Icon name="info" /> Changed on every machine: {overrideSummary(theirs, false)}. What you save here replaces that on {host.name}.</p>
+  {/if}
 
   <label class="field">
     <span class="label">Attribute in nixpkgs</span>
@@ -133,7 +142,7 @@
     {#each patches as p, i (i)}
       <div class="row patch">
         {#if p.file !== undefined}
-          <label class="field grow"><span class="label">File in {host.name}'s folder</span><input class="mono" bind:value={p.file} placeholder="patches/fix.patch" spellcheck="false" /></label>
+          <label class="field grow"><span class="label">{everywhere ? 'File in modules/' : `File in ${host.name}'s folder`}</span><input class="mono" bind:value={p.file} placeholder="patches/fix.patch" spellcheck="false" /></label>
         {:else}
           <label class="field grow"><span class="label">URL</span><input class="mono" bind:value={p.url} placeholder="https://…/fix.patch" spellcheck="false" /></label>
           <label class="field short"><span class="label">Hash</span><input class="mono" bind:value={p.hash} placeholder="empty: printed" spellcheck="false" /></label>
@@ -147,11 +156,13 @@
     </div>
   </section>
 
-  <section>
-    <h3>Nix</h3>
-    <p class="muted small">Anything else, in Nix: <span class="mono">{rawPath}</span> gets the package with the changes above and returns the one to use.</p>
-    <button class="small" disabled={!!attrProblem} onclick={() => openOrCreate(rawPath, packageFileTemplate(attr, host.name))}><Icon name="code" /> {rawExists ? 'Edit' : 'Create'} {attr}.nix</button>
-  </section>
+  {#if !everywhere}
+    <section>
+      <h3>Nix</h3>
+      <p class="muted small">Anything else, in Nix: <span class="mono">{rawPath}</span> gets the package with the changes above and returns the one to use.</p>
+      <button class="small" disabled={!!attrProblem} onclick={() => openOrCreate(rawPath, packageFileTemplate(attr, host.name))}><Icon name="code" /> {rawExists ? 'Edit' : 'Create'} {attr}.nix</button>
+    </section>
+  {/if}
 
   <section>
     <h3>Settings</h3>

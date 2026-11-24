@@ -78,7 +78,7 @@ export type Host = {
   managedFile: string | null
   /** managed.json attribute -> package name (nodejs_22 -> nodejs), to remove a model package by attribute. */
   managedPackages?: Record<string, string>
-  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager. */
+  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager; 3 adds modules/managed.json. */
   managedVersion?: number
   packages: Package[]
   /** Packages some module adds but managed.json's removedPackages takes out. */

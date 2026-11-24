@@ -2,6 +2,12 @@
 // the text forms of a package override.
 import type { Host, Managed, Package, PackageOverride } from './api'
 
+/** Edits take this in place of a machine name to change modules/managed.json, set for every machine. */
+export const SHARED = '*'
+export const SHARED_FILE = 'modules/managed.json'
+/** Whether the machine's modules/managed.nix applies modules/managed.json (version 3). */
+export const appliesShared = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 3
+
 /** One row of a packages table. */
 export type PackageRow = {
   name: string
@@ -15,6 +21,12 @@ export type PackageRow = {
   pending?: boolean
   /** Taken out by name: removedPackages, in the evaluation or not yet. */
   removed?: boolean
+  /** In modules/managed.json's list (every machine), by this attribute. */
+  sharedAttr?: string
+  /** Taken out by name in modules/managed.json, for every machine. */
+  removedShared?: boolean
+  /** Changed by modules/managed.json, by this attribute, and not by the machine's own. */
+  sharedOverride?: string
   /** NixOS's own package for a working system. */
   core?: boolean
 }
@@ -39,51 +51,65 @@ export function overriddenAttrs(host: Host, managed: Managed | undefined, paths:
   return [...new Set([...Object.keys(managed?.packageOverrides ?? {}), ...files])].sort()
 }
 
+/** The two files' lists of one kind (the system's or a user's home), as managed.nix joins them. */
+type Lists = { attrs: string[]; removed: Set<string>; sharedAttrs: string[]; removedShared: Set<string> }
+
 /**
- * The machine's packages: installed ones (the evaluation's), ones added since
- * (pending), and ones taken out by name, whether the evaluation shows it yet.
+ * Rows for what is installed and what the evaluation lists as removed, plus what
+ * the files add or take out that it does not show yet. ownFile: the machine's
+ * managed.json for the system's packages, whose files say where each comes from;
+ * null for a home's, whose packages come without files.
  */
-export function systemRows(host: Host, managed: Managed | undefined, paths: string[]): PackageRow[] {
-  const attrs = managed?.packages ?? []
-  const changed = overriddenAttrs(host, managed, paths)
-  const removedNames = new Set(managed?.removedPackages ?? [])
-  const core = new Set(host.corePackages ?? [])
-  const known = new Set([...host.packages, ...(host.removedPackages ?? [])].map((p) => p.name))
-  const row = (p: Package, extra: Partial<PackageRow> = {}): PackageRow => {
-    const attr = host.managedFile && p.files.includes(host.managedFile) ? attrOf(host, p.name, attrs) : undefined
-    // A name removed here still installs what managed.json adds (nodejs_20 replaced by nodejs_24).
-    return { ...p, attr, overridden: attrOf(host, p.name, changed), core: core.has(p.name), removed: removedNames.has(p.name) && !attr, ...extra }
-  }
+function rowsOf(host: Host, l: Lists, installed: Package[], removedEval: Package[], ownFile: string | null, extra: (name: string) => Partial<PackageRow>): PackageRow[] {
+  const known = new Set([...installed, ...removedEval].map((p) => p.name))
   const pname = (a: string) => host.managedPackages?.[a]
-  const pending = attrs
-    .filter((a) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? ''))
-    .map((a) => ({ name: a, version: '', files: host.managedFile ? [host.managedFile] : [], attr: a, pending: true, overridden: attrOf(host, a, changed) }))
-  const rows = [
-    ...host.packages.map((p) => row(p)),
-    ...(host.removedPackages ?? []).map((p) => row(p, { removed: true })),
-    ...pending,
-  ]
+  const unknown = (a: string) => !known.has(a) && !known.has(a.split('.').pop()!) && !known.has(pname(a) ?? '')
+  const from = (p: Package, file: string) => ownFile === null || p.files.includes(file)
+  const row = (p: Package, evalRemoved: boolean): PackageRow => {
+    const attr = from(p, ownFile ?? '') ? attrOf(host, p.name, l.attrs) : undefined
+    const sharedAttr = from(p, SHARED_FILE) ? attrOf(host, p.name, l.sharedAttrs) : undefined
+    // What either file adds stays whatever the shared file removes (nodejs_20 replaced by
+    // nodejs_24); a name the machine removes takes out what the shared file adds.
+    const removedShared = l.removedShared.has(p.name) && !attr && !sharedAttr
+    return { ...p, attr, sharedAttr, removedShared, removed: evalRemoved || (l.removed.has(p.name) && !attr) || removedShared, ...extra(p.name) }
+  }
+  const rows = [...installed.map((p) => row(p, false)), ...removedEval.map((p) => row(p, true))]
+  for (const a of l.attrs.filter(unknown)) rows.push({ name: a, version: '', files: ownFile ? [ownFile] : [], attr: a, pending: true, ...extra(a) })
+  for (const a of l.sharedAttrs.filter((a) => unknown(a) && !l.attrs.includes(a) && !l.removed.has(pname(a) ?? a)))
+    rows.push({ name: a, version: '', files: ownFile === null ? [] : [SHARED_FILE], sharedAttr: a, pending: true, ...extra(a) })
   // Removed by name, but the evaluation does not know the package: still listed, to give it back.
-  for (const n of removedNames) if (!known.has(n)) rows.push({ name: n, version: '', files: [], removed: true })
+  for (const n of new Set([...l.removed, ...l.removedShared])) if (!known.has(n)) rows.push({ name: n, version: '', files: [], removed: true, removedShared: l.removedShared.has(n) && !l.removed.has(n) })
   return rows.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** A home-manager user's packages, as the evaluation lists them and as managed.json changes them. */
-export function homeRows(host: Host, user: string, managed: Managed | undefined): PackageRow[] {
+/**
+ * The machine's packages: installed ones (the evaluation's), ones added since
+ * (pending), and ones taken out by name, whether the evaluation shows it yet.
+ * shared is modules/managed.json, given when the machine applies it.
+ */
+export function systemRows(host: Host, managed: Managed | undefined, paths: string[], shared?: Managed): PackageRow[] {
+  const changed = overriddenAttrs(host, managed, paths)
+  const sharedChanged = Object.keys(shared?.packageOverrides ?? {})
+  const core = new Set(host.corePackages ?? [])
+  const l: Lists = { attrs: managed?.packages ?? [], removed: new Set(managed?.removedPackages ?? []), sharedAttrs: shared?.packages ?? [], removedShared: new Set(shared?.removedPackages ?? []) }
+  // A Code-only machine has no managed.json: '' matches no file.
+  return rowsOf(host, l, host.packages, host.removedPackages ?? [], host.managedFile ?? '', (n) => {
+    const mine = attrOf(host, n, changed)
+    const theirs = mine ? undefined : attrOf(host, n, sharedChanged)
+    return { overridden: mine ?? theirs, sharedOverride: theirs, core: core.has(n) }
+  })
+}
+
+/**
+ * A user's home-manager packages, as the evaluation lists them and as managed.json changes
+ * them; shared (modules/managed.json) counts only where managed.json has the user's home.
+ */
+export function homeRows(host: Host, user: string, managed: Managed | undefined, shared?: Managed): PackageRow[] {
   const u = host.users.find((x) => x.name === user)
   const mine = managed?.home?.[user]
-  const attrs = mine?.packages ?? []
-  const removedNames = new Set(mine?.removedPackages ?? [])
-  const names = u?.home?.packages ?? []
-  const rows: PackageRow[] = names.map((n) => {
-    const attr = attrOf(host, n, attrs)
-    return { name: n, version: '', files: [], attr, removed: removedNames.has(n) && !attr }
-  })
-  const known = new Set(names)
-  const pname = (a: string) => host.managedPackages?.[a]
-  for (const a of attrs) if (!known.has(a) && !known.has(pname(a) ?? '') && !known.has(a.split('.').pop()!)) rows.push({ name: a, version: '', files: [], attr: a, pending: true })
-  for (const n of removedNames) if (!known.has(n)) rows.push({ name: n, version: '', files: [], removed: true })
-  return rows.sort((a, b) => a.name.localeCompare(b.name))
+  const theirs = mine ? shared?.home?.[user] : undefined
+  const l: Lists = { attrs: mine?.packages ?? [], removed: new Set(mine?.removedPackages ?? []), sharedAttrs: theirs?.packages ?? [], removedShared: new Set(theirs?.removedPackages ?? []) }
+  return rowsOf(host, l, (u?.home?.packages ?? []).map((n) => ({ name: n, version: '', files: [] })), [], null, () => ({}))
 }
 
 /** The release a new home starts at (home.stateVersion): the machine's NixOS release, 26.05. */

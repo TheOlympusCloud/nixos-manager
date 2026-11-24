@@ -4,9 +4,10 @@
   import { api, type PackageHit } from '../lib/api'
   import { frame } from '../lib/ascii'
   import { pkgSearch } from '../lib/dialogs.svelte'
-  import { addPackages, fleet, healthy, searchIndexed } from '../lib/fleet.svelte'
+  import { addPackages, fleet, healthy, loadManaged, searchIndexed, targetName } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
   import { isRepoFile } from '../lib/graph'
+  import { SHARED, SHARED_FILE, appliesShared } from '../lib/packages'
   import { machineLink } from '../lib/router.svelte'
   import Dither from './cell/Dither.svelte'
   import Icon from './Icon.svelte'
@@ -25,11 +26,14 @@
   const machines = $derived(healthy())
   const editable = $derived(machines.filter((h) => h.managedFile))
   const codeOnly = $derived(machines.filter((h) => !h.managedFile))
+  /** Some machine applies modules/managed.json, so packages can go there for every machine. */
+  const canShare = $derived(editable.some(appliesShared))
   /** Picked packages, by attribute, so adding can skip machines that already have them. */
   const hits = new Map<string, PackageHit>()
 
   /** Where a machine already gets this package: Set here, In code · file, or Default; null when it does not. */
   function hasOn(hostName: string, r: PackageHit): string | null {
+    if (hostName === SHARED) return fleet.managed[SHARED]?.packages.includes(r.attr) ? 'Set for every machine' : null
     const h = machines.find((x) => x.name === hostName)
     if (!h) return null
     if (fleet.managed[h.name]?.packages.includes(r.attr)) return 'Set here'
@@ -43,6 +47,7 @@
 
   onMount(() => {
     el.showModal()
+    if (canShare && !fleet.managed[SHARED]) loadManaged(SHARED)
     if (!targets.size) {
       // No machine given (e.g. from Packages): start from the ones picked last time.
       const last: string[] = JSON.parse(localStorage.getItem('nixmgr.pkgTargets') ?? '[]')
@@ -84,6 +89,9 @@
   /** Per machine, the picked packages it does not have yet. */
   const plan = $derived([...targets].map((t) => ({ host: t, attrs: [...picked].filter((a) => !(hits.has(a) && hasOn(t, hits.get(a)!))) })))
   const skipped = $derived(plan.reduce((n, p) => n + picked.size - p.attrs.length, 0))
+  const dest = $derived(
+    targets.has(SHARED) ? (targets.size > 1 ? `every machine and ${plural(targets.size - 1, 'machine')}` : 'every machine') : plural(targets.size, 'machine'),
+  )
 
   async function add() {
     adding = true
@@ -157,7 +165,7 @@
                 <input type="checkbox" checked={picked.has(r.attr)} disabled={everywhere && !picked.has(r.attr)} onchange={() => toggle(picked, r.attr)} />
                 <span class="attr mono">{r.attr}</span><span class="ver mono">{r.version}</span>
                 <span class="desc" title={r.description}>{#if r.description}{r.description}{/if}</span>
-                <span class="where">{#each on as o (o.host)}<span class="badge" class:ok={o.from === 'Set here'} title="{r.pname} is already on {o.host}: {o.from}">{everywhere && on.length === 1 ? 'Already here' : `On ${o.host}`} · {o.from}</span>{/each}</span>
+                <span class="where">{#each on as o (o.host)}<span class="badge" class:ok={o.from === 'Set here'} title="{r.pname} is already on {targetName(o.host)}: {o.from}">{everywhere && on.length === 1 ? 'Already here' : `On ${targetName(o.host)}`} · {o.from}</span>{/each}</span>
               </label>
             </li>
           {/each}
@@ -181,6 +189,12 @@
       </div>
       <div class="targets" role="group" aria-label="Machines to add to">
         <span class="label">Add to</span>
+        {#if canShare}
+          <label class="target" class:on={targets.has(SHARED)} title="Kept in {SHARED_FILE}, for every machine whose managed.nix applies it">
+            <input type="checkbox" checked={targets.has(SHARED)} onchange={() => toggle(targets, SHARED)} />
+            Every machine
+          </label>
+        {/if}
         {#each editable as h (h.name)}
           <label class="target" class:on={targets.has(h.name)} title="Kept in {h.managedFile}">
             <input type="checkbox" checked={targets.has(h.name)} onchange={() => toggle(targets, h.name)} />
@@ -204,7 +218,7 @@
         <span class="spacer"></span>
         <button onclick={() => el.close()}>Cancel</button>
         <button class="primary" disabled={!picked.size || !targets.size || adding || plan.every((p) => !p.attrs.length)} onclick={add}>
-          {adding ? 'Adding…' : !picked.size ? 'Add packages' : !targets.size ? 'Choose a machine' : `Add ${plural(picked.size, 'package')} to ${plural(targets.size, 'machine')}`}
+          {adding ? 'Adding…' : !picked.size ? 'Add packages' : !targets.size ? 'Choose a machine' : `Add ${plural(picked.size, 'package')} to ${dest}`}
         </button>
       </div>
     </footer>

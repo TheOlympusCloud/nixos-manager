@@ -1,6 +1,7 @@
 // The evaluated fleet (stale while a new evaluation runs) and editing by clicking.
 import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
 import { fillPath, optionSegments, pathName } from './options'
+import { SHARED, SHARED_FILE } from './packages'
 import { codeLink, go } from './router.svelte'
 import { refresh, refreshStatus } from './state.svelte'
 import { confirmBox, report, toast, type ToastAction } from './ui.svelte'
@@ -96,8 +97,12 @@ export function scheduleModel() {
 export const hostByName = (name: string): Host | undefined => fleet.model?.hosts.find((h) => h.name === name)
 export const healthy = () => (fleet.model?.hosts ?? []).filter((h) => !h.error)
 
+/** A machine's name in messages, or "every machine" for SHARED (modules/managed.json). */
+export const targetName = (host: string) => (host === SHARED ? 'every machine' : host)
+const fileOf = (host: string) => (host === SHARED ? SHARED_FILE : `${host}'s managed file`)
+
 const loadingManaged = new Map<string, Promise<void>>()
-/** Read a machine's managed file; callers asking while a read is in flight share it. */
+/** Read a machine's managed file (SHARED: modules/managed.json); callers asking while a read is in flight share it. */
 export function loadManaged(host: string): Promise<void> {
   let p = loadingManaged.get(host)
   if (!p) {
@@ -105,7 +110,7 @@ export function loadManaged(host: string): Promise<void> {
       (m) => {
         fleet.managed[host] = m
       },
-      (e) => report(e, `Could not read ${host}'s managed settings`),
+      (e) => report(e, `Could not read ${fileOf(host)}`),
     )
     loadingManaged.set(host, p)
     p.finally(() => loadingManaged.delete(host))
@@ -135,12 +140,13 @@ async function writeNow(host: string, fn: () => Promise<Managed>, done: string, 
     fleet.managed[host] = await fn()
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) {
-      toast(`Someone changed ${host}'s managed file at the same time. It has been reloaded; check it and try again.`, 'error', 'Edit not applied')
+      toast(`Someone changed ${fileOf(host)} at the same time. It has been reloaded; check it and try again.`, 'error', 'Edit not applied')
       await loadManaged(host)
-    } else report(e, `Could not change ${host}`)
+    } else report(e, `Could not change ${targetName(host)}`)
     return false
   }
-  if (!fleet.pending.includes(host)) fleet.pending.push(host)
+  const changed = host === SHARED ? (fleet.model?.hosts ?? []).filter((h) => h.managedFile).map((h) => h.name) : [host]
+  for (const h of changed) if (!fleet.pending.includes(h)) fleet.pending.push(h)
   toast(done, 'ok', undefined, action ?? { label: 'View changes', run: () => go('#/changes') })
   await refreshStatus() // the working copy changed: this also re-evaluates the model
   return true
@@ -150,13 +156,13 @@ async function writeNow(host: string, fn: () => Promise<Managed>, done: string, 
 function added(host: string, attrs: string[], user?: string) {
   const removed = user ? fleet.managed[host]?.home?.[user]?.removedPackages : fleet.managed[host]?.removedPackages
   const back = attrs.filter((a) => removed?.includes(a))
-  const whose = user ? `${user}'s home on ${host}` : host
+  const whose = where(host, user)
   return `Added ${list(attrs)} to ${whose}` + (back.length ? `. ${list(back)} ${back.length > 1 ? 'are' : 'is'} no longer removed by name, so what else adds ${back.length > 1 ? 'them' : 'it'} comes back too` : '')
 }
 export const addPackages = (host: string, attrs: string[]) => write(host, () => api.editPackages(host, { add: attrs }), added(host, attrs))
 /** Removing is one click, so the toast offers to put the packages back. */
 export const removePackages = (host: string, attrs: string[]) =>
-  write(host, () => api.editPackages(host, { remove: attrs }), `Removed ${list(attrs)} from ${host}`, { label: 'Undo', run: () => addPackages(host, attrs) })
+  write(host, () => api.editPackages(host, { remove: attrs }), `Removed ${list(attrs)} from ${targetName(host)}`, { label: 'Undo', run: () => addPackages(host, attrs) })
 
 /** The managed.json attribute that installs a package the model knows by name: nodejs → nodejs_22. */
 export function managedAttr(host: string, name: string): string | undefined {
@@ -172,7 +178,9 @@ export async function removePackageByName(host: string, name: string) {
   return removePackages(host, [attr])
 }
 /** Where a package edit lands: the machine, or a home-manager user on it. */
-const where = (host: string, user?: string) => (user ? `${user}'s home on ${host}` : host)
+function where(host: string, user?: string) {
+  return user ? `${user}'s home on ${targetName(host)}` : targetName(host)
+}
 /** One write for any package edit; done is the toast. */
 export const editPackages = (host: string, edit: PackageEdit, done: string, action?: ToastAction) => write(host, () => api.editPackages(host, edit), done, action)
 /** Takes packages (by name) out of the machine, or a user's home, wherever they are added. */
@@ -186,7 +194,7 @@ export const removeHomePackages = (host: string, user: string, attrs: string[]) 
   editPackages(host, { user, remove: attrs }, `Removed ${list(attrs)} from ${where(host, user)}`, { label: 'Undo', run: () => addHomePackages(host, user, attrs) })
 /** How a package is changed on the machine; null puts it back as nixpkgs has it. */
 export const setPackageOverride = (host: string, attr: string, o: PackageOverride | null) =>
-  write(host, async () => api.setPackageOverride(host, attr, o, await seenHash(host)), o ? `Changed how ${attr} is built on ${host}` : `${attr} is back to nixpkgs' own on ${host}`)
+  write(host, async () => api.setPackageOverride(host, attr, o, await seenHash(host)), o ? `Changed how ${attr} is built on ${targetName(host)}` : `${attr} is back to nixpkgs' own on ${targetName(host)}`)
 /** Turns home-manager on (stateVersion for a user without it yet) or off for a user. */
 export const setHome = (host: string, user: string, enable: boolean, stateVersion?: string) =>
   write(host, () => api.editHome(host, { user, enable, stateVersion }), enable ? `home-manager is on for ${user} on ${host}` : `${user}'s home on ${host} is no longer set here`)
@@ -232,7 +240,7 @@ export async function updateManagedModule(): Promise<boolean> {
       ? {
           title: `Update ${path}?`,
           message:
-            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users and the Nix files next to managed.json. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
+            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users, the Nix files next to managed.json and modules/managed.json, set for every machine. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
           ok: 'Update it',
         }
       : { title: `Create ${path}?`, message: "It is this nixos-manager's module that applies each machine's managed.json. Review it in Changes before you commit.", ok: 'Create it' },
@@ -253,13 +261,13 @@ async function seenHash(host: string): Promise<string> {
   if (!fleet.managed[host]) await loadManaged(host)
   const hash = fleet.managed[host]?.hash
   // Without it the server could not refuse to overwrite an edit made elsewhere.
-  if (hash === undefined) throw new Error(`${host}'s managed file could not be read, so nothing was changed. Reload and try again.`)
+  if (hash === undefined) throw new Error(`${fileOf(host)} could not be read, so nothing was changed. Reload and try again.`)
   return hash
 }
 /** `done`: the confirmation in words ("Opened port 8080 on pi"); by default the option's name. */
-export const setOption = (host: string, path: string[], value: unknown, done = `Set ${pathName(path)} on ${host}`) =>
+export const setOption = (host: string, path: string[], value: unknown, done = `Set ${pathName(path)} on ${targetName(host)}`) =>
   write(host, async () => api.editSetting(host, { path, value, base_hash: await seenHash(host) }), done)
-export const unsetOption = (host: string, path: string[], done = `Reset ${pathName(path)} on ${host}`) =>
+export const unsetOption = (host: string, path: string[], done = `Reset ${pathName(path)} on ${targetName(host)}`) =>
   write(host, async () => api.editSetting(host, { path, unset: true, base_hash: await seenHash(host) }), done)
 
 /** `services` + `desktopManager.plasma6` → services.desktopManager.plasma6.enable */

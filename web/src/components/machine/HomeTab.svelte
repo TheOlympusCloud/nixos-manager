@@ -2,9 +2,9 @@
   import { untrack } from 'svelte'
   import { api, type Host } from '../../lib/api'
   import { frame } from '../../lib/ascii'
-  import { addHomePackages, excludePackages, fleet, openOrCreate, removeHomePackages, restorePackages, setHome } from '../../lib/fleet.svelte'
+  import { addHomePackages, excludePackages, fleet, loadManaged, openOrCreate, removeHomePackages, restorePackages, setHome, targetName } from '../../lib/fleet.svelte'
   import { pathName } from '../../lib/options'
-  import { dotfilesDir, homeNixFile, homeNixTemplate, homeRows, homeStateVersion, type PackageRow } from '../../lib/packages'
+  import { SHARED, SHARED_FILE, appliesShared, dotfilesDir, homeNixFile, homeNixTemplate, homeRows, homeStateVersion, type PackageRow } from '../../lib/packages'
   import { codeLink, link, machineLink } from '../../lib/router.svelte'
   import { app, refresh } from '../../lib/state.svelte'
   import { confirmBox, report } from '../../lib/ui.svelte'
@@ -24,7 +24,17 @@
   const u = $derived(host.users.find((x) => x.name === user))
   const mine = $derived(managed?.home?.[user])
   const hasHome = $derived(!!u?.home || !!mine)
-  const rows = $derived(homeRows(host, user, managed))
+  /** A user's packages in modules/managed.json reach every machine whose managed.json has their home (managed.nix 3). */
+  const canShare = $derived(full && appliesShared(host) && !!mine)
+  $effect(() => {
+    if (canShare && !fleet.managed[SHARED]) loadManaged(SHARED)
+  })
+  const shared = $derived(canShare ? fleet.managed[SHARED] : undefined)
+  let everywhere = $state(false)
+  const target = $derived(everywhere && shared ? SHARED : host.name)
+  const edited = $derived(fleet.managed[target]?.home?.[user])
+  const rows = $derived(homeRows(host, user, managed, shared))
+  const attrIn = (p: PackageRow) => (target === SHARED ? p.sharedAttr : p.attr)
 
   const filesDir = $derived(dotfilesDir(host, user))
   const dotfiles = $derived(app.entries.filter((e) => !e.dir && e.path.startsWith(filesDir)).map((e) => e.path.slice(filesDir.length)))
@@ -67,13 +77,18 @@
   }
 
   async function remove(p: PackageRow) {
-    if (p.attr) return run(p.name, () => removeHomePackages(host.name, user, [p.attr!]))
+    const t = target
+    const attr = attrIn(p)
+    if (attr) return run(p.name, () => removeHomePackages(t, user, [attr]))
     const ok = await confirmBox({
-      title: `Remove ${p.name} from ${user}'s home?`,
-      message: `${p.name} comes from ${user}'s home-manager configuration (a module or a program), which stays as it is: it is taken out of ${user}'s packages by name, in ${host.managedFile}. Restore puts it back.`,
+      title: `Remove ${p.name} from ${user}'s home${t === SHARED ? ' on every machine' : ''}?`,
+      message:
+        `${p.name} comes from ${p.sharedAttr ? SHARED_FILE : `${user}'s home-manager configuration (a module or a program)`}, which stays as it is: it is taken out of ${user}'s packages by name, ` +
+        (t === SHARED ? `in ${SHARED_FILE}, on every machine whose managed.json has ${user}'s home.` : `in ${host.managedFile}.`) +
+        ' Restore puts it back.',
       ok: 'Remove',
     })
-    if (ok) await run(p.name, () => excludePackages(host.name, [p.name], user))
+    if (ok) await run(p.name, () => excludePackages(t, [p.name], user))
   }
 
   async function addFile(e: SubmitEvent) {
@@ -146,8 +161,17 @@
       <div class="head">
         <h3 id="hp-title">Packages <span class="num">{rows.filter((r) => !r.removed).length}</span></h3>
         <span class="spacer"></span>
+        {#if canShare}
+          <div class="seg" role="radiogroup" aria-label="Where changes to {user}'s packages go">
+            <button role="radio" aria-checked={!everywhere} class:on={!everywhere} onclick={() => (everywhere = false)} title="Changes go to {host.managedFile}">{host.name}</button>
+            <button role="radio" aria-checked={everywhere} class:on={everywhere} disabled={!shared} onclick={() => (everywhere = true)} title="Changes go to {SHARED_FILE}">Every machine</button>
+          </div>
+        {/if}
         {#if full}<button class="small primary" onclick={() => (drawer = { kind: 'add' })}><Icon name="plus" /> Add packages</button>{/if}
       </div>
+      {#if target === SHARED}
+        <p class="muted small scope">Changes go to <a class="mono" href={codeLink(SHARED_FILE)}>{SHARED_FILE}</a>, for {user}'s home on every machine whose managed.json has it; a machine's own wins where both set something.</p>
+      {/if}
       <table class="data">
         <thead><tr><th>Package</th><th>From</th><th><span class="sr-only">Actions</span></th></tr></thead>
         <tbody>
@@ -156,11 +180,14 @@
               <td class="mono name">{p.name}</td>
               <td>
                 {#if p.pending}<span class="badge busy">Adding{fleet.computing ? '…' : ''}</span>{/if}
-                {#if p.removed}<span class="chip warn">⌫ Removed here</span>{:else if p.attr}<span class="chip ok">✎ Set here</span>{:else}<span class="def">· home-manager configuration</span>{/if}
+                {#if p.removed}<span class="chip warn">⌫ Removed {p.removedShared ? 'on every machine' : 'here'}</span>{:else if p.attr}<span class="chip ok">✎ Set here</span>{:else if p.sharedAttr}<span
+                    class="chip ok"
+                    title="Set for every machine, in {SHARED_FILE}">⇉ Every machine</span
+                  >{:else}<span class="def">· home-manager configuration</span>{/if}
               </td>
               <td class="act">
                 {#if full && p.removed}
-                  <button class="small" disabled={busy === p.name || !mine?.removedPackages.includes(p.name)} onclick={() => run(p.name, () => restorePackages(host.name, [p.name], user))}><Icon name="undo" /> Restore</button>
+                  <button class="small" disabled={busy === p.name || !edited?.removedPackages.includes(p.name)} onclick={() => run(p.name, () => restorePackages(target, [p.name], user))}><Icon name="undo" /> Restore</button>
                 {:else if full}
                   <button class="icon" aria-label="Remove {p.name} from {user}'s home" title="Remove (you can undo)" disabled={busy === p.name} onclick={() => remove(p)}><Icon name="trash" /></button>
                 {/if}
@@ -223,8 +250,8 @@
 {/if}
 
 {#if drawer?.kind === 'add'}
-  <Drawer title="Add packages to {user}'s home on {host.name}" onclose={() => (drawer = null)} width={640}>
-    <PackagePicker label="Add" onpick={(hit) => addHomePackages(host.name, user, [hit.attr])} />
+  <Drawer title="Add packages to {user}'s home on {targetName(target)}" onclose={() => (drawer = null)} width={640}>
+    <PackagePicker label="Add" onpick={(hit) => addHomePackages(target, user, [hit.attr])} />
   </Drawer>
 {:else if drawer?.kind === 'options'}
   <Drawer title="{user}'s home-manager options on {host.name}" onclose={() => (drawer = null)} width={760}>
@@ -235,6 +262,9 @@
 <style>
   .toolbar {
     margin-bottom: var(--lh);
+  }
+  .scope {
+    margin: 0 0 var(--lh);
   }
   .src {
     display: flex;
