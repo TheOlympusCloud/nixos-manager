@@ -1,0 +1,41 @@
+name: VM tests
+
+# A machine installed from its installer ISO and booted, in QEMU with KVM: a few GB
+# of downloads and a quarter of an hour, so not on every push like ci.yml.
+on:
+  schedule:
+    - cron: "30 4 * * *" # nightly on main, after ci.yml's
+  workflow_dispatch:
+  # A change to the VM test itself runs it on that branch.
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/vm-tests.yml
+      - internal/core/testdata/install-vm.nix
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash # with pipefail, so `cmd | tee` fails when cmd does
+
+jobs:
+  install:
+    name: Install from the ISO and boot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - uses: cachix/install-nix-action@v31 # also opens /dev/kvm to Nix's builds
+      - name: Install a customised machine from its ISO, boot it and log in
+        run: |
+          NIXMGR_VM_TESTS=1 go test -v -timeout 80m -run 'InVMWithRealNix$' ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
+            { scripts/ci-annotate.sh "VM tests" "$RUNNER_TEMP/tests.log"; exit 1; }
