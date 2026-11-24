@@ -46,9 +46,10 @@ An MCP server gives automation the same features.
   applies with priority over hand-written values (but not over `mkForce`);
   hand-written Nix is never rewritten.
 - **Any package, your way**: every package of a machine, NixOS's defaults and
-  hand-written ones included, can be removed, replaced or rebuilt with other
-  arguments, attributes, version, source or patches, or with a Nix file of its
-  own; **Reset to default** puts it back, and **Copy to…** makes the same
+  hand-written ones included, can be removed, replaced, taken from another
+  nixpkgs (`nixos-unstable`, say) or rebuilt with other arguments, attributes,
+  version, source or patches, or with a Nix file of its own; **Reset to
+  default** puts it back, and **Copy to…** makes the same
   change on other machines. See [Customise any package](#customise-any-package).
 - **Every machine at once**: add, remove, replace or customise a package, and
   a user's home packages, for every machine in one click, in
@@ -1321,6 +1322,19 @@ hand-written file, or a click here.
   `nodejs_24`.
 - **Customise** changes how it is built on the machine, by attribute, in
   `packageOverrides`:
+  - **From another nixpkgs**: a flake input that is another nixpkgs, such as
+    `nixpkgs-unstable` for a newer version than the machine's release. The
+    drawer offers the locked inputs that are a nixpkgs. **Another input…**
+    shows the line to add to the `inputs` in `flake.nix`
+    (`nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";`), then
+    **Lock**: the console never edits `flake.nix` itself. `managed.json` keeps
+    the input's name in `from`. `modules/managed.nix` imports that nixpkgs once
+    per machine, for the machine's platform and with its `nixpkgs.config` (so
+    `allowUnfree` applies), without its overlays, and takes the package from
+    it. The changes below apply on top. This needs `inputs` in the
+    `specialArgs` of `nixosSystem`, as the starter fleet has. It suits
+    applications best: a library from another nixpkgs may not fit what the
+    machine builds against it;
   - arguments for `.override` (`withVimKeys = true`) and attributes for
     `.overrideAttrs` (`doCheck = false`), written as `name = value` with JSON
     values, as `managed.json` keeps them;
@@ -1435,7 +1449,8 @@ copied. To change something on every machine for good, use
 ### Upgrading a fleet's managed.nix
 
 Removing and customising packages, and homes, need a `modules/managed.nix` with
-`nixosManager.version = 2`, and Every machine needs this release's (3). A fleet
+`nixosManager.version = 2`, Every machine needs 3, and a package from another
+nixpkgs needs this release's (4). A fleet
 made by an earlier nixos-manager still has an older one: **Health** and the
 machine's Packages and Home tabs say so and offer **Update managed.nix**, which writes this
 release's file for you to review in Changes. Changes you made to that file by hand are replaced,
