@@ -93,8 +93,8 @@
       <button class="primary" onclick={checkStaged}><Icon name="play" /> Check staged changes</button>
       <p class="muted small">
         Runs <code>nix flake check</code> on a snapshot of the staged changes, then builds every machine whose system they change compared with the newest pushed commit
-        that passed a check (every machine while none has); when the server sets <code>checks.build = false</code>, it only evaluates and dry-builds them, and each machine
-        builds itself when comin deploys{app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
+        that passed a check (every machine while none has){app.selectedTargets.length ? `, and dry-builds ${app.selectedTargets.length} more configuration(s), which only evaluates them` : ''}.
+        When the server sets <code>checks.build = false</code>, it only evaluates and dry-builds those machines, and each one builds itself when comin deploys.
       </p>
       <a class="inputs-link small" href={link('inputs')}>Lock and update flake inputs in Inputs <Icon name="right" /></a>
     </div>

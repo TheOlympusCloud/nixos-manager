@@ -134,7 +134,10 @@ An MCP server gives automation the same features.
   result lists those machines under `evaluatedOnly` instead of `built`, and
   commits, pushes and **Try on <machine>** accept it like any passing check. A
   dry build does not verify fixed-output hashes, so a wrong `fetchurl` hash
-  only fails on the machine.
+  only fails on the machine. The check also drops the old GC root of each
+  machine it only evaluated, even for changes never committed, so with the
+  binary cache on, the cache may lose the system that machine runs now. Back on
+  `true`, a machine is built again only once a change touches it.
 - **Checks of pushed commits**: a commit pushed without the console's check
   (from a laptop, Forgejo's web editor, or with Push without checks) is checked
   when the push webhook announces it, on any branch: `nix flake check`, then a
