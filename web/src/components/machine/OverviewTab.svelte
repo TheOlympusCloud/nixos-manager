@@ -27,8 +27,8 @@
 <div class="tiles">
   {#each tiles as t (t.label)}
     <a class="tile lift" href={machineLink(host.name, t.tab)} use:frame={{ title: t.label, lift: true, animate: true }}>
-      <span class="sr-only">{t.label}</span>
-      <pre class="big t-value" use:odometer={t.value}></pre>
+      <span class="sr-only">{t.label}: {t.value}</span>
+      <pre class="big t-value" aria-hidden="true" use:odometer={t.value}></pre>
       <span class="t-note">{t.note}</span>
     </a>
   {/each}

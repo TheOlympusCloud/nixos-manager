@@ -230,7 +230,8 @@ export function scramble(s: string, p: number): string {
   return out
 }
 
-const SWEEP_SKIP = '.fr,.nofx,pre,textarea,script,style,.big,.bar,.skel,.cm-editor,.svelte-flow__edges,input,select,[contenteditable]'
+// Live regions are left alone too: a screen reader would read the placeholder out.
+const SWEEP_SKIP = '.fr,.nofx,pre,textarea,script,style,.big,.bar,.skel,.cm-editor,.svelte-flow__edges,input,select,[contenteditable],[role=status],[role=alert],[aria-live]'
 type Swept = Text & { _final?: string | null; _shown?: string }
 
 /**
@@ -371,14 +372,14 @@ export function bigText(el: HTMLElement, text: string) {
   }
 }
 
-/** Svelte action: a whole number in the pixel face that rolls up like an odometer, from 0 and then from the old value. */
+/** Svelte action: a whole number in the pixel face that rolls up like an odometer, from 0 and then from the old value.
+ *  The glyphs say nothing to a screen reader: hide the element and give the number in an sr-only copy beside it. */
 // The digits keep their width while they roll, so nothing beside them moves.
 export function odometer(el: HTMLElement, n: number) {
   let shown = 0
   let cancel = () => {}
   const roll = (to: number) => {
     cancel()
-    el.setAttribute('aria-label', String(to))
     const from = shown
     const width = String(Math.max(Math.abs(from), Math.abs(to))).length
     cancel = run(from === to || !Number.isFinite(to) ? 0 : 8, (p) => {

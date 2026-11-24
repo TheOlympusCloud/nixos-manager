@@ -89,8 +89,8 @@
       <div class="tiles">
         {#each tiles as t (t.label)}
           <div class="tile" class:zero={!t.value} use:frame={{ title: t.label, animate: true }}>
-            <span class="sr-only">{t.label}</span>
-            <pre class="big t-value {t.tone}" use:odometer={t.value}></pre>
+            <span class="sr-only">{t.label}: {t.value}</span>
+            <pre class="big t-value {t.tone}" aria-hidden="true" use:odometer={t.value}></pre>
             <span class="t-note">{t.note}</span>
           </div>
         {/each}
