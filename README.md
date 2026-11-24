@@ -729,7 +729,10 @@ machine, or make one with **New machine** and commit and push it, then
    key to the machine and runs `nixos-install --flake`. It offers to set the
    users' passwords, commits the hardware configuration and pushes it (the
    token must be able to write), so that comin deploys the same system, then
-   reboots.
+   reboots. Like the nixos-anywhere command's, that push does not go through
+   the console: the push webhook checks the commit, and **Pull** brings it
+   into the console's working copy (a commit made there meanwhile is rebased,
+   and needs a new check before it is pushed).
 
 The machine comes up enrolled: comin pulls the repository, its secrets (comin's
 pull token for a private repository included) open with the approved key, and
