@@ -5,8 +5,8 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [svelte()],
   base: '/',
-  // The graph layout engine (ELK, ~1.5 MB) runs in its own worker file; CodeMirror and three.js (~540 kB, shared
-  // by the intro's scene and the fleet backdrop) load on demand. Anything bigger than that in a chunk deserves a warning.
+  // The graph layout engine (ELK, ~1.5 MB) runs in its own worker file; CodeMirror and the graph load on demand.
+  // Anything bigger than that in a chunk deserves a warning.
   build: { outDir: 'dist/app', chunkSizeWarningLimit: 650 },
   server: {
     proxy: {
