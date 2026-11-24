@@ -53,7 +53,9 @@ var toolScope = map[string]auth.Scope{
 	"revert_commit": auth.ScopeEdit, "merge_branch": auth.ScopeEdit, "pull": auth.ScopeEdit,
 	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
-	"flake_lock": auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
+	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit,
+	"update_managed_module": auth.ScopeEdit,
+	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
 
 	"push": auth.ScopeFull, "try_on_machine": auth.ScopeFull, "end_trial": auth.ScopeFull,
 }
@@ -377,6 +379,31 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	})
 	tool(s, "remove_packages", "Remove packages from a machine's managed.json. Packages added in hand-written Nix files must be edited there.", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
 		return svc.RemovePackages(in.Host, in.Packages)
+	})
+	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		core.PackageEdit
+	}) (core.ManagedView, error) {
+		return svc.EditPackages(in.Host, in.PackageEdit)
+	})
+	tool(s, "set_package_override", "Change how a package (by nixpkgs attribute) is built on a machine, for everything there that uses it: arguments for .override, attributes for .overrideAttrs, a version with its source (a URL or a GitHub repository at a revision), and patches (a URL or a file in the machine's folder). An empty hash makes run_check fail and print the right one. Without override, the package is put back as nixpkgs has it. For anything else, write hosts/<host>/packages/<attribute>.nix with write_file: { pkgs, prev, lib, ... }: pkg: <package>.", func(ctx context.Context, in struct {
+		Host     string                `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Attr     string                `json:"attr" jsonschema:"nixpkgs attribute, e.g. htop"`
+		Override *core.PackageOverride `json:"override,omitempty"`
+	}) (core.ManagedView, error) {
+		return svc.SetPackageOverride(in.Host, in.Attr, in.Override, nil)
+	})
+	tool(s, "set_home_manager", "Turn home-manager on (with stateVersion for a user without it yet, e.g. the machine's release 26.05) or off for a user of a machine, through its managed.json. Then edit_packages with user, and set_option on home-manager.users.<user>.… (search_options with that prefix). Dotfiles are files in hosts/<host>/home/<user>/files/ (linked at ~/), and hosts/<host>/home/<user>/custom.nix is a home-manager module of your own. Needs home-manager's NixOS module in the machine's flake modules.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		core.HomeEdit
+	}) (core.ManagedView, error) {
+		return svc.SetHome(in.Host, in.HomeEdit)
+	})
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 2 needs for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+		BaseHash string `json:"base_hash,omitempty"`
+	}) (map[string]string, error) {
+		h, err := svc.UpdateManagedModule(in.BaseHash)
+		return map[string]string{"hash": h}, err
 	})
 	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types.", func(ctx context.Context, in struct {
 		Host  string   `json:"host"`
