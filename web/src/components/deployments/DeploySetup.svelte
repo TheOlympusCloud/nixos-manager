@@ -6,6 +6,7 @@
   import { codeLink, go, link, machineLink } from '../../lib/router.svelte'
   import { confirmBox, report, toast } from '../../lib/ui.svelte'
   import { copyText } from '../../lib/util'
+  import { frame } from '../../lib/ascii'
   import Icon from '../Icon.svelte'
 
   /** How to turn reporting on: the address for the repository, each machine's own token. */
@@ -91,7 +92,7 @@
 
 {#snippet copyButton(text: string, what: string, label: string)}
   <button class="small" onclick={() => copy(text, what)} aria-label={label} disabled={!token && what !== 'url'}>
-    <Icon name={copied === what ? 'tick' : 'copy'} size={13} />{copied === what ? 'Copied' : 'Copy'}
+    <Icon name={copied === what ? 'tick' : 'copy'} /> {copied === what ? 'Copied' : 'Copy'}
   </button>
 {/snippet}
 
@@ -106,7 +107,7 @@
         {@render copyButton(urlLine(url), 'url', 'Copy the line for common.nix')}
       </div>
       {#if local}
-        <p class="warn small" role="note"><Icon name="alert" size={13} />This page is open on {location.hostname}, which the machines cannot reach. Use the LAN or Tailscale address they know this server by.</p>
+        <p class="warn small" role="note"><Icon name="alert" /> This page is open on {location.hostname}, which the machines cannot reach. Use the LAN or Tailscale address they know this server by.</p>
       {:else}
         <p class="muted small">Use the address the machines reach this server at: its LAN name or its Tailscale name.</p>
       {/if}
@@ -142,10 +143,10 @@
         SSH at all, store every machine's token as its secret in <a href={link('settings')}>Settings → Secrets</a> (the starter fleet's sops-nix setup uses it); with agenix or
         your own sops-nix setup, set <span class="mono">fleet.deployReport.tokenFile</span> to the secret's path instead of <span class="mono">{TOKEN_FILE}</span>.
       </p>
-      <div class="row-end"><button class="small ghost" onclick={regenerate}><Icon name="refresh" size={13} />New tokens for every machine</button></div>
+      <div class="row-end"><button class="small ghost" onclick={regenerate}><Icon name="refresh" /> New tokens for every machine</button></div>
       {#if ov?.sharedToken}
-        <div class="shared" role="note">
-          <Icon name="alert" size={14} />
+        <div class="shared" role="note" data-tone="warn" use:frame>
+          <Icon name="alert" />
           <div>
             <p>
               This console still accepts the shared fleet token machines were set up with before each had its own. Whoever holds it can report as any machine.
@@ -167,7 +168,7 @@
         <div class="who" aria-label="Machines that reported">
           {#each machines as h (h)}
             <a class="who-chip" class:on={reported.has(h)} href={machineLink(h)} title={reported.has(h) ? `${h} reports its deployments` : `${h} has not reported yet`}>
-              <Icon name={reported.has(h) ? 'tick' : 'minus'} size={12} />{h}
+              <Icon name={reported.has(h) ? 'tick' : 'minus'} /> {h}
             </a>
           {/each}
         </div>
@@ -179,56 +180,41 @@
 <style>
   .steps {
     display: grid;
-    gap: var(--s4);
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    gap: calc(var(--lh) * 2) 0;
   }
   .steps > li {
     display: grid;
-    grid-template-columns: 26px minmax(0, 1fr);
-    gap: var(--s3);
+    grid-template-columns: 3ch minmax(0, 1fr);
+    gap: 0 2ch;
   }
+  /* The step number in reverse video: ▐1▌ */
   .n {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    color: var(--accent);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: 50%;
+    height: var(--lh);
+    color: var(--on-accent);
+    font-weight: 700;
+    text-align: center;
+    background: var(--accent);
   }
   .body {
     display: grid;
-    gap: var(--s2);
+    gap: var(--lh) 0;
     min-width: 0;
   }
-  .body h3 {
-    font-size: var(--fs-md);
-    font-weight: 600;
-  }
-  .body p {
-    margin: 0;
-    line-height: 1.55;
+  .body > h3 + p {
+    margin-top: calc(var(--lh) * -1);
   }
   .code-row {
     display: flex;
-    align-items: center;
-    gap: var(--s2);
+    align-items: baseline;
+    gap: 0 2ch;
     min-width: 0;
-    padding: 6px 6px 6px 12px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    padding: 0 1ch;
+    background: var(--bg-input);
   }
   .code-row code {
     flex: 1;
     min-width: 0;
     color: var(--fg-strong);
-    font: 12px/1.6 var(--mono);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -236,21 +222,24 @@
   .install {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: var(--s2);
+    align-items: baseline;
+    gap: 0 2ch;
+  }
+  .install + .token-row {
+    margin-top: calc(var(--lh) * -1);
   }
   .token-row .label,
   .install .label {
-    width: 96px;
+    width: 12ch;
   }
   .token-row input {
     flex: 1;
-    min-width: 200px;
-    max-width: 380px;
+    min-width: 24ch;
+    max-width: 46ch;
   }
   .install select {
     width: auto;
-    min-width: 200px;
+    min-width: 24ch;
   }
   .row-end {
     display: flex;
@@ -258,52 +247,36 @@
   }
   .shared {
     display: flex;
-    gap: var(--s2);
-    padding: var(--s3);
-    color: var(--fg);
-    background: color-mix(in srgb, var(--yellow) 6%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--yellow) 30%, var(--border));
-    border-radius: var(--r);
+    gap: 0 2ch;
   }
-  .shared > :global(svg) {
-    flex: none;
-    margin-top: 2px;
+  .shared > :global(.ic) {
     color: var(--yellow);
   }
   .shared div {
     display: grid;
-    gap: var(--s2);
+    gap: var(--lh) 0;
     justify-items: start;
   }
   .warn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
     color: var(--yellow);
   }
   .who {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 0 1ch;
   }
+  /* A machine that reports is a green chip, one that does not a muted one. */
   .who-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 22px;
-    padding: 0 8px;
+    padding: 0 1ch;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    text-decoration: none;
-    border: 1px dashed var(--line);
-    border-radius: 11px;
+    background: var(--bg-hover);
   }
   .who-chip.on {
-    color: var(--fg-strong);
-    background: color-mix(in srgb, var(--green) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
-  }
-  .who-chip.on :global(svg) {
     color: var(--green);
+    background: color-mix(in srgb, var(--green) 14%, transparent);
+  }
+  .who-chip:hover {
+    color: var(--on-accent);
+    background: var(--accent);
   }
 </style>

@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { frame } from '../../lib/ascii'
   import { driftDetail, excerpt, short, silenceDetail, stateDetail } from '../../lib/deployments'
   import { deployOf, deploys, watchDeployments } from '../../lib/deployments.svelte'
   import { link } from '../../lib/router.svelte'
   import { ago } from '../../lib/util'
   import DeployBadge from './DeployBadge.svelte'
   import FailureActions from './FailureActions.svelte'
+  import Icon from '../Icon.svelte'
 
   /** What comin last did on one machine, for its Overview tab. */
   let { host }: { host: string } = $props()
@@ -14,15 +16,16 @@
   const history = $derived((m?.reports ?? []).slice(0, 5))
 </script>
 
-<section class="section dep-card" aria-labelledby="dep-title">
+<section class="section card dep-card" aria-labelledby="dep-title" use:frame={{ title: 'Deployment' }}>
   <div class="head">
-    <h2 id="dep-title">Deployment</h2>
+    <h2 id="dep-title" class="sr-only">Deployment</h2>
     {#if m}<DeployBadge {m} />{/if}
     <span class="spacer"></span>
-    <a class="link-small" href={link('deployments')}>All deployments</a>
+    <!-- Sits on the frame's top line, where a frame tag would be. -->
+    <a class="link-small" href={link('deployments')}>All deployments <span aria-hidden="true">›</span></a>
   </div>
   {#if !deploys.overview}
-    <span class="skel" style:width="60%"></span>
+    <span class="skel" style:width="30ch"></span>
   {:else if !m || (m.state === 'never' && !m.lastSeen)}
     <p class="muted">{host} has not reported a deployment yet, so what it runs is unknown here. <a href={link('deployments')}>Turn on reporting</a> to see the commit comin deployed and why a deployment failed.</p>
   {:else}
@@ -36,15 +39,19 @@
       </dd>
       {#if m.deployedAt}<dt>Deployed</dt><dd title={new Date(m.deployedAt).toLocaleString()}>{ago(m.deployedAt)}</dd>{/if}
       <dt>Follows</dt>
-      <dd><span class="mono">{m.branch}</span>{#if m.behind && m.state !== 'failed'}<span class="muted"> · {m.behind} behind</span>{/if}</dd>
+      <dd><span class="mono"><Icon name="branch" /> {m.branch}</span>{#if m.behind && m.state !== 'failed'}<span class="muted"> · {m.behind} behind</span>{/if}</dd>
     </dl>
     {#if !m.failure}<p class="muted small state">{stateDetail(m)}</p>{/if}
     {#if m.silent}<p class="small state warn-line" role="status">{silenceDetail(m)}</p>{/if}
     {#if m.drift}<p class="small state warn-line" role="status">{driftDetail(m)}</p>{/if}
     {#if m.system?.reboot}<p class="muted small state">A reboot is pending: a deployment changed the kernel, its modules or the initrd, which only a reboot loads.</p>{/if}
     {#if m.failure}
-      <div class="fail" role="alert">
-        <div class="fail-head">
+      <div
+        class="fail"
+        role="alert"
+        data-tone="err"
+        use:frame={{ kind: 'square', title: `${m.failure.phase === 'build' ? 'Build' : 'Switch'} of ${short(m.failure.commit)} failed ${ago(m.failure.at)}` }}>
+        <div class="fail-head sr-only">
           {m.failure.phase === 'build' ? 'Build' : 'Switch'} of <span class="mono">{short(m.failure.commit)}</span> failed {ago(m.failure.at)}
         </div>
         {#if m.failure.error}<pre>{excerpt(m.failure.error, 8, 900)}</pre>{/if}
@@ -71,34 +78,38 @@
 <style>
   .head {
     display: flex;
-    align-items: center;
-    gap: var(--s2);
-    margin-bottom: var(--s3);
+    align-items: baseline;
+    gap: 0 2ch;
   }
-  .head h2 {
-    font-size: var(--fs-lg);
-  }
+  /* The link stands on the frame's top line, right-aligned like a frame tag: ─ All deployments › ─╮ */
   .link-small {
-    font-size: var(--fs-sm);
+    position: absolute;
+    top: 0;
+    right: 2ch;
+    z-index: 2;
+    padding: 0 1ch;
+    color: var(--fg-muted);
+    background: var(--bg);
+  }
+  .link-small:hover {
+    color: var(--on-accent);
+    background: var(--accent);
   }
   .kv {
-    display: grid;
-    grid-template-columns: 96px minmax(0, 1fr);
-    gap: 8px 12px;
-    margin: 0;
-  }
-  .kv dt {
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
+    grid-template-columns: 10ch minmax(0, 1fr);
+    gap: 0 2ch;
   }
   .kv dd {
     display: flex;
-    gap: 8px;
+    gap: 0 1ch;
     min-width: 0;
-    margin: 0;
+  }
+  .kv dd :global(.ic) {
+    color: var(--fg-muted);
   }
   .kv dd a {
     flex: none;
+    font-weight: 700;
   }
   .subject {
     overflow: hidden;
@@ -106,50 +117,30 @@
     white-space: nowrap;
   }
   .state {
-    margin: var(--s2) 0 0;
+    margin-top: var(--lh);
   }
   .warn-line {
     color: var(--yellow);
   }
-  .fail {
-    margin-top: var(--s3);
-    padding: var(--s3);
-    background: color-mix(in srgb, var(--red) 6%, var(--bg-raised));
-    border: 1px solid color-mix(in srgb, var(--red) 30%, var(--border));
-    border-radius: var(--r);
+  .warn-line::before {
+    content: '▲ ';
   }
-  .fail-head {
-    color: var(--red);
-    font-weight: 500;
+  .fail {
+    margin-top: var(--lh);
   }
   .fail pre {
-    max-height: 180px;
-    margin: var(--s2) 0;
+    max-height: calc(var(--lh) * 10);
+    margin-bottom: var(--lh);
     overflow: auto;
     color: var(--fg);
-    font: 12px/1.5 var(--mono);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .fail p {
-    margin: 0;
-  }
   .hist {
-    margin: var(--s3) 0 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid var(--border);
+    margin-top: var(--lh);
   }
   .hist li {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 0;
-    font-size: var(--fs-sm);
-    border-bottom: 1px solid var(--border);
-  }
-  .hist .dot {
-    width: 6px;
-    height: 6px;
+    gap: 0 1ch;
   }
 </style>

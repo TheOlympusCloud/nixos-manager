@@ -4,6 +4,7 @@
   import Icon from '../components/Icon.svelte'
   import ViewPane from '../components/ViewPane.svelte'
   import type { Commit } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { link, replace, route } from '../lib/router.svelte'
   import { app, type ViewTab } from '../lib/state.svelte'
 
@@ -39,7 +40,7 @@
 </script>
 
 <div class="hv">
-  <aside class="side">
+  <aside class="side" use:frame={{ title: 'History' }}>
     <form class="pick" onsubmit={choose}>
       <label for="hist-file" class="label">File history</label>
       <div class="row">
@@ -60,14 +61,18 @@
       {#key view.id + '#' + view.n}<ViewPane tab={view} onopen={open} />{/key}
     {:else if commits && !commits.length}
       <div class="hint">
-        <Icon name="history" size={22} />
+        <pre class="art" aria-hidden="true">╭───╮
+│ <Icon name="history" /> │
+╰───╯</pre>
         <p><strong>No commits yet.</strong></p>
         <p class="muted">Every commit you make in Changes shows here, with what it did to each machine. You can revert any of them.</p>
         <a class="btn" href="#/changes">Go to Changes</a>
       </div>
     {:else if commits}
       <div class="hint muted">
-        <Icon name="history" size={22} />
+        <pre class="art" aria-hidden="true">╭───╮
+│ <Icon name="history" /> │
+╰───╯</pre>
         <p>Pick a commit to see what it did to the machines{path ? `, or a version of ${path} to view, compare or restore it` : ''}.</p>
       </div>
     {/if}
@@ -77,8 +82,10 @@
 <style>
   .hv {
     display: grid;
-    grid-template-columns: 360px 1fr;
+    grid-template-columns: 44ch minmax(0, 1fr);
+    gap: 0 2ch;
     height: 100%;
+    padding: var(--lh) 1ch;
   }
   /* Phones: the side panel above the content, one scroll for both. */
   @media (max-width: 760px) {
@@ -87,27 +94,21 @@
       align-content: start;
       overflow-y: auto;
     }
-    .side {
-      border-right: 0;
-      border-bottom: 1px solid var(--border);
-    }
   }
+  /* Framed, so it never scrolls itself (the frame would scroll away): the list inside does. */
   .side {
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--bg-side);
-    border-right: 1px solid var(--border);
+    overflow: hidden;
   }
   .pick {
     display: grid;
-    gap: 6px;
-    padding: 12px;
-    border-bottom: 1px solid var(--border);
   }
   .pick .row {
     display: flex;
-    gap: 6px;
+    gap: 0 1ch;
+    min-width: 0;
   }
   .pick .link {
     justify-self: start;
@@ -125,14 +126,13 @@
   .hint {
     display: grid;
     justify-items: center;
-    gap: 10px;
-    max-width: 360px;
-    margin: 20vh auto 0;
+    gap: var(--lh) 0;
+    max-width: 48ch;
+    margin: calc(var(--lh) * 8) auto 0;
     text-align: center;
-    line-height: 1.5;
-    animation: rise var(--t-slow) var(--ease) backwards;
   }
-  .hint :global(svg) {
-    color: var(--fg-muted);
+  .art {
+    color: var(--accent);
+    text-align: left;
   }
 </style>

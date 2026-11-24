@@ -110,7 +110,7 @@
   .title {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: 0 2ch;
     min-width: 0;
   }
   .title strong {
@@ -120,11 +120,8 @@
   }
   .actions {
     display: flex;
-    gap: 6px;
+    gap: 0 2ch;
     margin-left: auto;
-  }
-  .small {
-    font-size: 12px;
   }
   .view-body {
     flex: 1;
@@ -132,15 +129,16 @@
     overflow: auto;
   }
   .message {
-    margin: 0;
-    padding: 10px 14px;
-    font: 12.5px/1.5 var(--mono);
+    margin-bottom: var(--lh);
+    padding: 0 1ch;
     white-space: pre-wrap;
-    border-bottom: 1px solid var(--line);
   }
   .error {
-    margin: 14px;
+    margin: var(--lh) 2ch;
     color: var(--red);
     white-space: pre-wrap;
+  }
+  .error::before {
+    content: '✖ ';
   }
 </style>

@@ -37,8 +37,9 @@
 {/snippet}
 
 <section class="panel" aria-label="History">
+  <!-- The view frames this panel and titles it "History"; the refresh button stands on that frame's top line. -->
   <div class="panel-head">
-    <h2>History</h2>
+    <h2 class="sr-only">History</h2>
     <div class="tools">
       <button class="icon" title="Refresh" aria-label="Refresh history" onclick={() => app.logVersion++}><Icon name="refresh" /></button>
     </div>
@@ -53,7 +54,7 @@
             <li class="empty">Loading…</li>
           {:else}
             {#each fileLog as c (c.sha)}
-              <li class="item two-line" class:selected={current === `version:${c.sha}:${path}` || current === `compare:${c.sha}:${path}`}>
+              <li class="item two-line version" class:selected={current === `version:${c.sha}:${path}` || current === `compare:${c.sha}:${path}`}>
                 <button class="item-main" onclick={() => showVersion(c, 'version')} title="View {path} at {c.short}">
                   <span class="name">{c.subject}</span>
                   {@render meta(c)}
@@ -85,7 +86,7 @@
               </button>
               {#if app.info?.web && onRemote(i, app.status?.upstream, app.status?.ahead)}
                 <span class="item-tools">
-                  <a class="ext" href={commitUrl(app.info.web, c.sha)} target="_blank" rel="noopener noreferrer" aria-label="Open {c.short} in Forgejo" title="Open {c.short} in Forgejo"><Icon name="external" size={13} /></a>
+                  <a class="ext" href={commitUrl(app.info.web, c.sha)} target="_blank" rel="noopener noreferrer" aria-label="Open {c.short} in Forgejo" title="Open {c.short} in Forgejo"><Icon name="external" /></a>
                 </span>
               {/if}
             </li>
@@ -99,61 +100,103 @@
 </section>
 
 <style>
+  /* On the top line of the frame around the panel (the nearest positioned ancestor). */
+  .panel-head {
+    height: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .panel-head .tools {
+    position: absolute;
+    top: 0;
+    right: 2ch;
+    z-index: 2;
+    padding: 0 1ch;
+    background: var(--bg);
+  }
   summary {
-    cursor: pointer;
-    list-style: none;
+    justify-content: flex-start;
   }
-  summary::-webkit-details-marker {
-    display: none;
-  }
-  summary h3::before {
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    margin: 0 8px 2px 1px;
-    content: '';
-    border-right: 1.5px solid currentColor;
-    border-bottom: 1.5px solid currentColor;
-    transform: rotate(-45deg);
-    transition: transform var(--t-fast) var(--ease);
-  }
-  details[open] > summary h3::before {
-    transform: rotate(45deg);
+  summary h3 {
+    color: var(--fg-muted);
+    font-weight: 400;
   }
   .fname {
-    margin-left: 4px;
-    text-transform: none;
-    letter-spacing: normal;
+    color: var(--fg-strong);
+    font-weight: 700;
+  }
+  /* Commits down a rail: ○ on each, ◉ on the one open, │ joining them. */
+  .item {
+    padding-right: 0;
+  }
+  .item::before,
+  .item::after {
+    position: absolute;
+    left: 1ch;
+    color: var(--line-strong);
+  }
+  .item::before {
+    top: 0;
+    content: '○';
+  }
+  .item:not(:last-child)::after {
+    top: var(--lh);
+    content: '│';
+  }
+  .item.version:not(:last-child)::after {
+    white-space: pre;
+    content: '│\A│';
+  }
+  .item .item-main {
+    padding-left: 3ch;
+  }
+  .item .name {
+    color: var(--fg-strong);
+    font-weight: 700;
+  }
+  .item.selected {
+    color: var(--on-accent);
+    background: var(--accent);
+  }
+  .item.selected::before {
+    content: '◉';
+  }
+  .item.selected::before,
+  .item.selected::after,
+  .item.selected :is(.item-main, .name, .dir, .ext) {
+    color: var(--on-accent);
+  }
+  /* A version is three rows: subject, sha · author · when, then its actions. */
+  .item.version {
+    flex-direction: column;
+    align-items: stretch;
   }
   .row-tools {
     display: flex;
     flex: none;
-    gap: 4px;
+    gap: 0 1ch;
+    padding-left: 3ch;
   }
-  .row-tools button {
-    height: 22px;
-    padding: 0 7px;
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    background: none;
+  .item.selected .row-tools button:not(:hover, :focus-visible) {
+    color: var(--on-accent);
   }
-  .row-tools button:hover:not(:disabled) {
-    color: var(--fg-strong);
+  .item.selected .row-tools button:not(:hover, :focus-visible)::before,
+  .item.selected .row-tools button:not(:hover, :focus-visible)::after {
+    color: var(--on-accent);
   }
   .item.selected .item-tools {
     opacity: 1;
   }
   .ext {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
+    display: inline-block;
+    width: 2ch;
     color: var(--fg-muted);
-    border-radius: var(--r);
+    text-align: center;
   }
   .ext:hover,
   .ext:focus-visible {
-    color: var(--fg-strong);
-    background: var(--bg-active);
+    color: var(--on-accent);
+    background: var(--accent);
   }
 </style>

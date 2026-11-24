@@ -40,8 +40,9 @@
 </script>
 
 <section class="panel" aria-label="Files">
+  <!-- The workspace frames this panel and titles it "Files"; the tools stand on that frame's top line. -->
   <div class="panel-head">
-    <h2>Files</h2>
+    <h2 class="sr-only">Files</h2>
     <div class="tools">
       <button class="icon" title="New file" aria-label="New file" onclick={() => newFile(targetFolder())}><Icon name="file-plus" /></button>
       <button class="icon" title="New folder" aria-label="New folder" onclick={() => newFolder(targetFolder())}><Icon name="folder-plus" /></button>
@@ -56,15 +57,15 @@
         <li>
           <div class="row" class:selected={selected?.path === node.path} class:open={activePath() === node.path}>
             <button
-              class="row-main"
-              style:padding-left="{8 + depth * 14}px"
+              class="row-main bare"
+              style:padding-left="{depth * 2 + 1}ch"
               aria-expanded={node.dir ? expanded.has(node.path) : undefined}
               aria-keyshortcuts="F2 Delete"
               title="{node.path}{node.dir ? '' : ' — F2 rename, Delete removes'}"
               onclick={(e) => activate(node, e)}
               onkeydown={(e) => onKey(e, node)}>
               {#if node.dir}
-                <Icon name={expanded.has(node.path) ? 'down' : 'right'} size={14} />
+                <Icon name={expanded.has(node.path) ? 'dir-down' : 'dir-right'} />
               {:else}
                 <span class="spacer"></span>
               {/if}
@@ -74,10 +75,10 @@
             {#if !node.deleted}
               <span class="row-tools">
                 {#if node.dir}
-                  <button class="icon" tabindex="-1" title="New file in {node.name}" aria-label="New file in {node.name}" onclick={() => newFile(node.path)}><Icon name="file-plus" size={14} /></button>
+                  <button class="icon" tabindex="-1" title="New file in {node.name}" aria-label="New file in {node.name}" onclick={() => newFile(node.path)}><Icon name="file-plus" /></button>
                 {/if}
-                <button class="icon" tabindex="-1" title="Rename or move (F2)" aria-label="Rename {node.name}" onclick={() => movePath(node.path)}><Icon name="edit" size={14} /></button>
-                <button class="icon" tabindex="-1" title="Delete (Del)" aria-label="Delete {node.name}" onclick={() => deletePath(node.path, node.dir)}><Icon name="trash" size={14} /></button>
+                <button class="icon" tabindex="-1" title="Rename or move (F2)" aria-label="Rename {node.name}" onclick={() => movePath(node.path)}><Icon name="edit" /></button>
+                <button class="icon" tabindex="-1" title="Delete (Del)" aria-label="Delete {node.name}" onclick={() => deletePath(node.path, node.dir)}><Icon name="trash" /></button>
               </span>
             {/if}
           </div>
@@ -97,45 +98,71 @@
 </section>
 
 <style>
-  ul {
+  /* On the top line of the frame around the panel (the nearest positioned ancestor): ▤+ ▸+ ↻ « */
+  .panel-head {
+    height: 0;
+    min-height: 0;
     margin: 0;
     padding: 0;
-    list-style: none;
+  }
+  .panel-head .tools {
+    position: absolute;
+    top: 0;
+    right: 2ch;
+    z-index: 2;
+    gap: 0 1ch;
+    padding: 0 1ch;
+    background: var(--bg);
   }
   .row {
     position: relative;
     display: flex;
-    align-items: center;
   }
   .row:hover {
     background: var(--bg-hover);
   }
-  .row.open .row-main {
-    color: var(--fg-strong);
-  }
   .row.selected {
     background: var(--bg-active);
+  }
+  /* The file open in the editor is reverse video. */
+  .row.open {
+    background: var(--accent);
+  }
+  .row.open .row-main,
+  .row.open .name,
+  .row.open .letter,
+  .row.open .row-tools .icon {
+    color: var(--on-accent);
+  }
+  .row.open .row-main {
+    font-weight: 700;
   }
   .row-main {
     display: flex;
     flex: 1;
-    align-items: center;
-    gap: 4px;
+    gap: 0 1ch;
     min-width: 0;
-    height: 24px;
-    padding-right: 8px;
+    padding-right: 1ch;
     color: var(--fg);
     text-align: left;
-    background: none;
-    border: 0;
-    border-radius: 0;
   }
-  .row-main:focus-visible {
-    outline-offset: -2px;
+  /* A row lights up as a row (--bg-hover), not as a button; keyboard focus stays reverse video. */
+  .row .row-main:hover:not(:focus-visible) {
+    color: var(--fg);
+    background: none;
+  }
+  .row.open .row-main:hover:not(:focus-visible) {
+    color: var(--on-accent);
+  }
+  .row-main :global(.ic) {
+    color: var(--fg-muted);
+  }
+  .row.open .row-main :global(.ic) {
+    color: var(--on-accent);
   }
   .spacer {
-    width: 14px;
     flex: none;
+    width: 1ch;
   }
   .name {
     flex: 1;
@@ -152,16 +179,16 @@
   }
   .row-tools {
     position: absolute;
-    right: 4px;
+    right: 1ch;
     display: none;
-    gap: 2px;
+    gap: 0 1ch;
+    padding-left: 1ch;
     background: var(--bg-hover);
+  }
+  .row.open .row-tools {
+    background: var(--accent);
   }
   .row:hover .row-tools {
     display: flex;
-  }
-  .row-tools .icon {
-    width: 22px;
-    height: 22px;
   }
 </style>
