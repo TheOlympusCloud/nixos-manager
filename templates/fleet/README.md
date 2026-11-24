@@ -4,9 +4,13 @@
   `default.nix` becomes a machine (`nixosConfigurations.<folder>`), so adding one
   is adding a folder; nixos-manager's "New machine" does it for you.
 - `hosts/<name>/`: one folder per machine, with its `hardware-configuration.nix`
-  and `managed.json` (packages and options changed by clicking in nixos-manager;
-  edit the other files by hand). A machine installed with nixos-anywhere also has
-  `disk-config.nix`, its disk layout for disko.
+  and `managed.json` (packages, removed and changed packages, home-manager users
+  and options changed by clicking in nixos-manager; edit the other files by hand).
+  A machine installed with nixos-anywhere also has `disk-config.nix`, its disk
+  layout for disko. `modules/managed.nix` also applies, when they exist, the
+  machine's `custom.nix`, `packages/<attribute>.nix` (how a package is built),
+  and per home-manager user `home/<user>/custom.nix` and the dotfiles in
+  `home/<user>/files/`.
 - `modules/`: settings shared by several machines; `common.nix` enables comin everywhere,
   and connects the machines to nixos-manager: deployment reports, its binary cache and
   secrets (`secrets.nix`).
