@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { checkTitle, forgejoApi, forgetHostKey, hookTarget, type Check, type ForgejoState } from '../lib/forgejo'
   import { pullOrPush, repo } from '../lib/repo.svelte'
   import { app, refresh, syncOpenTabs } from '../lib/state.svelte'
@@ -153,27 +154,29 @@
 
 {#snippet copyButton(text: string, what: string, label: string)}
   <button class="icon" aria-label="Copy the {label}" title={copied === what ? 'Copied' : `Copy the ${label}`} onclick={() => copy(text, what)}>
-    <Icon name={copied === what ? 'tick' : 'copy'} size={14} />
+    <Icon name={copied === what ? 'tick' : 'copy'} />
   </button>
 {/snippet}
 
-<section class="card fj" aria-labelledby="set-forgejo">
-  <div class="head">
-    <h2 id="set-forgejo">Forgejo</h2>
-    {#if busy === 'test'}
-      <span class="badge busy"><span class="dot busy"></span>Testing…</span>
-    {:else if check}
-      <span class="badge {tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : tone === 'warn' ? 'warn' : ''}"><span class="dot {tone === 'warn' ? 'off' : tone}"></span>{title}</span>
-    {/if}
-    <span class="spacer"></span>
-    {#if st?.web}<a class="btn" href={st.web} target="_blank" rel="noopener noreferrer"><Icon name="external" size={14} />Open in Forgejo</a>{/if}
-  </div>
-  <p class="muted lead">nixos-manager clones, commits and pushes to this repository, and every machine's comin pulls from it: a push here is a deploy.</p>
+<section class="card fj" aria-labelledby="set-forgejo" use:frame={{ title: 'Forgejo' }}>
+  <h2 id="set-forgejo" class="sr-only">Forgejo</h2>
+  {#if busy === 'test' || check || st?.web}
+    <div class="head">
+      {#if busy === 'test'}
+        <span class="badge busy">Testing…</span>
+      {:else if check}
+        <span class="badge {tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : tone === 'warn' ? 'warn' : ''}">{#if tone === 'off'}<span class="dot off"></span> {/if}{title}</span>
+      {/if}
+      <span class="spacer"></span>
+      {#if st?.web}<a class="btn" href={st.web} target="_blank" rel="noopener noreferrer"><Icon name="external" /> Open in Forgejo</a>{/if}
+    </div>
+  {/if}
+  <p class="muted">nixos-manager clones, commits and pushes to this repository, and every machine's comin pulls from it: a push here is a deploy.</p>
 
   {#if loadError}
     <p class="error-text" role="alert">{loadError}</p>
   {:else if !st}
-    <span class="skel" style:width="60%"></span>
+    <span class="skel" style:width="40ch"></span>
   {:else}
     <ol class="steps">
       <li class="step">
@@ -196,7 +199,7 @@
           <span class="mono">https://host/owner/repo.git</span>, with the token in a git credential helper, never in the URL.
         </p>
         {#if st.env_remote}
-          <p class="note"><Icon name="info" size={14} /><span><span class="mono">NIXMGR_REMOTE</span> sets the remote at every start. Change it there as well, or a change made here lasts until the next restart.</span></p>
+          <p class="note"><Icon name="info" /><span><span class="mono">NIXMGR_REMOTE</span> sets the remote at every start. Change it there as well, or a change made here lasts until the next restart.</span></p>
         {/if}
       </li>
 
@@ -210,13 +213,13 @@
           <p class="muted"><span class="mono">GIT_SSH_COMMAND</span> is set on the server, so git uses that command and its key; a deploy key managed here would not be used.</p>
         {:else if st.ssh === 'home' && !st.key}
           <p class="muted">git uses the SSH key in <span class="mono">~/.ssh</span> on this server. To manage the key here instead:</p>
-          <button class="self-start" onclick={createKey} disabled={!!busy}><Icon name="key" size={14} />{busy === 'key' ? 'Creating…' : 'Create a deploy key'}</button>
+          <button class="self-start" onclick={createKey} disabled={!!busy}><Icon name="key" /> {busy === 'key' ? 'Creating…' : 'Create a deploy key'}</button>
         {:else if st.key}
           <div class="code-row">
             <code class="key" title={st.key.public}>{st.key.public}</code>
             {@render copyButton(st.key.public, 'key', 'public key')}
           </div>
-          <p class="small muted">Fingerprint <span class="mono">{st.key.fingerprint}</span>. Only this public half leaves the server.</p>
+          <p class="muted">Fingerprint <span class="mono">{st.key.fingerprint}</span>. Only this public half leaves the server.</p>
           <ol class="how">
             <li>In Forgejo, open the repository → <b>Settings</b> → <b>Deploy keys</b> → <b>Add deploy key</b>.</li>
             <li>Paste the key, name it <i>nixos-manager</i>, tick <b>Enable write access</b>, and add it.</li>
@@ -227,15 +230,15 @@
       <li class="step">
         <h3>Connection</h3>
         <div class="row">
-          <button class="self-start" onclick={test} disabled={!st.remote || !!busy}><Icon name="refresh" size={14} />{busy === 'test' ? 'Testing…' : 'Test connection'}</button>
-          {#if !st.remote}<span class="muted small">Save the repository URL first.</span>{/if}
+          <button class="self-start" onclick={test} disabled={!st.remote || !!busy}><Icon name="refresh" /> {busy === 'test' ? 'Testing…' : 'Test connection'}</button>
+          {#if !st.remote}<span class="muted">Save the repository URL first.</span>{/if}
         </div>
         {#if check && busy !== 'test'}
-          <div class="result {tone}" role="status">
+          <div class="result" role="status" data-tone={tone} use:frame={{ animate: true }}>
             <p>{check.message}</p>
             {#if check.branches.length}
               <p class="branches">
-                <span class="muted small">Branches</span>{#each check.branches as b (b)}<span class="chip mono">{b}</span>{/each}
+                <span class="muted">Branches</span>{#each check.branches as b (b)}<span class="chip mono"><Icon name="branch" /> {b}</span>{/each}
               </p>
             {/if}
             {#if forget}
@@ -244,21 +247,21 @@
             {#if check.next === 'adopt'}
               <div class="row">
                 <button class="primary" onclick={adopt} disabled={!!busy}>{busy === 'adopt' ? 'Replacing…' : 'Use the Forgejo repository'}</button>
-                <span class="muted small">Replaces the starter files; they stay in git as a backup.</span>
+                <span class="muted">Replaces the starter files; they stay in git as a backup.</span>
               </div>
             {:else if check.next === 'push'}
               <div class="row">
-                <button class="primary" onclick={push} disabled={!!repo.busy || !!busy}><Icon name="push" size={14} />{repo.busy === 'push' ? 'Pushing…' : 'Push'}</button>
-                <a class="small" href="#/changes">Commit first in Changes</a>
+                <button class="primary" onclick={push} disabled={!!repo.busy || !!busy}><Icon name="push" /> {repo.busy === 'push' ? 'Pushing…' : 'Push'}</button>
+                <a href="#/changes">Commit first in Changes</a>
               </div>
             {/if}
             {#if check.detail}
-              <details><summary class="small">What git said</summary><pre>{check.detail}</pre></details>
+              <details><summary>What git said</summary><pre>{check.detail}</pre></details>
             {/if}
           </div>
         {/if}
         {#if st.host_key}
-          <p class="small muted">Host key recorded on first contact: <span class="mono">{st.host_key}</span></p>
+          <p class="muted">Host key recorded on first contact: <span class="mono">{st.host_key}</span></p>
         {/if}
       </li>
 
@@ -278,20 +281,20 @@
             {@render copyButton(st.hook_secret, 'secret', 'secret')}
           </dd>
         </dl>
-        {#if hook.warning}<p class="note warn"><Icon name="alert" size={14} /><span>{hook.warning}</span></p>{/if}
+        {#if hook.warning}<p class="note warn"><Icon name="alert" /><span>{hook.warning}</span></p>{/if}
         <ol class="how">
           <li>In Forgejo, open the repository → <b>Settings</b> → <b>Webhooks</b> → <b>Add webhook</b> → <b>Forgejo</b>.</li>
           <li>Target URL and Secret: the two above. HTTP method <b>POST</b>, POST content type <b>application/json</b>.</li>
           <li>Trigger on <b>Push events</b>, keep it active, and add the webhook. Its <i>Test delivery</i> button sends one now.</li>
         </ol>
-        <div class="delivery small" role="status">
+        <div class="delivery" role="status">
           <span class="dot {st.last_delivery ? (st.last_delivery.ok ? 'ok' : 'err') : 'off'}"></span>
           {#if st.last_delivery}
             <span><span class="when">Last delivery <time datetime={st.last_delivery.time} title={new Date(st.last_delivery.time).toLocaleString()}>{ago(st.last_delivery.time)}</time></span> · {st.last_delivery.result}</span>
           {:else}
             <span class="muted">No delivery since the server started. If Forgejo's delivery log shows 401, its secret differs from the one above.</span>
           {/if}
-          <button class="link small" onclick={load}>Refresh</button>
+          <button class="link" onclick={load}>Refresh</button>
         </div>
       </li>
 
@@ -308,8 +311,8 @@
         {:else}
           <p class="row">
             {#if st.web}<a class="mono" href={st.web} target="_blank" rel="noopener noreferrer">{st.web}</a>{:else}<span class="muted">None: the remote has no web page.</span>{/if}
-            <span class="muted small">{st.web_base ? 'set here' : 'derived from the remote'}</span>
-            <button class="link small" onclick={() => ((webBase = st?.web_base ?? ''), (editWeb = true))}>Change</button>
+            <span class="muted">{st.web_base ? 'set here' : 'derived from the remote'}</span>
+            <button class="link" onclick={() => ((webBase = st?.web_base ?? ''), (editWeb = true))}>Change</button>
           </p>
           <p class="hint">Commits in History and files in Code link to Forgejo through this address.</p>
         {/if}
@@ -323,9 +326,9 @@
         {:else}
           {#if st.status_token}
             <p class="row">
-              <span class="ok-text"><Icon name="tick" size={14} />Token saved</span>
-              <span class="muted small">{st.status_console ? `links open ${st.status_console}` : 'no links'}</span>
-              <button class="link small" onclick={() => saveToken('')} disabled={!!busy}>Remove</button>
+              <span class="t-ok"><Icon name="tick" /> Token saved</span>
+              <span class="muted">{st.status_console ? `links open ${st.status_console}` : 'no links'}</span>
+              <button class="link" onclick={() => saveToken('')} disabled={!!busy}>Remove</button>
             </p>
           {/if}
           <form class="row" onsubmit={(e) => (e.preventDefault(), saveToken(token.trim()))}>
@@ -345,14 +348,14 @@
             <li>In Forgejo, as a user who can write to the repository: <b>Settings</b> → <b>Applications</b> → <b>Generate new token</b>.</li>
             <li>Give it the <b>repository</b> permission <b>Read and write</b>, generate it, and paste it here. It is tried on the repository, then kept on this server only.</li>
           </ol>
-          <div class="delivery small" role="status">
+          <div class="delivery" role="status">
             <span class="dot {st.last_status ? (st.last_status.ok ? 'ok' : 'err') : 'off'}"></span>
             {#if st.last_status}
               <span><span class="when">Last status <time datetime={st.last_status.time} title={new Date(st.last_status.time).toLocaleString()}>{ago(st.last_status.time)}</time></span> · {st.last_status.result}</span>
             {:else}
               <span class="muted">No status sent since the server started.</span>
             {/if}
-            <button class="link small" onclick={load}>Refresh</button>
+            <button class="link" onclick={load}>Refresh</button>
           </div>
         {/if}
       </li>
@@ -362,233 +365,141 @@
 
 <style>
   .fj {
-    display: grid;
-    gap: 10px;
     min-width: 0;
-    padding: var(--s4) var(--s5) var(--s5);
     overflow-wrap: anywhere;
+  }
+  .fj > * + * {
+    margin-top: var(--lh);
+  }
+  .fj > h2 + * {
+    margin-top: 0;
   }
   .head {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
+    gap: 0 2ch;
   }
-  h2 {
-    flex: none;
-    font-size: var(--fs-lg);
-  }
-  .badge.warn {
-    color: var(--yellow);
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
-    border-color: color-mix(in srgb, var(--yellow) 30%, transparent);
-  }
-  .badge.warn .dot {
-    --c: var(--yellow);
-  }
-  .lead {
-    line-height: 1.5;
-  }
+  /* Numbered steps on a │ rail: 1 Repository, 2 Deploy key, … */
   .steps {
-    display: grid;
-    gap: 0;
-    margin: 4px 0 0;
-    padding: 0;
-    list-style: none;
     counter-reset: step;
   }
   .step {
     position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    gap: var(--lh) 0;
     min-width: 0;
-    padding: 2px 0 18px 36px;
+    padding: 0 0 calc(var(--lh) * 2) 5ch;
     counter-increment: step;
+  }
+  .step:last-child {
+    padding-bottom: 0;
   }
   .step::before {
     position: absolute;
     top: 0;
     left: 0;
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    color: var(--fg-strong);
-    font: 600 var(--fs-xs) var(--sans);
+    width: 3ch;
+    color: var(--on-accent);
+    font-weight: 700;
+    text-align: center;
     content: counter(step);
-    background: var(--bg-active);
-    border: 1px solid var(--line);
-    border-radius: 50%;
+    background: var(--accent);
   }
-  /* The line joining the step numbers. */
   .step:not(:last-child)::after {
     position: absolute;
-    top: 26px;
-    bottom: 4px;
-    left: 11px;
-    width: 1px;
-    content: '';
-    background: var(--line);
-  }
-  .step:last-child {
-    padding-bottom: 0;
-  }
-  h3 {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin: 2px 0 0;
-    color: var(--fg-strong);
-    font-size: var(--fs-md);
+    top: var(--lh);
+    bottom: 0;
+    left: 1ch;
+    width: 1ch;
+    overflow: hidden;
+    color: var(--line);
+    white-space: pre;
+    content: '│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A│\A';
   }
   .opt {
     color: var(--fg-faint);
-    font-size: var(--fs-xs);
-    font-weight: 500;
+    font-weight: 400;
   }
   .row {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
+    align-items: baseline;
+    gap: 0 2ch;
   }
   .row input {
     flex: 1;
-    min-width: 220px;
+    width: auto;
+    min-width: 28ch;
   }
   .self-start {
     justify-self: start;
   }
-  .ok-text {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--green);
-  }
   .hint {
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.5;
   }
   .note {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    color: var(--fg);
-    font-size: var(--fs-sm);
-    line-height: 1.5;
+    gap: 1ch;
   }
-  .note :global(svg) {
-    flex: none;
-    margin-top: 2px;
+  .note :global(.ic) {
     color: var(--accent);
   }
-  .note.warn :global(svg) {
+  .note.warn :global(.ic) {
     color: var(--yellow);
   }
   .code-row {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    gap: 1ch;
     min-width: 0;
-    margin: 0;
   }
   .code-row code {
     flex: 1;
     min-width: 0;
-    padding: 6px 10px;
+    padding: 0 1ch;
     overflow: hidden;
-    font-size: 12px;
     white-space: nowrap;
     text-overflow: ellipsis;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    background: var(--bg-input);
   }
   .code-row code.masked {
     color: var(--fg-muted);
-    letter-spacing: 0.1em;
   }
   .how {
-    display: grid;
-    gap: 3px;
-    margin: 0;
-    padding-left: 18px;
-    color: var(--fg);
-    line-height: 1.5;
-  }
-  .how b {
-    color: var(--fg-strong);
-    font-weight: 600;
+    padding-left: 3ch;
+    list-style: decimal;
   }
   .pairs {
     display: grid;
-    grid-template-columns: 84px minmax(0, 1fr);
-    gap: 6px 10px;
-    align-items: center;
-    margin: 0;
+    grid-template-columns: 12ch minmax(0, 1fr);
+    gap: 0 2ch;
   }
   .pairs dt {
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
   }
   .result {
     display: grid;
-    gap: 8px;
-    padding: 10px 14px;
-    line-height: 1.5;
-    background: color-mix(in srgb, var(--c, var(--line-strong)) 6%, var(--bg-side));
-    border: 1px solid color-mix(in srgb, var(--c, var(--line-strong)) 35%, var(--line));
-    border-radius: var(--r);
-  }
-  .result.ok {
-    --c: var(--green);
-  }
-  .result.warn {
-    --c: var(--yellow);
-  }
-  .result.err {
-    --c: var(--red);
+    gap: var(--lh) 0;
   }
   .branches {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-  details summary {
-    color: var(--fg-muted);
-    cursor: pointer;
+    gap: 0 1ch;
   }
   details pre {
-    margin: 6px 0 0;
-    padding: 8px 10px;
+    padding: 0 1ch;
     overflow: auto;
-    font: 12px/1.5 var(--mono);
     white-space: pre-wrap;
-    background: var(--bg-deep);
-    border-radius: var(--r-sm);
+    background: var(--bg-input);
   }
   .delivery {
     display: grid;
-    grid-template-columns: 8px minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 10px;
-    padding: 8px 12px;
-    line-height: 1.5;
-    background: var(--bg-side);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-  }
-  .delivery .dot {
-    margin-top: 6px;
+    grid-template-columns: 1ch minmax(0, 1fr) auto;
+    gap: 0 1ch;
+    padding: 0 1ch;
+    background: var(--bg-raised);
   }
   .when {
     color: var(--fg-strong);
-  }
-  a.small {
-    font-size: var(--fs-sm);
   }
 </style>

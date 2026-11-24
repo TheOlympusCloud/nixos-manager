@@ -6,6 +6,7 @@
   import ModelGate from '../components/ModelGate.svelte'
   import ScheduledUpdate from '../components/ScheduledUpdate.svelte'
   import { api, type Input } from '../lib/api'
+  import { bigText, frame } from '../lib/ascii'
   import { fleet } from '../lib/fleet.svelte'
   import { age, days, plural } from '../lib/format'
   import { fetchModelDiff, type ModelDiff } from '../lib/modeldiff'
@@ -86,19 +87,23 @@
   <div class="page-inner">
     <ModelGate title="flake inputs">
       <div class="page-head">
-        <h1>Inputs</h1>
-        <span class="sub">{plural(inputs.length, 'flake input')} every machine is built from, as locked in <span class="mono">flake.lock</span></span>
+        <div>
+          <h1 class="big" aria-label="Inputs" use:bigText={'Inputs'}></h1>
+          <p class="sub">{plural(inputs.length, 'flake input')} every machine is built from, as locked in <span class="mono">flake.lock</span></p>
+        </div>
         <span class="spacer"></span>
-        <button onclick={() => ((logOpen = true), startJob({ kind: 'lock' }))} disabled={running} title="nix flake lock: add inputs declared in flake.nix to flake.lock, without updating the others">
-          <Icon name="key" size={14} />Lock
-        </button>
-        <button class="primary" onclick={() => update([])} disabled={running || !inputs.length} title="nix flake update: move every input to its newest revision">
-          <Icon name="refresh" size={14} />Update all
-        </button>
+        <div class="tools">
+          <button onclick={() => ((logOpen = true), startJob({ kind: 'lock' }))} disabled={running} title="nix flake lock: add inputs declared in flake.nix to flake.lock, without updating the others">
+            <Icon name="key" /> Lock
+          </button>
+          <button class="primary" onclick={() => update([])} disabled={running || !inputs.length} title="nix flake update: move every input to its newest revision">
+            <Icon name="refresh" /> Update all
+          </button>
+        </div>
       </div>
 
       {#if inputs.length}
-        <div class="table-wrap card">
+        <div class="table-wrap">
           <table class="data">
             <thead>
               <tr><th>Input</th><th>Source</th><th>Revision</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr>
@@ -118,17 +123,17 @@
                       {#if gh}<a class="mono" href="{gh.repo}/commit/{i.rev}" target="_blank" rel="noreferrer noopener" title="This revision on GitHub">{i.rev.slice(0, 7)}</a>
                       {:else}<span class="mono">{i.rev.slice(0, 7)}</span>{/if}
                       <button class="icon copy" aria-label="Copy the full revision of {i.name}" title={copied === i.rev ? 'Copied' : 'Copy the full revision'} onclick={() => copy(i.rev)}>
-                        <Icon name={copied === i.rev ? 'tick' : 'copy'} size={13} />
+                        <Icon name={copied === i.rev ? 'tick' : 'copy'} />
                       </button>
                     {:else}<span class="muted">not locked</span>{/if}
                   </td>
                   <td class="when">
                     {#if i.lastModified}
                       <span class="age {cls}" title={new Date(i.lastModified * 1000).toLocaleString()}>
-                        {#if cls}<span class="dot"></span>{/if}{age(i.lastModified)}
+                        <span class="dot {cls === 'old' ? 'err' : cls === 'aging' ? 'warn' : 'off'}"></span> {age(i.lastModified)}
                       </span>
                       <span class="date muted">{new Date(i.lastModified * 1000).toLocaleDateString()}</span>
-                      {#if cls === 'old'}<span class="badge tag-old">Outdated</span>{/if}
+                      {#if cls === 'old'}<span class="badge err">Outdated</span>{/if}
                     {/if}
                   </td>
                   <td class="act">
@@ -139,39 +144,46 @@
             </tbody>
           </table>
         </div>
-        <p class="legend muted small">Inputs older than 30 days show in amber, older than 60 days in red: updating brings security fixes and new versions.</p>
-        <ScheduledUpdate />
+        <p class="legend muted">Inputs older than 30 days show in amber, older than 60 days in red: updating brings security fixes and new versions.</p>
       {:else}
         <div class="empty-state">
           <h2>No inputs locked</h2>
           <p>The flake has no <span class="mono">flake.lock</span> yet, or no inputs. Declare inputs in <span class="mono">flake.nix</span>, then lock them.</p>
-          <div class="row"><button class="primary" onclick={() => startJob({ kind: 'lock' })}><Icon name="key" size={14} />Lock the flake</button></div>
+          <div class="row"><button class="primary" onclick={() => startJob({ kind: 'lock' })}><Icon name="key" /> Lock the flake</button></div>
         </div>
       {/if}
 
-      {#if job}
-        <section class="section job" aria-label="Last input job">
-          <div class="job-head">
-            <h2>{job.kind === 'lock' ? 'Lock' : 'Update'}</h2>
-            <span class="state s-{job.state}">{running ? (job.kind === 'lock' ? 'Locking…' : 'Updating…') : job.state}</span>
-            {#if job.started}<span class="muted small">{new Date(job.started).toLocaleTimeString()}</span>{/if}
-            <span class="spacer"></span>
-            <button class="link small" onclick={() => (logOpen = !logOpen)} aria-expanded={logOpen}>{logOpen ? 'Hide the log' : 'Show the log'}</button>
-          </div>
-          {#if logOpen}<div class="log">{#key job.id}<JobLog jobId={job.id} compact />{/key}</div>{/if}
-        </section>
-      {/if}
+      <!-- The running job on the left, the scheduled update on the right (each takes the row alone when the other is not there). -->
+      <div class="duo">
+        {#if job}
+          <section
+            class="section job"
+            aria-label="Last input job"
+            data-tone={running ? 'accent' : job.state === 'failed' ? 'err' : undefined}
+            use:frame={{ title: job.kind === 'lock' ? 'Lock' : 'Update', animate: true }}>
+            <div class="job-head">
+              <h2 class="sr-only">{job.kind === 'lock' ? 'Lock' : 'Update'}</h2>
+              <span class="badge {running ? 'busy' : job.state === 'passed' ? 'ok' : job.state === 'failed' ? 'err' : ''}">{running ? (job.kind === 'lock' ? 'Locking…' : 'Updating…') : job.state}</span>
+              {#if job.started}<span class="muted">{new Date(job.started).toLocaleTimeString()}</span>{/if}
+              <span class="spacer"></span>
+              <button class="link" onclick={() => (logOpen = !logOpen)} aria-expanded={logOpen}>{logOpen ? 'Hide the log' : 'Show the log'}</button>
+            </div>
+            {#if logOpen}<div class="log">{#key job.id}<JobLog jobId={job.id} compact />{/key}</div>{/if}
+          </section>
+        {/if}
+        {#if inputs.length}<ScheduledUpdate />{/if}
+      </div>
 
       {#if lockChanged || moved.length}
         <section class="section">
           <div class="changed-head">
             <h2>What the update changes</h2>
-            <span class="muted small">flake.lock is not committed yet{otherFiles > 0 ? `; ${plural(otherFiles, 'other uncommitted file')} may add to this (see Changes)` : ''}.</span>
+            <span class="muted">flake.lock is not committed yet{otherFiles > 0 ? `; ${plural(otherFiles, 'other uncommitted file')} may add to this (see Changes)` : ''}.</span>
           </div>
           <MachineImpact {diff} {computing} quiet="The new revisions change nothing any machine runs." />
           <div class="row-actions">
-            <button class="primary" onclick={review}><Icon name="commit" size={14} />Review and commit</button>
-            <button class="ghost" onclick={discard}><Icon name="undo" size={14} />Discard the update</button>
+            <button class="primary" onclick={review}><Icon name="commit" /> Review and commit</button>
+            <button class="danger" onclick={discard}><Icon name="undo" /> Discard the update</button>
           </div>
         </section>
       {/if}
@@ -180,117 +192,69 @@
 </div>
 
 <style>
-  .page-inner {
-    max-width: 1180px;
-  }
   .table-wrap {
     overflow: auto;
   }
-  table.data th:first-child,
-  table.data td:first-child {
-    padding-left: 16px;
-  }
   .name {
     color: var(--fg-strong);
-    font-weight: 500;
+    font-weight: 700;
   }
-  .src a,
+  .src a {
+    color: var(--fg-muted);
+  }
   .rev a {
     color: var(--fg);
-    text-decoration: none;
   }
-  .src a:hover,
-  .rev a:hover {
-    color: var(--accent);
-    text-decoration: underline;
-  }
-  .rev {
-    white-space: nowrap;
-  }
-  .copy {
-    width: 22px;
-    height: 22px;
-    margin-left: 2px;
-    vertical-align: middle;
-  }
+  .rev,
   .when {
     white-space: nowrap;
   }
+  .copy {
+    margin-left: 1ch;
+  }
   .age {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 92px;
-    color: var(--fg);
+    display: inline-block;
+    min-width: 14ch;
   }
   .age.aging {
-    --c: var(--yellow);
     color: var(--yellow);
   }
   .age.old {
-    --c: var(--red);
     color: var(--red);
-  }
-  .age .dot {
-    width: 7px;
-    height: 7px;
   }
   .date {
-    margin-left: 10px;
-    font-size: var(--fs-sm);
-  }
-  .tag-old {
-    margin-left: 10px;
-    color: var(--red);
-    background: color-mix(in srgb, var(--red) 10%, transparent);
-    border-color: color-mix(in srgb, var(--red) 30%, transparent);
+    margin-right: 2ch;
   }
   .act {
     width: 1%;
-    padding-right: 14px;
     text-align: right;
   }
-  .legend {
-    margin-top: 10px;
+  .duo {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(60ch, 1fr));
+    gap: 0 2ch;
+    align-items: start;
   }
   .job-head,
   .changed-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 10px;
-    margin-bottom: 10px;
+    gap: 0 2ch;
   }
-  .job-head h2,
-  .changed-head h2 {
-    font-size: var(--fs-lg);
-  }
-  .state {
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-  .s-passed {
-    color: var(--green);
-  }
-  .s-failed {
-    color: var(--red);
-  }
-  .s-running,
-  .s-queued {
-    color: var(--accent);
+  .changed-head {
+    margin-bottom: var(--lh);
   }
   .log {
     display: flex;
     flex-direction: column;
-    height: 240px;
+    height: calc(var(--lh) * 12);
+    margin-top: var(--lh);
     overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
   }
   .row-actions {
     display: flex;
-    gap: 8px;
-    margin-top: 12px;
+    gap: 2ch;
+    margin-top: var(--lh);
   }
 </style>
