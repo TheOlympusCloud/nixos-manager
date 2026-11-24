@@ -22,17 +22,18 @@ import (
 const (
 	jobTimeout   = 30 * time.Minute
 	checkTimeout = 3 * time.Hour // a check builds the machines a change touches; a new kernel can take a while
+	isoTimeout   = 3 * time.Hour // an installer ISO compresses a whole system
 	maxOutput    = 8 << 20       // per job; nix -L can be chatty
 	keepJobs     = 50
 	queueLength  = 256  // per lane; skipped model jobs keep their slot until the worker drains them
 	keepChecks   = 1000 // passed trees remembered; the oldest are forgotten first
 )
 
-// Jobs runs Nix commands in three lanes, each one job at a time in submission
+// Jobs runs Nix commands in four lanes, each one job at a time in submission
 // order: checks, which build machines and can take long; the systems deployed
-// machines should run, for Deployments; and everything else (the fleet model,
-// search indexes, option values, lock and update), so the fleet views never
-// wait for either. It keeps the jobs' output for the UI and
+// machines should run, for Deployments; installer ISOs (iso.go); and everything
+// else (the fleet model, search indexes, option values, lock and update), so
+// the fleet views never wait for the others. It keeps the jobs' output for the UI and
 // MCP, and remembers which staged trees passed a check, in checks.json once
 // PersistChecks has named it.
 type Jobs struct {
@@ -56,6 +57,7 @@ type Jobs struct {
 	queue        chan *Job            // every kind but check and system
 	checkQueue   chan *Job
 	systemQueue  chan *Job
+	isoQueue     chan *Job
 	systems      map[string]SystemEval // by commit/host
 	systemOrder  []string
 	closures     map[string]closureEntry // by "from to" system paths
@@ -71,10 +73,11 @@ type Jobs struct {
 
 func newJobs(repo *Repo) *Jobs {
 	j := &Jobs{Repo: repo, Nix: "nix", Nixfmt: "nixfmt", EvalJobs: min(2, runtime.NumCPU()), passed: map[string]CheckPass{}, models: map[string]*Model{}, indexes: map[string]any{}, indexErrs: map[string]error{},
-		queue: make(chan *Job, queueLength), checkQueue: make(chan *Job, queueLength), systemQueue: make(chan *Job, queueLength), systems: map[string]SystemEval{}}
+		queue: make(chan *Job, queueLength), checkQueue: make(chan *Job, queueLength), systemQueue: make(chan *Job, queueLength), isoQueue: make(chan *Job, queueLength), systems: map[string]SystemEval{}}
 	go j.worker(j.queue)
 	go j.worker(j.checkQueue)
 	go j.worker(j.systemQueue)
+	go j.worker(j.isoQueue)
 	return j
 }
 
@@ -116,8 +119,9 @@ type Job struct {
 	state    string
 	started  time.Time
 	finished time.Time
-	summary  *CheckSummary // a check's, once it ran
-	result   []byte        // an update-branch job's new flake.lock
+	summary  *CheckSummary                     // a check's, once it ran
+	result   []byte                            // an update-branch job's new flake.lock
+	do       func(context.Context, *Job) error // an iso job's work
 	out      []byte
 	changed  chan struct{} // closed and replaced on every write
 	done     chan struct{}
@@ -129,6 +133,7 @@ type JobInfo struct {
 	State    string        `json:"state"` // queued, running, passed, failed
 	Targets  []string      `json:"targets"`
 	Inputs   []string      `json:"inputs,omitempty"`
+	Host     string        `json:"host,omitempty"` // an options index's or an installer ISO's machine
 	Tree     string        `json:"tree,omitempty"`
 	Commit   string        `json:"commit,omitempty"` // a check of a commit, not of the staged changes
 	Branch   string        `json:"branch,omitempty"` // the branch a webhook saw Commit pushed to
@@ -183,7 +188,7 @@ func (j *Job) Done() <-chan struct{} { return j.done }
 func (j *Job) Info(withOutput bool) JobInfo {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	info := JobInfo{ID: j.ID, Kind: j.Req.Kind, State: j.state, Targets: j.Req.Targets, Inputs: j.Req.Inputs, Tree: j.tree, Commit: j.Req.Commit, Branch: j.Req.Branch,
+	info := JobInfo{ID: j.ID, Kind: j.Req.Kind, State: j.state, Targets: j.Req.Targets, Inputs: j.Req.Inputs, Host: j.Req.Host, Tree: j.tree, Commit: j.Req.Commit, Branch: j.Req.Branch,
 		Started: j.started, Finished: j.finished, Summary: j.summary}
 	if info.Targets == nil {
 		info.Targets = []string{}
@@ -262,15 +267,22 @@ func (js *Jobs) Submit(ctx context.Context, req JobRequest) (*Job, error) {
 
 // enqueue queues a job in its lane; js.mu must be held.
 func (js *Jobs) enqueue(req JobRequest, tree, key string) (*Job, error) {
+	return js.enqueueDo(req, tree, key, nil)
+}
+
+// enqueueDo is enqueue for a job whose work is do; js.mu must be held.
+func (js *Jobs) enqueueDo(req JobRequest, tree, key string, do func(context.Context, *Job) error) (*Job, error) {
 	js.nextID++
 	job := newJob(fmt.Sprintf("j%d", js.nextID), req)
-	job.tree, job.key = tree, key
+	job.tree, job.key, job.do = tree, key, do
 	lane := js.queue
 	switch req.Kind {
 	case "check":
 		lane = js.checkQueue
 	case "system":
 		lane = js.systemQueue
+	case "iso":
+		lane = js.isoQueue
 	}
 	select {
 	case lane <- job:
@@ -421,12 +433,17 @@ func (js *Jobs) nixCmd(ctx context.Context, args ...string) *exec.Cmd {
 
 func (js *Jobs) run(job *Job) error {
 	timeout := jobTimeout
-	if job.Req.Kind == "check" {
+	switch job.Req.Kind {
+	case "check":
 		timeout = checkTimeout
+	case "iso":
+		timeout = isoTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	switch job.Req.Kind {
+	case "iso":
+		return job.do(ctx, job)
 	case "check":
 		return js.runCheck(ctx, job)
 	case "model":
