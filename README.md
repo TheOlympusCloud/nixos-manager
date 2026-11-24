@@ -56,9 +56,11 @@ An MCP server gives automation the same features.
   `modules/managed.json`; each machine's own `managed.json` still wins. See
   [Every machine at once](#every-machine-at-once).
 - **home-manager**: per machine and user, turn it on, add and remove packages,
-  set any home-manager option from a search, keep dotfiles, and write a module
-  of your own, all checked, committed and deployed like the rest, and copy a
-  home to other machines. See [Homes with home-manager](#homes-with-home-manager).
+  set any home-manager option from a search, keep dotfiles, put secrets in
+  `~` (`.netrc`, a token in `gh`'s or `rclone`'s config) without them reaching
+  the Nix store, and write a module of your own, all checked, committed and
+  deployed like the rest, and copy a home to other machines. See [Homes with
+  home-manager](#homes-with-home-manager).
 - **Real values**: an option's effective value on each machine and the file
   that sets it, compared across the fleet, with "copy to" other machines.
 - **New machines**: a wizard creates `hosts/<name>/` with a role preset
@@ -1202,7 +1204,7 @@ Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `compare_option`, `search_packages`, `search_options`, `add_packages`,
 `remove_packages`, `edit_packages` (any package removed by name, and a
 home-manager user's packages), `set_package_override`, `set_home_manager`,
-`copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
+`link_home_secret`, `copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
 package and option tools take host `*` for every machine
 (`modules/managed.json`). File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
@@ -1416,8 +1418,28 @@ NixOS module (the starter fleet loads it on every machine, with
   `xdg.configFile` puts files). The tab creates one and opens it in Code; it
   also lists what home-manager's modules link there. These files are copied to
   the Nix store, which every user of the machine can read: never keep a token
-  or password there (`.netrc`, `.config/gh/hosts.yml`…); use
-  [Secrets](#secrets).
+  or password there (`.netrc`, `.config/gh/hosts.yml`…); use Secrets in ~.
+- **Secrets in ~**: a machine's [secrets](#secrets), decrypted on the machine
+  by sops-nix with its SSH host key as any other, put in the user's home. No
+  value reaches the Nix store or is kept unencrypted in the repository:
+  - **a whole file**: pick a path in `~` and one of the machine's secrets
+    (`~/.netrc` = the secret `netrc`). `managed.json` keeps it in
+    `home.<user>.secrets`. The secret becomes the user's (`owner`), and
+    `~/.netrc` a link to `/run/secrets/netrc`. A secret has one owner, so one
+    linked for two users, or owned by a service in hand-written Nix, fails the
+    check: use a file with secrets for the second;
+  - **a file with secrets**: text in `hosts/<name>/home/<user>/templates/<path>`,
+    opened in Code, where each `@secret:<name>@` stands for that secret
+    (`oauth_token: @secret:gh-token@`). sops-nix fills it in on the machine
+    (`sops.templates`), as a file only the user can read, which `~/<path>`
+    links to. The text itself is not secret: it goes to the store.
+
+  The machine must get the secret (common to every machine, or its own): one
+  it lacks, removed in Settings or not encrypted for it, fails its check with
+  a message that names it. A secret's file is read-only, so a program that
+  rewrites it (`gh auth refresh`) cannot. A link for every machine,
+  in `modules/managed.json` (MCP's `link_home_secret` with host `*`), reaches
+  the machines with the user's home, as shared home packages do.
 - **Nix for \<user\>**: `hosts/<name>/home/<user>/custom.nix`, a home-manager
   module of the user's own.
 
@@ -1433,11 +1455,13 @@ writes what this machine has to the machines you pick, each in its own
 
 - a package's change: its `packageOverrides` entry, the patch files it names
   and `packages/<attribute>.nix`;
-- a user's home: the packages and removed packages in `home.<user>` (joined
-  with the machine's own), the options in `settings.home-manager.users.<user>`
-  except `home.stateVersion`, `home/<user>/custom.nix` and the files in
-  `home/<user>/files/`. Only machines with the user and home-manager are
-  offered. Where the user has no home yet, home-manager is turned on there at
+- a user's home: the packages, removed packages and linked secrets in
+  `home.<user>` (joined with the machine's own), the options in
+  `settings.home-manager.users.<user>` except `home.stateVersion`,
+  `home/<user>/custom.nix` and the files in `home/<user>/files/` and
+  `home/<user>/templates/`. Only machines with the user and home-manager are
+  offered, and for a home with secrets, those on managed.nix 5. A machine
+  without one of those secrets fails its check until it gets it. Where the user has no home yet, home-manager is turned on there at
   that machine's release, as **Turn on** does.
 
 A copy never overwrites. A machine that already has another value for anything
@@ -1452,8 +1476,8 @@ copied. To change something on every machine for good, use
 ### Upgrading a fleet's managed.nix
 
 Removing and customising packages, and homes, need a `modules/managed.nix` with
-`nixosManager.version = 2`, Every machine needs 3, and a package from another
-nixpkgs needs this release's (4). A fleet
+`nixosManager.version = 2`, Every machine needs 3, a package from another
+nixpkgs 4, and secrets in homes this release's (5). A fleet
 made by an earlier nixos-manager still has an older one: **Health** and the
 machine's Packages and Home tabs say so and offer **Update managed.nix**, which writes this
 release's file for you to review in Changes. Changes you made to that file by hand are replaced,
@@ -1498,7 +1522,9 @@ from `PATH`; `E2E_STUB_NIX=1` stubs Nix out. `go test ./internal/core` runs
 
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking win
-without dropping the hand-written users and SSH settings around them, the
+without dropping the hand-written users and SSH settings around them, a secret
+linked into a home and a file with secrets become the user's and are linked
+from `/run/secrets`, while a secret the machine lacks fails with its name, the
 deployment reporter wires into comin, the binary cache module adds the fleet's
 cache next to cache.nixos.org, new LXC and VM machines evaluate (one with a
 first user and home-manager), a sysctl shows
