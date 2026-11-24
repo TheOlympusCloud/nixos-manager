@@ -16,6 +16,14 @@ describe('managedSettings', () => {
     expect(Object.keys(got)).toEqual(['pi'])
   })
 
+  it('names the package changes next to the settings', async () => {
+    vi.spyOn(api, 'fileAt').mockResolvedValue(JSON.stringify({ settings: {}, removedPackages: ['perl'] }))
+    const now = { settings: {}, removedPackages: ['perl', 'nano'], packageOverrides: { htop: { override: { withVimKeys: true } } }, home: { pablo: { packages: ['fd'] } } }
+    vi.spyOn(api, 'file').mockResolvedValue({ content: JSON.stringify(now) } as Awaited<ReturnType<typeof api.file>>)
+    const got = await managedSettings(['hosts/pi/managed.json'], 'HEAD', null)
+    expect(got.pi.map((c) => c.path.join('.'))).toEqual(['home.pablo.packages', 'packageOverrides.htop.override.withVimKeys', 'removedPackages'])
+  })
+
   it('takes a file that is not there (404) as empty', async () => {
     vi.spyOn(api, 'fileAt').mockRejectedValue(new ApiError(404, 'hosts/pi/managed.json did not exist'))
     vi.spyOn(api, 'file').mockResolvedValue({ content: managed({ time: { timeZone: 'UTC' } }) } as Awaited<ReturnType<typeof api.file>>)
