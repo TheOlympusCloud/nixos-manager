@@ -26,9 +26,10 @@
     options: 'index the options',
     packages: 'index the packages',
     values: 'read option values',
+    iso: 'installer ISO of',
   }
   function jobLine(j: Job) {
-    const what = (KIND[j.kind] ?? j.kind) + (j.commit ? ' ' + j.commit.slice(0, 7) : j.targets?.length ? ' ' + j.targets.join(', ') : '')
+    const what = (KIND[j.kind] ?? j.kind) + (j.commit ? ' ' + j.commit.slice(0, 7) : j.targets?.length ? ' ' + j.targets.join(', ') : j.kind === 'iso' ? ' ' + j.host : '')
     const built = j.summary ? ` · built ${j.summary.built.length}` : ''
     return j.state === 'running' || j.state === 'queued' ? `${what}: ${j.state}…` : `${what} ${j.state}${built}`
   }

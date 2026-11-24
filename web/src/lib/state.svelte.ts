@@ -360,12 +360,13 @@ const jobDone: Record<string, [string, string]> = {
   check: ['Checks passed', 'Checks failed'],
   lock: ['Flake inputs locked', 'Locking the flake inputs failed'],
   update: ['Flake inputs updated', 'Updating the flake inputs failed'],
+  iso: ['Installer ISO ready', 'Building the installer ISO failed'],
 }
 
-/** Show a job's log: checks in Changes, input updates and locks in Inputs. */
+/** Show a job's log: checks in Changes, installer ISOs in Machines, input updates and locks in Inputs. */
 export function showJob(id: string, kind = 'check') {
   app.inspect = { kind: 'job', id }
-  go(kind === 'check' ? '#/changes' : '#/inputs')
+  go(kind === 'check' ? '#/changes' : kind === 'iso' ? '#/machines' : '#/inputs')
 }
 
 /** Start a job; one toast follows it from start to finish. Resolves to the job id, '' on failure. */

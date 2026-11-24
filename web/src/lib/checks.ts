@@ -30,11 +30,12 @@ export function summaryLines(s: CheckSummary, commit = false): string[] {
   return lines
 }
 
-const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs', 'update-branch': 'Scheduled update' }
+const kinds: Record<string, string> = { check: 'Checks', lock: 'Lock inputs', update: 'Update inputs', 'update-branch': 'Scheduled update', iso: 'Installer ISO' }
 
 /** A job's name in lists; a check of a commit names the commit, and the branch it was pushed to. */
 export function jobTitle(j: Job): string {
   if (j.commit) return `Commit ${j.commit.slice(0, 7)}${j.branch ? ` on ${j.branch}` : ''}`
+  if (j.kind === 'iso') return `Installer ISO of ${j.host}`
   return `${kinds[j.kind] ?? j.kind} ${j.id}`
 }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte'
+  import InstallerISO from '../components/InstallerISO.svelte'
   import MachineCard from '../components/MachineCard.svelte'
   import ModelGate from '../components/ModelGate.svelte'
   import NewMachine from '../components/NewMachine.svelte'
@@ -56,6 +57,8 @@
           <p class="muted">No machine matches “{filter}”.</p>
         {/each}
       </div>
+
+      <InstallerISO onnew={() => (wizard = true)} />
 
       {#if m.homes.length}
         <section class="section">

@@ -38,6 +38,7 @@ describe('checks of a commit', () => {
     expect(jobTitle(job({ commit: sha }))).toBe('Commit abcdef0')
     expect(jobTitle(job({ id: 'j7' }))).toBe('Checks j7')
     expect(jobTitle(job({ id: 'j8', kind: 'update' }))).toBe('Update inputs j8')
+    expect(jobTitle(job({ id: 'j9', kind: 'iso', host: 'pc' }))).toBe('Installer ISO of pc')
   })
   it('finds the newest check of a commit', () => {
     const jobs = [job({ id: 'j9', kind: 'update' }), job({ id: 'j8', commit: sha, state: 'running' }), job({ id: 'j3', commit: sha, state: 'failed' }), job({ id: 'j2' })]

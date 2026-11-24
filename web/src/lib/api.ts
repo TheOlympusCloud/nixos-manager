@@ -36,9 +36,11 @@ export type Target = { kind: 'nixos' | 'home' | 'darwin'; name: string; attr: st
 export type JobState = 'queued' | 'running' | 'passed' | 'failed'
 export type Job = {
   id: string
-  /** update-branch: nix flake update for a scheduled update, never in the working copy. */
-  kind: 'check' | 'lock' | 'update' | 'update-branch' | 'model' | 'options' | 'packages'
+  /** update-branch: nix flake update for a scheduled update, never in the working copy. iso: an installer ISO. */
+  kind: 'check' | 'lock' | 'update' | 'update-branch' | 'model' | 'options' | 'packages' | 'iso'
   state: JobState
+  /** The machine of an options index or an installer ISO. */
+  host?: string
   targets?: string[] | null
   tree?: string
   /** A check of this commit, not of the staged changes; branch: where a push brought it. */
@@ -309,6 +311,9 @@ export const api = {
   createMachine: (spec: MachineSpec) => post<MachineCreated>('/api/machines', spec),
   /** The SSH host key of the machine at this address: the server starts the handshake and stops at the key, never logs in. */
   fetchHostKey: (address: string) => post<HostKey>('/api/hostkey', { address }),
+  isos: () => get<{ isos: ISO[] }>('/api/isos').then((r) => r.isos ?? []),
+  buildISO: (host: string) => post<ISO>('/api/isos', { host }),
+  isoUrl: (id: string) => `/api/isos/${encodeURIComponent(id)}/download`,
   /** Stages the inverse of a commit, or with since of every commit after since up to rev (nothing is committed). 409: local changes, not on this branch, or a conflict. */
   revert: (rev: string, since = '') => post('/api/revert', { rev, since }),
   /** Commits the staged changes (or takes the unpushed commits) on the machine's testing branch and pushes it; the working copy moves there. */
@@ -364,7 +369,8 @@ export const api = {
   revealSecret: (host: string, name: string) => post<{ value: string }>('/api/secrets/reveal', { host, name }).then((r) => r.value),
   reencryptSecrets: () => post<void>('/api/secrets/reencrypt'),
   /** Stores every machine's own report token as its secret; returns the machines. */
-  storeReportTokens: () => post<{ hosts: string[] }>('/api/secrets/report-tokens').then((r) => r.hosts),
+  /** Each machine's report token as its secret: every machine with a key, or only hosts. */
+  storeReportTokens: (hosts?: string[]) => post<{ hosts: string[] }>('/api/secrets/report-tokens', hosts ? { hosts } : {}).then((r) => r.hosts),
 }
 
 // ---- secrets (Settings) ----
@@ -424,6 +430,26 @@ export type Update = {
 }
 /** outdated: the branch moved on since the update was made, so it cannot be merged. */
 export type UpdateStatus = { schedule: UpdateSchedule; next?: string; zone: string; update?: Update; outdated?: boolean }
+
+// ---- installer ISOs ----
+
+/** An installer ISO: built (ready), or a build the server still remembers. */
+export type ISO = {
+  id: string
+  host: string
+  /** The pushed commit it installs, and its branch. */
+  commit: string
+  branch: string
+  state: 'queued' | 'running' | 'failed' | 'ready'
+  /** The build's job, while the server keeps it. */
+  job?: string
+  started: string
+  finished?: string
+  /** The download's file name. */
+  file?: string
+  size?: number
+  sha256?: string
+}
 
 // ---- deployments (what comin reports from each machine) ----
 
