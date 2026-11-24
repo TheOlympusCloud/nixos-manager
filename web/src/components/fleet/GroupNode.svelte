@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte'
+  import { frame } from '../../lib/ascii'
   import type { GNode } from '../../lib/graph'
   import { graphUi, toggleExpanded } from '../../lib/graphui.svelte'
   import Icon from '../Icon.svelte'
@@ -9,9 +10,9 @@
   const dim = $derived(!!graphUi.lit && !graphUi.lit.has(id))
 </script>
 
-<div class="node group" class:dim class:sel={graphUi.selected === id}>
+<div class="node group lift" class:dim class:sel={graphUi.selected === id} use:frame={{ kind: graphUi.selected === id ? 'heavy' : 'square', lift: true, animate: true }}>
   <Handle type="target" position={targetPosition ?? Position.Left} isConnectable={false} />
-  <span class="ico"><Icon name="package" size={14} /></span>
+  <span class="ico"><Icon name="package" /></span>
   <span class="text">
     <span class="label num">{data.label}</span>
     <span class="sub">{data.preview}</span>
@@ -24,7 +25,7 @@
       e.stopPropagation()
       toggleExpanded(data.host)
     }}>
-    <Icon name={data.expanded ? 'minus' : 'plus'} size={14} />
+    <Icon name={data.expanded ? 'minus' : 'plus'} />
   </button>
   <Handle type="source" position={sourcePosition ?? Position.Right} isConnectable={false} />
 </div>
