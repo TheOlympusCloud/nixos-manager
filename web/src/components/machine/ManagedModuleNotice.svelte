@@ -3,7 +3,6 @@
   import { frame } from '../../lib/ascii'
   import { updateManagedModule } from '../../lib/fleet.svelte'
   import { codeLink } from '../../lib/router.svelte'
-  import { confirmBox } from '../../lib/ui.svelte'
   import Icon from '../Icon.svelte'
 
   /** A machine whose modules/managed.nix predates removed packages, overrides and home-manager. */
@@ -12,13 +11,6 @@
   let busy = $state(false)
 
   async function update() {
-    const ok = await confirmBox({
-      title: 'Update modules/managed.nix?',
-      message:
-        "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users and the Nix files next to managed.json. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
-      ok: 'Update it',
-    })
-    if (!ok) return
     busy = true
     await updateManagedModule()
     busy = false

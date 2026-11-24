@@ -138,6 +138,12 @@ func Insights(m *Model, deploys []MachineDeployment, origin string, tip *CommitC
 	add(Insight{ID: "not-managed", Severity: "info", Hosts: where(func(h Host) bool { return h.ManagedFile == nil }),
 		Title:  "Visual editing off",
 		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
+	// 1 is the first managed.nix; 0 (not reported) is left alone.
+	if old := where(func(h Host) bool { return h.ManagedFile != nil && h.ManagedVersion == 1 }); len(old) > 0 {
+		out = append(out, Insight{ID: "managed-old", Severity: "warning", Hosts: old, Link: "#/machines/" + old[0] + "/packages",
+			Title:  "modules/managed.nix is older than this console",
+			Detail: "These machines load the first managed.nix: packages set here still apply, but removing or customising a package and home-manager users do not. Update it (here, or on a machine's Packages tab), then check, commit and push it."})
+	}
 	out = append(out, missingPackages(healthy)...)
 	out = append(out, releaseInsights(healthy, now)...)
 	out = append(out, inputEOL(m.Inputs, healthy, now)...)

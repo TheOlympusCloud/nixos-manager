@@ -3,7 +3,7 @@ import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type 
 import { fillPath, optionSegments, pathName } from './options'
 import { codeLink, go } from './router.svelte'
 import { refresh, refreshStatus } from './state.svelte'
-import { report, toast, type ToastAction } from './ui.svelte'
+import { confirmBox, report, toast, type ToastAction } from './ui.svelte'
 
 export const fleet = $state({
   model: null as import('./api').Model | null,
@@ -205,19 +205,38 @@ export async function openOrCreate(path: string, template: string): Promise<bool
   return true
 }
 
-/** Writes this server's modules/managed.nix over the repository's, which an older one lacks features for. */
+/**
+ * Writes this server's modules/managed.nix over the repository's (an older one lacks
+ * features), or creates it, once confirmed.
+ */
 export async function updateManagedModule(): Promise<boolean> {
   const path = 'modules/managed.nix'
+  let base: string
   try {
-    const base = await api.file(path).then(
+    base = await api.file(path).then(
       (f) => f.hash,
       (e) => (e instanceof ApiError && e.status === 404 ? '' : Promise.reject(e)),
     )
+  } catch (e) {
+    return report(e, `Could not read ${path}`), false
+  }
+  const ok = await confirmBox(
+    base
+      ? {
+          title: `Update ${path}?`,
+          message:
+            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users and the Nix files next to managed.json. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
+          ok: 'Update it',
+        }
+      : { title: `Create ${path}?`, message: "It is this nixos-manager's module that applies each machine's managed.json. Review it in Changes before you commit.", ok: 'Create it' },
+  )
+  if (!ok) return false
+  try {
     await api.updateManagedModule(base)
   } catch (e) {
-    return report(e, `Could not update ${path}`), false
+    return report(e, `Could not write ${path}`), false
   }
-  toast(`Updated ${path}: review it in Changes`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
+  toast(`${base ? 'Updated' : 'Created'} ${path}: review it in Changes`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
   await refresh()
   return true
 }

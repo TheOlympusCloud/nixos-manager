@@ -1364,9 +1364,9 @@ the user; the files stay until you delete them.
 
 Removing and customising packages, and homes, need the `modules/managed.nix` of
 this release (it sets `nixosManager.version = 2`). A fleet made by an earlier
-nixos-manager still has its first one: the machine's Packages and Home tabs
-say so and offer **Update managed.nix**, which writes this release's file for
-you to review in Changes. Changes you made to that file by hand are replaced,
+nixos-manager still has its first one: **Health** and the machine's Packages
+and Home tabs say so and offer **Update managed.nix**, which writes this
+release's file for you to review in Changes. Changes you made to that file by hand are replaced,
 so check the diff. MCP: `update_managed_module`.
 
 ## Visual editing on an existing repository
@@ -1379,7 +1379,8 @@ editing on for it (the machine page shows it too):
 (import ./modules/managed.nix ./hosts/<name>/managed.json)
 ```
 
-and copy `modules/managed.nix` from `templates/fleet/modules/`.
+and create `modules/managed.nix`: the machine page's **Update managed.nix**
+writes it (or copy it from `templates/fleet/modules/`).
 
 ## Development
 

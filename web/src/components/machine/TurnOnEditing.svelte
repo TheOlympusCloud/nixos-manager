@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../../lib/api'
   import { codeLink } from '../../lib/router.svelte'
+  import { updateManagedModule } from '../../lib/fleet.svelte'
   import { app } from '../../lib/state.svelte'
   import { copyText } from '../../lib/util'
   import { editingPreview } from '../../lib/values'
@@ -57,7 +58,10 @@
           <p class="muted small">flake.nix does not import <span class="mono">./hosts/{host}</span> on a line of its own (a helper function may build the machines): add the line to the list of modules that builds {host}.</p>
         {/if}
         {#if !hasModule}
-          <p class="warn small"><Icon name="alert" /> This repository has no <span class="mono">modules/managed.nix</span> yet. Copy it from the starter flake (<span class="mono">templates/fleet</span>) first.</p>
+          <p class="warn small">
+            <Icon name="alert" /> This repository has no <span class="mono">modules/managed.nix</span> yet.
+            <button class="link small" onclick={updateManagedModule}>Create it</button>
+          </p>
         {/if}
       </div>
     </li>
