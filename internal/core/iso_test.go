@@ -360,7 +360,7 @@ func TestISOEvaluatesWithRealNix(t *testing.T) {
 // computer but in QEMU (testdata/install-vm.nix): fleet-install --yes --offline
 // installs it on an empty disk, and its home-manager user logs in with the
 // packages clicked for them on the PATH and their file in ~. It takes KVM, a few
-// GB of downloads and a quarter of an hour, so it runs only with
+// GB of downloads and about six minutes, so it runs only with
 // NIXMGR_VM_TESTS=1 (.github/workflows/vm-tests.yml).
 func TestInstallInVMWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_VM_TESTS") == "" {
