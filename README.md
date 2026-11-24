@@ -52,7 +52,9 @@ An MCP server gives automation the same features.
   flake picks up every folder in `hosts/`. A physical machine or VM can get a
   disk layout instead (ext4 or Btrfs, with disko): its page then fetches the
   installer's SSH host key for its secrets and gives the `nixos-anywhere`
-  command that installs it. The console never runs the install itself.
+  command that installs it. Or build an **installer ISO** for it: a USB stick
+  whose `sudo fleet-install` installs the machine from the repository, already
+  enrolled. The console never runs the install itself.
 - **Fleet matrices**: which package and which service runs on which machine.
 - **Flake inputs**: each input's revision and age; update one or all and see
   what moved (with compare links) and which package versions change on which
@@ -641,6 +643,9 @@ two ways:
     UEFI; aarch64 boots UEFI only.
   - `hardware-configuration.nix` is a placeholder without file systems:
     nixos-anywhere writes the real one.
+- **Installer ISO**: a USB stick the console builds for the machine, which
+  installs it, its disk layout included: see [Install from an installer
+  ISO](#install-from-an-installer-iso).
 
 The page of a machine with a disk layout then shows **Install with
 nixos-anywhere**, open until the machine has reported a deployment:
@@ -658,8 +663,8 @@ nixos-anywhere**, open until the machine has reported a deployment:
    /etc/ssh/ssh_host_ed25519_key.pub` on the machine, since anyone between the
    server and the machine could answer with a key of their own. **Use it for
    secrets** then approves it, as [Settings → Secrets](#secrets) does, and
-   encrypts the secrets for it: commit and push them. Fetching needs the web
-   login or a full token.
+   encrypts the secrets for it, with the machine's report token: commit and
+   push them. Fetching needs the web login or a full token.
 4. In a clone of the repository, on a computer with Nix (flakes on), run the
    command it shows:
 
@@ -680,6 +685,59 @@ fetch in step 3 is its only connection to it, and only when you click. Booting
 the installer again makes a new host key, so fetch it again before
 installing; after the install, a fetch shows whether the machine kept the
 approved key.
+
+### Install from an installer ISO
+
+**Machines → Installer ISO** builds, on the server, a NixOS installer for one
+machine: the minimal installer from the machine's own nixpkgs (the one the
+flake locks), with `sudo fleet-install`, which installs that machine. Pick the
+machine, or make one with **New machine** and commit and push it, then
+**Build ISO**.
+
+- It builds what is pushed: the commit the machines deploy (the remote's copy
+  of the branch, as last fetched), which is also on the ISO.
+- Builds run in a job lane of their own, one at a time, so they never hold up
+  checks or the fleet views. The log shows while it builds; then **Download**
+  gives `nixos-<name>-<commit>.iso` with its SHA-256. The last 3 ISOs are kept
+  (about a gigabyte each); an older one loses its GC root and Nix's garbage
+  collector frees it.
+- The machine needs a disk layout, or its real hardware configuration and boot
+  loader: a placeholder without a disk layout is refused, and so is a
+  container. As for checks, an `aarch64-linux` ISO on an `x86_64-linux` server
+  needs [emulation or a remote builder](#machines-of-another-architecture).
+- Nothing secret is on it: no age key and no token. The ISO uses the
+  machine's own caches, so the install downloads what checks built when the
+  [binary cache](#binary-cache) is on.
+
+**Install steps**, next to each ISO, then says:
+
+1. Check the SHA-256 and write the ISO to a USB stick (`dd`, or any image
+   writer).
+2. Boot the machine from it and run `sudo fleet-install`. It shows the
+   machine's addresses and the SSH host key it will keep, made when the ISO
+   booted, in memory, and waits.
+3. In the console, **Fetch host key** from one of those addresses, compare the
+   fingerprint, and **Use it for secrets**: the key is approved, as Settings →
+   Secrets does, and the machine's report token is stored in its secrets.
+   Commit and push them.
+4. Press Enter on the machine. fleet-install fetches the branch from comin's
+   remote: a private repository asks for a Forgejo user and a token that can
+   read it, kept in memory only. It shows the disks and, once you type the
+   machine's name, partitions them with `disk-config.nix` (a machine without a
+   disk layout installs on what you mounted at `/mnt`), writes
+   `hardware-configuration.nix` when it is the placeholder, copies the host
+   key to the machine and runs `nixos-install --flake`. It offers to set the
+   users' passwords, commits the hardware configuration and pushes it (the
+   token must be able to write), so that comin deploys the same system, then
+   reboots.
+
+The machine comes up enrolled: comin pulls the repository, its secrets (comin's
+pull token for a private repository included) open with the approved key, and
+with `fleet.deployReport.url` set it shows in [Deployments](#deployments)
+within about 15 minutes. Without the network to Forgejo, `sudo fleet-install
+--offline` installs the commit on the ISO instead: comin catches up once it
+can fetch, and until then the machine cannot open what was encrypted for its
+key after the build.
 
 A fleet made before this has no disko input. The wizard says so and gives the
 lines to add to `flake.nix`, then run **Lock**:
@@ -1246,8 +1304,10 @@ the end of its output is repeated as an annotation on the run's page.
 remote: login, lock, check, commit gate, commit, push, edit, history and
 restore, Health naming an unchecked commit, a commit pushed from another
 clone checked through the signed webhook, a trial, a rollback, and (with Nix
-stubbed) an update of the inputs on `flake-update` merged with one click. It
-uses `nix` from `PATH`; `E2E_STUB_NIX=1` stubs Nix out.
+stubbed) an installer ISO built from what is pushed and downloaded, and an
+update of the inputs on `flake-update` merged with one click. It uses `nix`
+from `PATH`; `E2E_STUB_NIX=1` stubs Nix out. `go test ./internal/core` runs
+`fleet-install` itself against stand-ins for the installer's tools.
 
 `NIXMGR_NIX_TESTS=1 go test -timeout 30m ./templates ./nix ./internal/core`
 runs the checks that need real Nix (network needed): values set by clicking win
@@ -1259,7 +1319,9 @@ one, a check builds the one machine an edit changes and fails on a system that
 does not build, a commit pushed from elsewhere is built against the last
 checked commit before it, the starter fleet's Forgejo Actions check passes on
 the starter fleet and fails on a machine that does not build, a standalone
-home-manager configuration shows its packages and programs, and the flake
+home-manager configuration shows its packages and programs, the installer
+ISO of a machine with a disk layout evaluates and its `fleet-install` builds
+(with ShellCheck), and the flake
 builds the package and passes `nix flake check`, which also makes and keeps a
 binary cache key with the module's script, and an update of a local input is
 locked on `flake-update`, checked and merged.
