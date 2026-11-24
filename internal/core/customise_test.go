@@ -27,8 +27,10 @@ new file mode 100755
 // fleet: NixOS's default packages removed and rebuilt, a package changed from
 // managed.json and from a raw Nix file, a machine's own custom.nix, and
 // home-manager users with packages, an option, a dotfile and a module of
-// their own, and modules/managed.json for both. The check builds both machines, the built systems hold exactly
-// that, the model says so, and comin builds the same systems from the push.
+// their own, a home copied from one machine to the other, and
+// modules/managed.json for both. The check builds both machines, the built
+// systems hold exactly that, the model says so, and comin builds the same
+// systems from the push.
 func TestCustomisedFleetWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
@@ -71,6 +73,15 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	edit(s.SetOption("ct", []string{"users", "users", "anna", "isNormalUser"}, true, nil))
 	edit(s.SetHome("ct", HomeEdit{User: "anna", Enable: true, StateVersion: "26.05"}))
 	edit(s.EditPackages("ct", PackageEdit{User: "anna", Add: []string{"hello"}}))
+	write(t, s.Repo, "hosts/ct/home/anna/files/.config/nixmgr/anna.conf", "anna\n")
+
+	// example gets anna too, and her home copied from ct; home.stateVersion stays
+	// example's own, set as the web sets it after a copy.
+	edit(s.SetOption("example", []string{"users", "users", "anna", "isNormalUser"}, true, nil))
+	if r := must[[]CopyResult](t)(s.Copy("ct", CopyRequest{Home: "anna", To: []string{"example"}})); len(r) != 1 || !r[0].Changed {
+		t.Fatalf("copy anna's home: %+v", r)
+	}
+	edit(s.SetHome("example", HomeEdit{User: "anna", Enable: true, StateVersion: "26.05"}))
 
 	// Every machine: jq, which ct takes out, and cowsay for pablo, whose home only
 	// example manages: ct has no pablo and must not get a home for him.
@@ -118,6 +129,7 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	expect(strings.Contains(read(pablo+"/etc/profile.d/hm-session-vars.sh"), `NIXMGR_TEST="managed"`), "pablo's home has the option set by clicking")
 	expect(!exists(ct+"/sw/bin/rsync") && !exists(ct+"/sw/bin/strace") && exists(ct+"/sw/bin/perl") && exists(ct+"/sw/bin/htop"), "ct has no rsync or strace, and keeps perl and htop")
 	expect(exists(ct+"/etc/profiles/per-user/anna/bin/hello"), "anna has hello")
+	expect(exists(ex+"/etc/profiles/per-user/anna/bin/hello"), "anna has hello on example too, from the copy")
 	lua, err := filepath.EvalSymlinks(ct + "/sw/bin/lua")
 	expect(err == nil && strings.Contains(lua, "-lua-5.4"), "ct runs lua 5.4, the replacement of the same name, not lua 5.3 nor no lua: "+lua)
 
@@ -185,6 +197,8 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	}
 	files := nixRaw(t, ref+"#nixosConfigurations.example.config.home-manager.users.pablo.home-files.outPath")
 	expect(read(files+"/.config/nixmgr/test.conf") == "dotfile\n" && read(files+"/nixmgr-custom") == "home custom.nix", "pablo's dotfile and custom.nix are in his home files")
+	annaFiles := nixRaw(t, ref+"#nixosConfigurations.example.config.home-manager.users.anna.home-files.outPath")
+	expect(read(annaFiles+"/.config/nixmgr/anna.conf") == "anna\n", "anna's dotfile, copied from ct, is in her home files on example")
 	vim := nixRaw(t, ref+"#nixosConfigurations.ct.pkgs.htop.outPath")
 	resolved, err := filepath.EvalSymlinks(ct + "/sw/bin/htop")
 	expect(err == nil && strings.HasPrefix(resolved, vim+"/"), "ct runs the htop built with vim keys")

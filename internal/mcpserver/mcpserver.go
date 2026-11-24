@@ -31,6 +31,11 @@ type pathsIn struct {
 	Paths []string `json:"paths,omitempty" jsonschema:"repository-relative paths; empty means all changes"`
 }
 
+// copyOut wraps copy_to_machines' results: a tool's output is an object.
+type copyOut struct {
+	Results []core.CopyResult `json:"results"`
+}
+
 type jobOut struct {
 	ID      string             `json:"id"`
 	State   string             `json:"state" jsonschema:"queued, running, passed or failed"`
@@ -54,6 +59,7 @@ var toolScope = map[string]auth.Scope{
 	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
 	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit,
+	"copy_to_machines":      auth.ScopeEdit,
 	"update_managed_module": auth.ScopeEdit,
 	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
 
@@ -398,6 +404,13 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		core.HomeEdit
 	}) (core.ManagedView, error) {
 		return svc.SetHome(in.Host, in.HomeEdit)
+	})
+	tool(s, "copy_to_machines", "Copy, from one machine to others, how a package is changed (packageOverride) or a user's home (home), as that machine's managed.json and folder have it. A machine that already has another value for something copied is refused whole and listed with its conflicts; nothing is overwritten. Home package lists are joined; home.stateVersion is not copied, so a machine where the user has no home yet also needs set_home_manager with its stateVersion.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"the machine to copy from"`
+		core.CopyRequest
+	}) (copyOut, error) {
+		r, err := svc.Copy(in.Host, in.CopyRequest)
+		return copyOut{r}, err
 	})
 	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 3 needs for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`

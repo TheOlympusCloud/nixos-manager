@@ -789,6 +789,15 @@ func TestPackageCustomisationOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"user": "pablo", "add": []string{"ripgrep"}}, &v); code != 200 || v.Home["pablo"].Packages[0] != "ripgrep" {
 		t.Fatalf("home package: %d %+v", code, v)
 	}
+	// Copied to another machine, which reports what it got.
+	e.do(t, "POST", "/api/hosts/laptop/packages", map[string]any{"add": []string{"git"}}, nil)
+	var copied []core.CopyResult
+	if code := e.do(t, "POST", "/api/hosts/web/copy", map[string]any{"home": "pablo", "to": []string{"laptop"}}, &copied); code != 200 || len(copied) != 1 || !copied[0].Changed {
+		t.Fatalf("copy: %d %+v", code, copied)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/copy", map[string]any{"home": "pablo", "to": []string{"*"}}, nil); code != 400 {
+		t.Fatalf("copy to every machine: %d", code)
+	}
 	// * is modules/managed.json, for every machine, as the web client sends it (unescaped).
 	if code := e.do(t, "POST", "/api/hosts/*/packages", map[string]any{"exclude": []string{"perl"}}, &v); code != 200 || v.Path != "modules/managed.json" || v.RemovedPackages[0] != "perl" {
 		t.Fatalf("every machine: %d %+v", code, v)
