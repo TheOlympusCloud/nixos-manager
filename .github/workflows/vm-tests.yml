@@ -39,3 +39,7 @@ jobs:
         run: |
           NIXMGR_VM_TESTS=1 go test -v -timeout 80m -run 'InVMWithRealNix$' ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
             { scripts/ci-annotate.sh "VM tests" "$RUNNER_TEMP/tests.log"; exit 1; }
+          # A skipped test passes too: say that it ran, and how long it took.
+          passed=$(grep -- '--- PASS: TestInstallInVMWithRealNix' "$RUNNER_TEMP/tests.log") ||
+            { echo "::error title=VM tests::TestInstallInVMWithRealNix did not run"; exit 1; }
+          echo "::notice title=VM tests::$passed"
