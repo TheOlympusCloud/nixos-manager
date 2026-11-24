@@ -26,7 +26,7 @@
 
 <ModelGate>
   <div class="ov">
-    <div class="bar">
+    <div class="head">
       <label class="pick">
         <span class="label">Machine</span>
         <select value={host} onchange={(e) => replace(link('options', [e.currentTarget.value], { q: query.trim(), o: selected }))}>
@@ -42,25 +42,27 @@
 </ModelGate>
 
 <style>
+  /* One blank row at the foot, so the panes' frames end on a whole row inside the view. */
   .ov {
     display: flex;
     flex-direction: column;
     height: 100%;
+    padding: 0 2ch var(--lh);
   }
-  .bar {
+  .head {
     display: flex;
-    align-items: center;
-    gap: var(--s4);
-    padding: 10px var(--s4);
-    border-bottom: 1px solid var(--border);
+    flex: none;
+    align-items: baseline;
+    gap: 0 3ch;
+    padding: var(--lh) 0;
   }
   .pick {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex: none;
+    gap: 1ch;
   }
   .pick select {
-    width: 200px;
+    width: 26ch;
   }
   .ov > :global(.ob) {
     flex: 1;

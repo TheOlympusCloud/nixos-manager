@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte'
   import Icon from '../components/Icon.svelte'
   import ModelGate from '../components/ModelGate.svelte'
+  import { bar, bigText } from '../lib/ascii'
   import type { Feature, FeatureGroup } from '../lib/api'
   import { openPackageSearch } from '../lib/dialogs.svelte'
   import { fleet, healthy, loadManaged, removePackageByName, toggleFeature } from '../lib/fleet.svelte'
@@ -62,32 +63,32 @@
   <div class="page-inner">
     <ModelGate>
       <div class="page-head">
-        <h1>{kind === 'packages' ? 'Packages' : 'Services'}</h1>
-        <span class="sub num">
-          {kind === 'packages' ? plural(total, 'package') : plural(total, 'feature')} across {plural(hosts.length, 'machine')}{#if broken.length}{' · '}<span class="bad"
-              >{broken.map((h) => h.name).join(', ')} not evaluated</span
-            >{/if}
-        </span>
-        <span class="spacer"></span>
-        <span class="legend muted small">
-          <span class="lg"><span class="sw managed"></span>Set here</span>
-          <span class="lg"><span class="sw repo"></span>In code</span>
-          {#if kind === 'packages'}<span class="lg"><span class="sw default"></span>Default</span>{/if}
-        </span>
+        <div>
+          <h1 class="big" aria-label={kind === 'packages' ? 'Packages' : 'Services'} use:bigText={kind === 'packages' ? 'Packages' : 'Services'}></h1>
+          <p class="sub num">
+            {kind === 'packages' ? plural(total, 'package') : plural(total, 'feature')} across {plural(hosts.length, 'machine')}{#if broken.length}{' · '}<span class="bad"
+                >{broken.map((h) => h.name).join(', ')} not evaluated</span
+              >{/if}
+          </p>
+        </div>
+        <div class="toolbar">
+          <span class="field"><Icon name="filter" /><input class="search" type="search" placeholder={kind === 'packages' ? 'Filter packages' : 'Filter services and programs'} aria-label="Filter rows" data-search bind:value={filter} /></span>
+          {#if kind === 'packages'}
+            <label class="toggle"><input type="checkbox" bind:checked={hideDefaults} />Hide defaults</label>
+          {/if}
+          <label class="toggle"><input type="checkbox" bind:checked={onlyDiff} />Only where machines differ</label>
+          {#if kind === 'packages'}<button class="primary" onclick={() => openPackageSearch()}><Icon name="plus" /> Add packages</button>{/if}
+        </div>
       </div>
 
-      <div class="toolbar">
-        <input class="search" type="search" placeholder={kind === 'packages' ? 'Filter packages' : 'Filter services and programs'} aria-label="Filter rows" data-search bind:value={filter} />
-        {#if kind === 'packages'}
-          <label class="toggle"><input type="checkbox" bind:checked={hideDefaults} />Hide defaults</label>
-        {/if}
-        <label class="toggle"><input type="checkbox" bind:checked={onlyDiff} />Only where machines differ</label>
-        <span class="spacer"></span>
-        {#if kind === 'packages'}<button class="primary" onclick={() => openPackageSearch()}><Icon name="plus" size={14} />Add packages</button>{/if}
+      <div class="legend muted">
+        <span class="lg managed"><span class="sw"></span>Set here</span>
+        <span class="lg repo"><span class="sw"></span>In code</span>
+        {#if kind === 'packages'}<span class="lg default"><span class="sw"></span>Default</span>{/if}
       </div>
 
       <div class="matrix-wrap">
-        <table class="matrix">
+        <table class="matrix data">
           <thead>
             <tr>
               <th class="corner">{kind === 'packages' ? 'Package' : 'Feature'}</th>
@@ -116,17 +117,17 @@
                         <span class="has {source(c)}" title={sourceTitle(c)}>
                           <span class="ver mono">{c.version}</span>
                           {#if c.managed}
-                            <button class="cell-btn" aria-label="Remove {r.name} from {h.name}" title="Remove from {h.name}" onclick={() => run(r.name + h.name, 'off', () => removePackageByName(h.name, r.name))}>
-                              <Icon name="x" size={12} />
+                            <button class="cell-btn icon" aria-label="Remove {r.name} from {h.name}" title="Remove from {h.name}" onclick={() => run(r.name + h.name, 'off', () => removePackageByName(h.name, r.name))}>
+                              <Icon name="x" />
                             </button>
                           {/if}
                         </span>
                       {:else if h.managedFile}
-                        <button class="cell-add" aria-label="Add {r.name} to {h.name}" title="Add to {h.name}…" onclick={() => openPackageSearch(r.name, [h.name])}><Icon name="plus" size={13} /></button>
+                        <button class="cell-add icon" aria-label="Add {r.name} to {h.name}" title="Add to {h.name}…" onclick={() => openPackageSearch(r.name, [h.name])}><Icon name="plus" /></button>
                       {/if}
                     </td>
                   {/each}
-                  <td class="n num">{r.count}/{hosts.length}</td>
+                  <td class="n num">{r.count}/{hosts.length} <span class="bar" aria-hidden="true">{@html bar(r.count / hosts.length, 4)}</span></td>
                 </tr>
               {/each}
             {:else}
@@ -145,22 +146,23 @@
                           <span class="spinner" aria-hidden="true"></span><span class="sr-only">Turning {r.name} {pending[key]} on {h.name}</span>
                         </span>
                       {:else if c && (!c.managed || !h.managedFile || c.files.some((f) => isRepoFile(f) && f !== h.managedFile))}
-                        <span class="tick {source(c)} g-{r.group}" title="{h.name}: {sourceTitle(c)}"><Icon name="tick" size={13} /></span>
+                        <span class="tick {source(c)} g-{r.group}" title="{h.name}: {sourceTitle(c)}"><Icon name="tick" /></span>
                       {:else if c}
-                        <button class="tick managed g-{r.group} toggle-btn" aria-pressed="true" aria-label="Turn off {r.name} on {h.name}" title="On (set here); click to turn off" onclick={() => run(key, 'off', () => toggleFeature(h.name, r.group, r.name, false))}>
-                          <Icon name="tick" size={13} />
+                        <button class="tick managed g-{r.group} toggle-btn icon" aria-pressed="true" aria-label="Turn off {r.name} on {h.name}" title="On (set here); click to turn off" onclick={() => run(key, 'off', () => toggleFeature(h.name, r.group, r.name, false))}>
+                          <Icon name="tick" />
                         </button>
                       {:else if h.managedFile}
-                        <button class="cell-add" aria-pressed="false" aria-label="Turn on {r.name} on {h.name}" title="Turn on for {h.name}" onclick={() => run(key, 'on', () => toggleFeature(h.name, r.group, r.name, true))}>
-                          <Icon name="plus" size={13} />
+                        <button class="cell-add icon" aria-pressed="false" aria-label="Turn on {r.name} on {h.name}" title="Turn on for {h.name}" onclick={() => run(key, 'on', () => toggleFeature(h.name, r.group, r.name, true))}>
+                          <Icon name="plus" />
                         </button>
                       {/if}
                     </td>
                   {/each}
                   <td class="n num">
-                    <span class="count">{r.count}/{hosts.length}</span>
+                    <span>{r.count}/{hosts.length}</span>
+                    <span class="bar" aria-hidden="true">{@html bar(r.count / hosts.length, 4)}</span>
                     <a class="opts" href={link('options', [r.cells.findIndex(Boolean) >= 0 ? hosts[r.cells.findIndex(Boolean)].name : hosts[0].name], { q: r.key + '.' })} title="Configure {r.name}" aria-label="Configure the options of {r.name}">
-                      <Icon name="sliders" size={13} />
+                      <Icon name="sliders" />
                     </a>
                   </td>
                 </tr>
@@ -183,262 +185,175 @@
   .bad {
     color: var(--red);
   }
-  .toolbar {
-    margin-bottom: var(--s3);
+  .bad::before {
+    content: '✖ ';
+  }
+  /* The tools take what the title leaves and wrap inside it, as in the other page heads. */
+  .page-head .toolbar {
+    flex: 1 1 0;
+    justify-content: flex-end;
+    min-width: 40ch;
+  }
+  .field {
+    display: inline-flex;
+    gap: 1ch;
+    color: var(--fg-muted);
   }
   .toggle {
     display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-left: 6px;
+    gap: 1ch;
     cursor: pointer;
   }
+  /* A cell is coloured by where its value comes from; the legend uses the same colours. */
   .legend {
     display: flex;
-    gap: 12px;
-    margin-right: 8px;
+    gap: 2ch;
+    margin-bottom: var(--lh);
   }
   .lg {
     display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    gap: 1ch;
   }
-  .sw {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
+  .sw::before {
+    content: '■';
   }
-  .sw.managed {
-    background: color-mix(in srgb, var(--accent-strong) 70%, transparent);
+  .managed {
+    color: var(--green);
   }
-  .sw.repo {
-    background: var(--line-strong);
+  .repo {
+    color: var(--fg-muted);
   }
-  .sw.default {
-    border: 1px dashed var(--line-strong);
+  .default {
+    color: var(--fg-faint);
   }
+  /* Its own scroller, so the header row and the name column stay put. */
   .matrix-wrap {
+    max-height: calc(100vh - var(--lh) * 18);
     overflow: auto;
-    max-height: calc(100vh - 214px);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
   }
   .matrix {
     min-width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-variant-numeric: tabular-nums;
+    width: auto;
+  }
+  .matrix :is(th, td) {
+    white-space: nowrap;
   }
   .matrix thead th {
-    position: sticky;
-    top: 0;
     z-index: 2;
-    height: 38px;
-    padding: 0 12px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    font-weight: 500;
-    text-align: left;
-    white-space: nowrap;
-    background: var(--bg-side);
-    border-bottom: 1px solid var(--line);
-  }
-  .matrix thead .col a {
-    color: var(--fg-strong);
-    font-weight: 600;
-    text-decoration: none;
-  }
-  .matrix thead .col a:hover {
-    color: var(--accent);
-  }
-  .corner,
-  .row-head {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    min-width: 220px;
-    max-width: 320px;
-    background: var(--bg);
   }
   .matrix thead .corner {
+    position: sticky;
+    left: 0;
     z-index: 3;
-    background: var(--bg-side);
+  }
+  .code-only {
+    margin-left: 1ch;
+    color: var(--fg-faint);
+  }
+  .code-only::before {
+    content: 'λ ';
+  }
+  /* Row heads are th, so they undo the caps header of table.data. */
+  .matrix tbody th {
+    position: sticky;
+    top: auto;
+    left: 0;
+    z-index: 1;
+    height: var(--lh);
+    text-transform: none;
+    /* Opaque over cells scrolled under it, and on the page's greenbar (print theme) where it lies. */
+    background: var(--bars), var(--bg);
+    background-attachment: fixed;
+  }
+  .matrix tbody th::after {
+    content: none;
   }
   .row-head {
-    padding: 0 12px;
+    min-width: 26ch;
+    max-width: 38ch;
     overflow: hidden;
     color: var(--fg-strong);
-    font-size: 12.5px;
-    font-weight: 400;
-    text-align: left;
+    font-weight: 700;
     text-overflow: ellipsis;
-    white-space: nowrap;
-    border-right: 1px solid var(--border);
   }
-  .matrix td,
-  .row-head {
-    height: 34px;
-    border-bottom: 1px solid var(--border);
-  }
-  .matrix tbody tr:hover td,
-  .matrix tbody tr:hover .row-head {
-    background: var(--bg-raised);
+  .matrix tbody tr:not(.group-row):hover th {
+    background: var(--bg-hover);
   }
   .cell {
-    min-width: 128px;
-    padding: 0 8px;
+    min-width: 14ch;
   }
   .has {
     display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    height: 24px;
-    max-width: 150px;
-    padding: 0 4px 0 8px;
-    border-radius: var(--r-sm);
-  }
-  .has.repo {
-    background: var(--bg-active);
-  }
-  .has.managed {
-    background: color-mix(in srgb, var(--accent-strong) 16%, var(--bg-raised));
-  }
-  .has.managed .ver {
-    color: var(--fg-strong);
-  }
-  .has.default {
-    border: 1px dashed var(--line-strong);
+    gap: 1ch;
+    max-width: 20ch;
   }
   .ver {
     overflow: hidden;
-    color: var(--fg);
-    font-size: 11.5px;
     text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .has:not(.managed) {
-    padding-right: 8px;
-  }
-  .cell-btn,
-  .cell-add {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    color: var(--fg-muted);
-    background: none;
-    border: 1px solid transparent;
-  }
-  .cell-btn:hover:not(:disabled) {
-    color: var(--fg-strong);
-    background: color-mix(in srgb, var(--red) 14%, transparent);
-    border-color: transparent;
-  }
-  .cell-add {
-    opacity: 0;
-    border-style: dashed;
-    border-color: var(--line-strong);
-  }
-  tr:hover .cell-add,
-  .cell-add:focus-visible {
-    opacity: 1;
-  }
-  .cell-add:hover:not(:disabled) {
-    color: var(--fg-strong);
-    background: var(--bg-hover);
-  }
-  .tick {
-    display: inline-grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    color: var(--c);
-    background: color-mix(in srgb, var(--c) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
-    border-radius: var(--r-sm);
-  }
-  .tick.default {
-    background: none;
-    border-style: dashed;
-  }
-  .tick.managed {
-    color: var(--on-accent);
-    background: var(--c);
-  }
-  .toggle-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--red) 18%, transparent);
-    border-color: color-mix(in srgb, var(--red) 50%, transparent);
-  }
-  .group-row th {
-    position: sticky;
-    left: 0;
-    height: 30px;
-    padding: 10px 12px 4px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    font-weight: 500;
-    text-align: left;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-  }
-  .group-row .dot {
-    margin-right: 8px;
-    background: var(--c);
-  }
-  .fname {
-    font-weight: 500;
-  }
-  .n,
-  .n-col {
-    width: 110px;
-    white-space: nowrap;
-    padding-right: 14px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    text-align: right;
-  }
-  .n .opts {
-    display: inline-grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    margin-left: 6px;
-    color: var(--fg-faint);
-    vertical-align: middle;
-    border-radius: var(--r-sm);
-  }
-  tr:hover .opts {
-    color: var(--fg-muted);
-  }
-  .n .opts:hover {
-    color: var(--accent);
-    background: var(--bg-hover);
-  }
-  .code-only {
-    margin-left: 6px;
-    color: var(--fg-faint);
-    font-size: var(--fs-xs);
-    font-weight: 400;
   }
   .has.pending {
-    opacity: 0.7;
-    border: 1px dashed var(--line-strong);
+    color: var(--fg-faint);
   }
-  .tick.pending {
-    background: none;
-    border-style: dashed;
-  }
-  .tick.pending .spinner,
-  .has.pending .spinner {
+  .has .spinner {
     margin: 0;
   }
+  .cell-btn {
+    min-width: 1ch;
+  }
+  /* Glyph buttons start on the cell's first column, like the values beside them. */
+  .cell-add,
+  .toggle-btn {
+    text-align: left;
+  }
+  .cell-add {
+    color: var(--fg-faint);
+  }
+  .tick {
+    display: inline-block;
+    min-width: 1ch;
+  }
+  .tick.pending .spinner {
+    margin: 0;
+  }
+  /* Clicking a ✓ set here turns it off: red under the pointer. */
+  .toggle-btn:hover:not(:disabled) {
+    color: var(--on-accent);
+    background: var(--red);
+  }
+  .matrix tbody .group-row th {
+    height: calc(var(--lh) * 2);
+    color: var(--fg-muted);
+    font-weight: 400;
+    text-transform: uppercase;
+    vertical-align: bottom;
+  }
+  .group-row .dot {
+    margin-right: 1ch;
+  }
+  .group-row .dot::before {
+    content: '▪';
+  }
+  .matrix tbody .group-row:hover {
+    background: none;
+  }
+  .matrix :is(.n, .n-col) {
+    color: var(--fg-muted);
+    text-align: left;
+  }
+  .n .opts {
+    margin-left: 1ch;
+    color: var(--fg-faint);
+  }
+  .n .opts:hover {
+    color: var(--on-accent);
+  }
   .none {
-    padding: 18px 12px;
+    height: calc(var(--lh) * 3);
+    vertical-align: middle;
   }
   .more {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 12px;
+    gap: 2ch;
+    margin-top: var(--lh);
   }
 </style>

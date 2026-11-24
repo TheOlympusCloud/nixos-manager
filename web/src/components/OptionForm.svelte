@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity'
   import type { OptionInfo } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { fleet, healthy, hostByName, managedValue, setOption, unsetOption, useValues, valueOf } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
   import { controlFor, docsHTML, fillPath, optionSegments, parseNix, pathName, type Scalar } from '../lib/options'
@@ -194,9 +195,9 @@
   }
 </script>
 
-<div class="of">
+<div class="of" use:frame={{ title: option.name }}>
   <div class="name-row">
-    <h3 class="mono">{option.name}</h3>
+    <h3 class="mono sr-only">{option.name}</h3>
   </div>
   <div class="type mono">{option.type}</div>
 
@@ -209,13 +210,13 @@
 
   <div class="editor" class:locked={!editable}>
     {#if option.readOnly}
-      <p class="note"><Icon name="info" size={14} />Read-only: NixOS computes this option; it cannot be set.</p>
+      <p class="note"><Icon name="info" /> Read-only: NixOS computes this option; it cannot be set.</p>
     {:else if inList}
-      <p class="note"><Icon name="info" size={14} />This option sits inside a list of submodules, which a settings path cannot address. Set it in Code.</p>
+      <p class="note"><Icon name="info" /> This option sits inside a list of submodules, which a settings path cannot address. Set it in Code.</p>
     {:else if !managed}
-      <p class="note"><Icon name="info" size={14} />{host} is Code only: change options in its Nix files, or <a href={machineLink(host)}>turn on editing</a> to set them here.</p>
+      <p class="note"><Icon name="info" /> {host} is Code only: change options in its Nix files, or <a href={machineLink(host)}>turn on editing</a> to set them here.</p>
     {:else if !fleet.managed[host]}
-      <span class="skel" style:width="40%"></span>
+      <span class="skel" style:width="40ch"></span>
     {/if}
 
     {#if placeholders.length && !inList}
@@ -245,7 +246,7 @@
         {#if vals.error}
           <span class="error-text small">{vals.error}</span>
         {:else if !eff}
-          <span class="skel" style:width="160px"></span>{#if vals.job}<span class="muted small">Evaluating {host}…</span>{/if}
+          <span class="skel" style:width="20ch"></span>{#if vals.job}<span class="muted small">Evaluating {host}…</span>{/if}
         {:else if eff.state === 'missing'}
           <span class="muted">{placeholders.length ? `Nothing is set for ${names.filter(Boolean).map((n) => `“${n}”`).join(', ')} on ${host} yet.` : `${host} has no such option: none of its modules declares it.`}</span>
         {:else if eff.state === 'error'}
@@ -316,7 +317,7 @@
           {@const items = Array.isArray(draft) ? draft : []}
           <div class="chips list">
             {#each items as item, i (i)}
-              <span class="chip mono">{String(item)}<button class="x" aria-label="Remove {item}" onclick={() => edit(items.filter((_, j) => j !== i))}><Icon name="x" size={11} /></button></span>
+              <span class="chip mono">{String(item)}<button class="x bare" aria-label="Remove {item}" onclick={() => edit(items.filter((_, j) => j !== i))}><Icon name="x" /></button></span>
             {:else}
               <span class="muted small">Empty list</span>
             {/each}
@@ -371,7 +372,7 @@
         {#if vals.values}<span class="muted small">{distinct <= 1 ? 'The same everywhere it is set' : `${plural(distinct, 'different value')}`}</span>{/if}
       </div>
       <table class="data">
-        <colgroup><col style:width="24%" /><col style:width="34%" /><col /><col style:width="104px" /></colgroup>
+        <colgroup><col style:width="24%" /><col style:width="34%" /><col /><col style:width="16ch" /></colgroup>
         <thead><tr><th>Machine</th><th>Value</th><th>From</th><th><span class="sr-only">Actions</span></th></tr></thead>
         <tbody>
           {#each rows as r (r.host)}
@@ -380,7 +381,7 @@
               <td class="m"><a href={machineLink(r.host)}>{r.host}</a>{#if !r.editable}<span class="co" title="Not editable here: it does not load a managed.json">Code only</span>{/if}</td>
               <td class="v">
                 {#if vals.error}<span class="muted small">—</span>
-                {:else if !e}<span class="skel" style:width="70%"></span>
+                {:else if !e}<span class="skel" style:width="12ch"></span>
                 {:else if e.state === 'missing'}<span class="muted small">{placeholders.length ? 'Not set' : 'No such option'}</span>
                 {:else if e.state === 'error'}<span class="error-text small">Does not evaluate</span>
                 {:else}<code title={showValue(e.value)}>{showValue(e.value)}</code>{/if}
@@ -388,14 +389,14 @@
               <td>{#if e?.state === 'value'}<SourceTag source={e.source} pending={e.pending} />{/if}</td>
               <td class="act">
                 {#if e?.state === 'value' && !e.pending && copyable(e.value) && rows.some((x) => x.editable && x.host !== r.host && x.eff?.state !== 'missing')}
-                  <button class="small ghost" aria-expanded={copying?.from === r.host} onclick={() => (copying?.from === r.host ? (copying = null) : startCopy(r.host, e.value))}><Icon name="copy" size={12} />Copy to…</button>
+                  <button class="small ghost" aria-expanded={copying?.from === r.host} onclick={() => (copying?.from === r.host ? (copying = null) : startCopy(r.host, e.value))}><Icon name="copy" /> Copy to…</button>
                 {/if}
               </td>
             </tr>
             {#if copying?.from === r.host}
               <tr class="copy-row">
                 <td colspan="4">
-                  <div class="copy">
+                  <div class="copy" use:frame={'dash'}>
                     <p>Set <code>{showValue(copying.value)}</code> from {r.host} on:</p>
                     <div class="chips">
                       {#each copyTargets as t (t.host)}
@@ -425,235 +426,182 @@
 <style>
   .of {
     display: grid;
-    gap: 10px;
-  }
-  .name-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-  }
-  h3 {
-    overflow-wrap: anywhere;
-    font-size: var(--fs-lg);
-    font-weight: 600;
+    gap: var(--lh);
+    min-width: 0;
   }
   .type {
     color: var(--accent);
-    font-size: 12px;
+    overflow-wrap: anywhere;
   }
   .docs {
-    max-width: 72ch;
-    color: var(--fg);
-    line-height: 1.6;
+    max-width: 80ch;
   }
-  .docs :global(p + p),
-  .docs :global(ul) {
-    margin-top: 8px;
+  .docs > :global(* + *) {
+    margin-top: var(--lh);
   }
-  .docs :global(ul) {
-    margin-bottom: 0;
-    padding-left: 18px;
+  .docs :global(li)::before {
+    color: var(--fg-muted);
+    content: '• ';
   }
   .docs :global(code) {
-    padding: 1px 4px;
     color: var(--fg-strong);
     background: var(--bg-hover);
-    border-radius: 3px;
   }
   .docs :global(pre) {
-    padding: 8px;
-    background: var(--bg-deep);
-    border-radius: var(--r);
+    padding: 0 1ch;
+    overflow: auto;
+    background: var(--bg-input);
+  }
+  .docs :global(pre code) {
+    background: none;
   }
   .defaults {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 6px 14px;
-    margin: 4px 0 0;
+    grid-template-columns: 12ch minmax(0, 1fr);
   }
   .defaults dt {
-    padding-top: 4px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
   }
   .defaults dd {
-    margin: 0;
     min-width: 0;
   }
+  /* Values are Nix literals, in the Code view's colour for them. */
   .defaults pre {
-    margin: 0;
-    padding: 4px 8px;
     overflow: auto;
-    font: 12px/1.5 var(--mono);
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    color: var(--yellow);
   }
   .editor {
     display: grid;
-    gap: 12px;
-    margin-top: 6px;
-    padding: 14px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
+    gap: var(--lh);
   }
   .note {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--fg-muted);
+    gap: 1ch;
+  }
+  .note :global(.ic) {
+    color: var(--accent);
   }
   .names {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: var(--lh) 2ch;
   }
   .field {
     display: grid;
-    gap: 4px;
-    width: 260px;
+    width: 32ch;
   }
-  .editor > .label {
-    margin-bottom: -6px;
+  /* "Value" heads the control it names, with no blank row between. */
+  .editor > .label + .control {
+    margin-top: calc(var(--lh) * -1);
   }
   .control {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
+    align-items: baseline;
+    gap: var(--lh) 2ch;
   }
   .switch-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    gap: 1ch;
   }
   .short {
-    width: 220px;
+    width: 26ch;
   }
-  .seg {
-    display: inline-flex;
-    padding: 2px;
-    background: var(--bg-deep);
-    border: 1px solid var(--line);
-    border-radius: var(--r);
+  .seg > button + button::before {
+    margin-right: 1ch;
+    margin-left: -1ch;
+    color: var(--line);
+    content: '│';
   }
-  .seg button {
-    height: 26px;
-    color: var(--fg-muted);
-    background: none;
-    border: 0;
-  }
-  .seg button.on {
-    color: var(--fg-strong);
-    background: var(--bg-active);
+  .seg > button.on::before {
+    color: var(--on-accent);
   }
   .list {
     width: 100%;
   }
   .add-item {
     display: flex;
-    gap: 6px;
+    gap: 2ch;
   }
   .json {
     width: 100%;
+    height: calc(var(--lh) * 6);
   }
   .problem {
     color: var(--red);
-    font-size: var(--fs-sm);
+  }
+  .problem::before {
+    content: '✖ ';
   }
   .buttons {
     display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .wait {
-    margin-left: 4px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 2ch;
   }
   .now {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 10px;
-    min-width: 0;
-  }
-  .now .label {
+    align-items: baseline;
+    gap: 0 2ch;
     min-width: 0;
   }
   .val {
     max-width: 100%;
-    padding: 3px 8px;
+    padding: 0 1ch;
     overflow: hidden;
-    color: var(--fg-strong);
-    font-size: 12.5px;
+    color: var(--yellow);
     white-space: nowrap;
     text-overflow: ellipsis;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    background: var(--bg-input);
   }
   .why {
-    max-width: 72ch;
-    margin-top: -4px;
+    max-width: 80ch;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.5;
   }
-  .compare {
-    display: grid;
-    gap: 8px;
-    margin-top: 10px;
+  /* Headings of the form read like the page's: ▌ ON EVERY MACHINE. */
+  h4 {
+    text-transform: uppercase;
+  }
+  h4::before {
+    margin-right: 1ch;
+    color: var(--accent);
+    content: '▌';
   }
   .c-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 10px;
-  }
-  h4 {
-    font-size: var(--fs-md);
+    gap: 0 2ch;
+    margin-bottom: var(--lh);
   }
   .compare table {
     table-layout: fixed;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-  }
-  .compare tbody tr:last-child td {
-    border-bottom: 0;
   }
   .compare td {
-    font-size: var(--fs-sm);
+    overflow: hidden;
   }
   .m {
-    overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
   .m a {
-    color: var(--fg-strong);
-    font-weight: 500;
-    text-decoration: none;
-  }
-  .m a:hover {
-    color: var(--accent);
+    font-weight: 700;
   }
   .co {
-    margin-left: 8px;
+    margin-left: 1ch;
     color: var(--fg-faint);
-    font-size: var(--fs-xs);
   }
-  tr.me td {
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
+  .co::before {
+    content: 'λ ';
   }
-  .compare td {
-    overflow: hidden;
+  tr.me {
+    background: var(--bg-active);
   }
   .v code {
     display: block;
     overflow: hidden;
-    color: var(--fg-strong);
+    color: var(--yellow);
     white-space: nowrap;
     text-overflow: ellipsis;
   }
@@ -661,34 +609,27 @@
     text-align: right;
     white-space: nowrap;
   }
-  .copy-row td,
-  .copy-row:hover td {
-    background: var(--bg-side);
+  .compare tbody .copy-row:hover {
+    background: none;
   }
   .copy {
     display: grid;
-    gap: 10px;
-    padding: 8px 2px 10px;
+    gap: var(--lh);
+    margin-bottom: var(--lh);
   }
   .copy code {
-    color: var(--fg-strong);
+    color: var(--yellow);
+  }
+  .copy .chips {
+    gap: 0 2ch;
   }
   .target {
     display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 13px;
+    gap: 1ch;
+    padding-right: 1ch;
     cursor: pointer;
   }
   .target.on {
     color: var(--fg-strong);
-    background: color-mix(in srgb, var(--accent-strong) 22%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .target .muted {
-    font-size: var(--fs-xs);
   }
 </style>

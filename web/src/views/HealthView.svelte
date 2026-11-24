@@ -1,9 +1,11 @@
 <script lang="ts">
-  import Icon, { type IconName } from '../components/Icon.svelte'
+  import Icon from '../components/Icon.svelte'
+  import Bar from '../components/cell/Bar.svelte'
   import type { Insight } from '../lib/api'
   import { openPackageSearch } from '../lib/dialogs.svelte'
   import { fleet, hostByName } from '../lib/fleet.svelte'
   import { plural } from '../lib/format'
+  import { bigText, frame } from '../lib/ascii'
   import { applyFix, checkCommitFix, health, loadInsights, updateInputFix } from '../lib/health.svelte'
   import { bySeverity, fixPlan, insightDetail, insightTitle, missingPackage, nixLines, severityLabel } from '../lib/insights'
   import { link, machineLink } from '../lib/router.svelte'
@@ -11,7 +13,8 @@
   import { copyText } from '../lib/util'
 
   const groups = $derived(bySeverity(health.insights ?? []))
-  const sevIcon: Record<Insight['severity'], IconName> = { error: 'alert', warning: 'shield', info: 'info' }
+  const sigil: Record<Insight['severity'], string> = { error: '✖', warning: '▲', info: '◆' }
+  const tone: Record<Insight['severity'], string | undefined> = { error: 'err', warning: 'warn', info: undefined }
   const affected = $derived(new Set((health.insights ?? []).flatMap((i) => i.hosts)).size)
   const jobState = (id: string) => app.jobs.find((j) => j.id === id)?.state ?? 'queued'
   let copied = $state('')
@@ -30,7 +33,7 @@
     <div class="fix">
       {#if st && !st.finished}
         <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax={st.total} aria-valuenow={st.done} aria-label="Applying {i.fix.label}">
-          <span style:width="{(st.done / st.total) * 100}%"></span>
+          <Bar v={st.done / st.total} w={18} live />
         </div>
         <p class="fix-note">Writing {st.done + 1} of {st.total} · {st.host}</p>
       {:else if st?.error}
@@ -40,18 +43,18 @@
         <p class="fix-note warn-note">Written on {plan.editable.join(', ')}, but the new evaluation still reports it: a definition in code may force the old value (mkForce).</p>
         <a class="link-small" href="#/changes">Review in Changes</a>
       {:else if st}
-        <p class="fix-note ok"><Icon name="tick" size={13} />Applied on {plan.editable.join(', ') || 'the machines'}</p>
+        <p class="fix-note ok"><Icon name="tick" /> Applied on {plan.editable.join(', ') || 'the machines'}</p>
         <a class="link-small" href="#/changes">Review and commit in Changes</a>
       {:else}
         {#if plan.steps.length}
           <button class:primary={i.severity !== 'info'} onclick={() => applyFix(i)}>
-            <Icon name="tick" size={14} />{i.fix.label}{plan.codeOnly.length || plan.noKey.length ? ` on ${plan.editable.join(', ')}` : ''}
+            <Icon name="tick" /> {i.fix.label}{plan.codeOnly.length || plan.noKey.length ? ` on ${plan.editable.join(', ')}` : ''}
           </button>
         {:else if plan.codeOnly.length}
-          <p class="fix-note unavailable"><Icon name="code" size={13} />{i.fix.label}: change it in code, {plan.codeOnly.join(', ')} {plan.codeOnly.length === 1 ? 'is' : 'are'} Code only</p>
+          <p class="fix-note unavailable"><Icon name="code" /> {i.fix.label}: change it in code, {plan.codeOnly.join(', ')} {plan.codeOnly.length === 1 ? 'is' : 'are'} Code only</p>
         {/if}
         {#each plan.noKey as h (h)}
-          <p class="fix-note unavailable"><Icon name="key" size={13} />Not on {h}: no user there has an SSH key, so this would lock everyone out. <a href={machineLink(h, 'users')}>Add a key in Users</a> first.</p>
+          <p class="fix-note unavailable"><Icon name="key" /> Not on {h}: no user there has an SSH key, so this would lock everyone out. <a href={machineLink(h, 'users')}>Add a key in Users</a> first.</p>
         {/each}
       {/if}
     </div>
@@ -59,29 +62,29 @@
     {@const name = i.fix.updateInput}
     <div class="fix">
       {#if st?.job && !st.finished}
-        <button disabled><span class="spinner" aria-hidden="true"></span>Updating {name}…</button>
-        <button class="link-small" onclick={() => showJob(st.job, 'update')}>Show the log</button>
+        <button class="is-busy" disabled><span class="spinner" aria-hidden="true"></span>Updating {name}…</button>
+        <button class="link link-small" onclick={() => showJob(st.job, 'update')}>Show the log</button>
       {:else if st?.error}
         <p class="fix-note bad" role="alert">{st.error}</p>
-        <button class="link-small" onclick={() => showJob(st.job, 'update')}>Show the log</button>
+        <button class="link link-small" onclick={() => showJob(st.job, 'update')}>Show the log</button>
       {:else if st?.job}
-        <p class="fix-note ok"><Icon name="tick" size={13} />{name} updated ({jobState(st.job)})</p>
+        <p class="fix-note ok"><Icon name="tick" /> {name} updated ({jobState(st.job)})</p>
         <a class="link-small" href={link('inputs')}>See what changed</a>
       {:else}
-        <button class:primary={i.severity !== 'info'} onclick={() => updateInputFix(i)}><Icon name="refresh" size={14} />{i.fix.label}</button>
+        <button class:primary={i.severity !== 'info'} onclick={() => updateInputFix(i)}><Icon name="refresh" /> {i.fix.label}</button>
       {/if}
     </div>
   {:else if i.fix?.check}
     {@const short = i.fix.check.slice(0, 7)}
     <div class="fix">
       {#if st?.job && !st.finished}
-        <button disabled><span class="spinner" aria-hidden="true"></span>Checking {short}…</button>
-        <button class="link-small" onclick={() => showJob(st.job)}>Show the log</button>
+        <button class="is-busy" disabled><span class="spinner" aria-hidden="true"></span>Checking {short}…</button>
+        <button class="link link-small" onclick={() => showJob(st.job)}>Show the log</button>
       {:else if st?.error}
         <p class="fix-note bad" role="alert">{st.error}</p>
-        <button class="link-small" onclick={() => showJob(st.job)}>Show the log</button>
+        <button class="link link-small" onclick={() => showJob(st.job)}>Show the log</button>
       {:else}
-        <button class:primary={i.severity !== 'info'} onclick={() => checkCommitFix(i)}><Icon name="play" size={14} />{i.fix.label}</button>
+        <button class:primary={i.severity !== 'info'} onclick={() => checkCommitFix(i)}><Icon name="play" /> {i.fix.label}</button>
         {#if i.link}<a class="link-small" href={i.link}>Show the last check's log</a>{/if}
       {/if}
     </div>
@@ -92,7 +95,7 @@
     {@const h = hostByName(i.hosts[0])}
     <div class="fix">
       {#if h?.managedFile}
-        <button onclick={() => openPackageSearch(pkg, [h.name])}><Icon name="plus" size={14} />Add {pkg} to {h.name}…</button>
+        <button onclick={() => openPackageSearch(pkg, [h.name])}><Icon name="plus" /> Add {pkg} to {h.name}…</button>
       {:else}
         <p class="fix-note">{i.hosts[0]} is Code only: add {pkg} in its configuration.</p>
       {/if}
@@ -107,32 +110,36 @@
 <div class="page">
   <div class="page-inner">
     <div class="page-head">
-      <h1>Health</h1>
-      <span class="sub">
-        {#if health.insights}
-          {health.insights.length ? `${plural(health.insights.length, 'finding')}${affected ? ` on ${plural(affected, 'machine')}` : ''}, from the last evaluation` : 'From the last evaluation'}
-        {:else}
-          Security and upkeep checks of every machine
-        {/if}
-      </span>
+      <div>
+        <h1 class="big" aria-label="Health" use:bigText={'Health'}></h1>
+        <p class="sub">
+          {#if health.insights}
+            {health.insights.length ? `${plural(health.insights.length, 'finding')}${affected ? ` on ${plural(affected, 'machine')}` : ''}, from the last evaluation` : 'From the last evaluation'}
+          {:else}
+            Security and upkeep checks of every machine
+          {/if}
+        </p>
+      </div>
       <span class="spacer"></span>
-      {#if health.computing || fleet.computing}<span class="badge busy"><span class="dot busy"></span>Evaluating…</span>{/if}
-      <button class="ghost" onclick={loadInsights} disabled={health.computing} title="Ask for the findings again"><Icon name="refresh" size={14} />Check again</button>
+      <div class="tools">
+        {#if health.computing || fleet.computing}<span class="badge busy">Evaluating…</span>{/if}
+        <button onclick={loadInsights} disabled={health.computing} title="Ask for the findings again"><Icon name="refresh" /> Check again</button>
+      </div>
     </div>
 
     {#if health.error && !health.insights}
       <div class="empty-state" role="alert">
         <h2>Cannot check the fleet</h2>
         <pre>{health.error}</pre>
-        <div class="row"><button class="primary" onclick={loadInsights}><Icon name="refresh" size={14} />Try again</button></div>
+        <div class="row"><button class="primary" onclick={loadInsights}><Icon name="refresh" /> Try again</button></div>
       </div>
     {:else if !health.insights}
       <div class="list" aria-hidden="true">
-        {#each [0, 1, 2] as k (k)}<div class="finding skel-row"><span class="skel" style:width="34%"></span><span class="skel" style:width="62%"></span></div>{/each}
+        {#each [0, 1, 2] as k (k)}<div class="finding skel-row" use:frame={'dash'}><span class="skel" style:width="34ch"></span><span class="skel" style:width="62ch"></span></div>{/each}
       </div>
     {:else if !health.insights.length}
-      <div class="all-clear">
-        <span class="ok-mark"><Icon name="tick" size={20} /></span>
+      <div class="all-clear" data-tone="ok" use:frame>
+        <span class="ok-mark"><Icon name="tick" /></span>
         <div>
           <h2>Nothing to fix</h2>
           <p class="muted">Every machine evaluates, keeps its firewall on, accepts SSH keys only, collects garbage, and the flake inputs are recent.</p>
@@ -141,14 +148,13 @@
     {:else}
       {#each groups as g (g.severity)}
         <section class="group" aria-labelledby="sev-{g.severity}">
-          <h2 id="sev-{g.severity}" class="g-title sev-{g.severity}"><span class="dot"></span>{severityLabel[g.severity]}<span class="n num">{g.items.length}</span></h2>
+          <h2 id="sev-{g.severity}" class="g-title sev-{g.severity}">{severityLabel[g.severity]}<span class="n num">{g.items.length}</span></h2>
           <ul class="list">
             {#each g.items as i (i.id)}
               {@const plan = fixPlan(i, fleet.model?.hosts ?? [])}
-              <li class="finding sev-{i.severity}">
-                <span class="sev-ico" aria-hidden="true"><Icon name={sevIcon[i.severity]} size={16} /></span>
+              <li class="finding sev-{i.severity}" data-tone={tone[i.severity]} use:frame={{ title: `${sigil[i.severity]} ${insightTitle(i)}` }}>
                 <div class="main">
-                  <h3>{insightTitle(i)}</h3>
+                  <h3 class="sr-only">{insightTitle(i)}</h3>
                   <p class="detail">{insightDetail(i)}</p>
                   <div class="chips">
                     {#each i.hosts as h (h)}
@@ -168,7 +174,7 @@
                       <p class="muted small">Turn on editing on the machine page so fixes apply here, or add this to {plan.codeOnly.length === 1 ? `hosts/${plan.codeOnly[0]}/default.nix` : 'each machine’s configuration'}:</p>
                       <div class="code-row">
                         <pre>{nixLines(i)}</pre>
-                        <button class="icon" aria-label="Copy the Nix lines" title={copied === i.id ? 'Copied' : 'Copy'} onclick={() => copy(i)}><Icon name={copied === i.id ? 'tick' : 'copy'} size={14} /></button>
+                        <button class="icon" aria-label="Copy the Nix lines" title={copied === i.id ? 'Copied' : 'Copy'} onclick={() => copy(i)}><Icon name={copied === i.id ? 'tick' : 'copy'} /></button>
                       </div>
                     </details>
                   {/if}
@@ -184,24 +190,17 @@
 </div>
 
 <style>
-  .page-inner {
-    max-width: 1080px;
-  }
-  .group {
-    margin-top: var(--s5);
+  .group + .group {
+    margin-top: var(--lh);
   }
   .g-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: var(--s2);
-    color: var(--fg);
-    font-size: var(--fs-md);
-    font-weight: 600;
+    margin-bottom: var(--lh);
+    color: var(--c);
   }
   .g-title .n {
+    margin-left: 1ch;
     color: var(--fg-muted);
-    font-weight: 500;
+    font-weight: 400;
   }
   .sev-error {
     --c: var(--red);
@@ -210,107 +209,59 @@
     --c: var(--yellow);
   }
   .sev-info {
-    --c: var(--accent);
+    --c: var(--blue);
   }
   .list {
     display: grid;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
+    gap: var(--lh);
   }
+  /* A finding is a card: title on the frame line, the fix at the right of its last row. */
   .finding {
     display: grid;
-    grid-template-columns: 28px 1fr minmax(200px, auto);
-    gap: 4px 14px;
-    align-items: start;
-    padding: 14px 16px;
-    transition: background var(--t) var(--ease);
-  }
-  .finding:hover {
-    background: color-mix(in srgb, var(--c, var(--accent)) 4%, transparent);
-  }
-  .finding + .finding {
-    border-top: 1px solid var(--border);
-  }
-  .sev-ico {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    color: var(--c);
-    background: color-mix(in srgb, var(--c) 13%, transparent);
-    border-radius: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0 3ch;
+    align-items: end;
   }
   .main {
     display: grid;
-    gap: 6px;
     min-width: 0;
   }
-  h3 {
-    padding-top: 4px;
-    font-size: var(--fs-md);
-  }
   .detail {
-    max-width: 72ch;
-    color: var(--fg-muted);
-    line-height: 1.5;
-  }
-  .chips {
-    align-items: center;
-    margin-top: 2px;
-  }
-  a.chip {
-    text-decoration: none;
+    max-width: 96ch;
   }
   .host-chip {
-    --c: var(--fg-muted);
     color: var(--fg);
-    text-decoration: none;
-  }
-  .host-chip:hover {
-    color: var(--fg-strong);
-    border-color: var(--line-strong);
   }
   .host-chip .dot {
-    width: 6px;
-    height: 6px;
+    margin-right: 1ch;
+  }
+  .host-chip:hover .dot {
+    --c: var(--on-accent);
   }
   .tag {
-    margin-left: 2px;
+    margin-left: 1ch;
     color: var(--fg-faint);
-    font-size: var(--fs-xs);
+  }
+  .tag::before {
+    content: 'λ ';
+  }
+  .host-chip:hover .tag {
+    color: inherit;
   }
   .fix {
     display: grid;
     justify-items: end;
-    gap: 6px;
-    min-width: 200px;
-    max-width: 280px;
+    min-width: 24ch;
+    max-width: 40ch;
     text-align: right;
   }
   .fix-note {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.45;
   }
   .fix-note.unavailable {
-    align-items: flex-start;
-    max-width: 240px;
     text-align: left;
   }
-  .fix-note.unavailable :global(svg) {
-    flex: none;
-    margin-top: 3px;
-  }
   .fix-note.warn-note {
-    max-width: 260px;
     color: var(--yellow);
   }
   .fix-note.ok {
@@ -319,111 +270,51 @@
   .fix-note.bad {
     color: var(--red);
   }
-  .link-small {
-    height: auto;
-    padding: 0;
-    color: var(--accent);
-    font-size: var(--fs-sm);
-    font-weight: 400;
-    background: none;
-    border: 0;
-  }
-  button.link-small:hover:not(:disabled) {
-    text-decoration: underline;
-    background: none;
-  }
-  .progress {
-    width: 200px;
-    height: 4px;
-    overflow: hidden;
-    background: var(--bg-active);
-    border-radius: 2px;
-  }
-  .progress span {
-    position: relative;
-    display: block;
-    height: 100%;
-    overflow: hidden;
-    background: var(--accent);
-    transition: width 360ms var(--ease);
-  }
-  .progress span::after {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg-raised) 55%, transparent), transparent);
-    animation: sheen 1.4s var(--ease) infinite;
-    content: '';
-  }
-  .by-hand {
-    margin-top: 2px;
-    font-size: var(--fs-sm);
+  .fix-note.bad::before {
+    content: '✖ ';
   }
   .by-hand summary {
     width: fit-content;
     color: var(--fg-muted);
-    cursor: pointer;
   }
   .by-hand summary:hover {
     color: var(--fg);
+    background: var(--bg-hover);
   }
   .by-hand p {
-    margin: 8px 0 6px;
+    margin: var(--lh) 0;
   }
   .code-row {
     display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    max-width: 640px;
+    gap: 1ch;
+    max-width: 80ch;
   }
   .code-row pre {
     flex: 1;
-    margin: 0;
-    padding: 8px 10px;
+    padding: 0 1ch;
     overflow: auto;
-    color: var(--fg);
-    font: 12px/1.55 var(--mono);
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    background: var(--bg-input);
   }
   .skel-row {
-    display: grid;
-    gap: 10px;
-    grid-template-columns: 1fr;
-    padding: 18px 16px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .all-clear {
     display: flex;
-    gap: 14px;
-    align-items: flex-start;
-    max-width: 640px;
-    margin-top: var(--s5);
-    padding: var(--s4) var(--s5);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
+    gap: 2ch;
+    max-width: 80ch;
+    margin-top: calc(var(--lh) * 2);
   }
   .all-clear h2 {
-    margin-bottom: 4px;
-    font-size: var(--fs-lg);
+    margin-bottom: var(--lh);
   }
   .ok-mark {
-    display: grid;
-    flex: none;
-    place-items: center;
-    width: 36px;
-    height: 36px;
     color: var(--green);
-    background: color-mix(in srgb, var(--green) 13%, transparent);
-    border-radius: 10px;
   }
   @media (max-width: 900px) {
     .finding {
-      grid-template-columns: 28px 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
     .fix {
-      grid-column: 2;
       justify-items: start;
       text-align: left;
     }

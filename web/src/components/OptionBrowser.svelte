@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type OptionInfo } from '../lib/api'
+  import { frame } from '../lib/ascii'
   import { fleet, hostByName, loadManaged, managedValue, searchIndexed, setOption } from '../lib/fleet.svelte'
   import { fillPath, matchOption, optionSegments } from '../lib/options'
   import { managedOptions, showValue } from '../lib/values'
@@ -161,12 +162,14 @@
     const [group, ...rest] = path.slice(0, -1)
     return managedValue(host, path) === true || !!hostByName(host)?.features.some((f) => f.group === group && f.name === rest.join('.'))
   }
+  // Side by side the list is a framed pane; stacked in a drawer, the drawer's frame holds it.
+  const pane = (node: HTMLElement) => (stacked ? undefined : frame(node))
 </script>
 
 <div class="ob" class:stacked class:has-form={!!picked}>
-  <div class="list-pane">
+  <div class="list-pane" use:pane>
     <div class="search">
-      <span class="s-ico"><Icon name="search" size={14} /></span>
+      <b class="prompt" aria-hidden="true">λ ›</b>
       <input
         type="search"
         placeholder={enable ? 'Search services and programs, e.g. jellyfin' : 'Search options, e.g. services.openssh'}
@@ -183,14 +186,14 @@
       {:else if indexJob}
         <div class="pad indexing" role="status">
           <p><span class="dot busy"></span> <strong>Indexing the options of {host}…</strong> This reads every option of the machine once; with real Nix it takes a minute or two.</p>
-          <div class="log">{#key indexJob}<JobLog jobId={indexJob} compact />{/key}</div>
+          <div class="log" use:frame={'square'}>{#key indexJob}<JobLog jobId={indexJob} compact />{/key}</div>
         </div>
       {:else if loading && !results}
-        <div class="pad skels">{#each [0, 1, 2, 3, 4] as i (i)}<span class="skel" style:width="{40 + ((i * 17) % 50)}%"></span>{/each}</div>
+        <div class="pad skels">{#each [0, 1, 2, 3, 4] as i (i)}<span class="skel" style:width="{16 + ((i * 7) % 20)}ch"></span>{/each}</div>
       {:else if results === null && enable}
         <div class="pad landing">
           <p class="muted">Search the services and programs {host} can turn on, by name or by what they do.</p>
-          <div class="chips">{#each suggestions as q (q)}<button class="chip" onclick={() => (query = q)}>{q}</button>{/each}</div>
+          <div class="chips">{#each suggestions as q (q)}<button class="chip g-services" onclick={() => (query = q)}>{q}</button>{/each}</div>
         </div>
       {:else if results === null}
         <div class="landing">
@@ -200,7 +203,7 @@
               <ul>
                 {#each setHere as o (o.name)}
                   <li class:sel={selected === o.name}>
-                    <button class="o-row" onclick={() => (selected = o.name)}>
+                    <button class="o-row bare" onclick={() => (selected = o.name)}>
                       <span class="o-name mono">{o.name}</span>
                       <span class="o-type mono">{showValue(o.value)}</span>
                     </button>
@@ -214,7 +217,7 @@
             <ul>
               {#each popular as name (name)}
                 <li class:sel={selected === name}>
-                  <button class="o-row" onclick={() => (selected = name)}><span class="o-name mono">{name}</span></button>
+                  <button class="o-row bare" onclick={() => (selected = name)}><span class="o-name mono">{name}</span></button>
                 </li>
               {/each}
             </ul>
@@ -224,7 +227,7 @@
             <ul class="prefixes">
               {#each prefixes as [p, note] (p)}
                 <li>
-                  <button class="o-row" onclick={() => (query = p + '.')}>
+                  <button class="o-row bare" onclick={() => (query = p + '.')}>
                     <span class="o-name mono">{p}.</span>
                     <span class="o-type">{note}</span>
                   </button>
@@ -260,7 +263,7 @@
             <ul>
               {#each opts as o (o.name)}
                 <li class:sel={picked?.name === o.name}>
-                  <button class="o-row" aria-current={picked?.name === o.name} onclick={() => (selected = o.name)}>
+                  <button class="o-row bare" aria-current={picked?.name === o.name} onclick={() => (selected = o.name)}>
                     <span class="o-line"><span class="o-name mono">{rest(o.name, group)}</span>{#if isSetHere(o)}<span class="mark here">Set here</span>{:else if o.name.endsWith('.enable') && isOn(o)}<span class="mark">On</span>{/if}</span>
                     <span class="o-type">{o.type}</span>
                   </button>
@@ -275,16 +278,16 @@
   {#if !enable}
     <div class="form-pane">
       {#if picked}
-        {#if stacked}<button class="ghost back" onclick={() => (selected = '')}><Icon name="left" size={14} />Back to results</button>{/if}
+        {#if stacked}<button class="ghost back" onclick={() => (selected = '')}><Icon name="left" /> Back to results</button>{/if}
         {#key host + picked.name + pickedNames.join('\0')}<OptionForm {host} option={picked} initialNames={pickedNames} />{/key}
       {:else if missing}
-        <div class="empty-form muted" role="status">
-          <Icon name="search" size={22} />
+        <div class="empty-form muted" role="status" use:frame={'dash'}>
+          <Icon name="search" />
           <p>{host} has no option called <span class="mono">{missing}</span>. A module it does not import may declare it.</p>
         </div>
       {:else}
-        <div class="empty-form muted">
-          <Icon name="sliders" size={22} />
+        <div class="empty-form muted" use:frame={'dash'}>
+          <Icon name="sliders" />
           <p>Pick an option to read its documentation and set it on {host}.</p>
         </div>
       {/if}
@@ -295,15 +298,13 @@
 <style>
   .ob {
     display: grid;
-    grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+    grid-template-columns: 50ch minmax(0, 1fr);
+    gap: 0 2ch;
     height: 100%;
     min-height: 0;
   }
   .ob.stacked {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .flat {
-    padding-top: 6px;
   }
   .ob.stacked.has-form .list-pane,
   .ob.stacked:not(.has-form) .form-pane {
@@ -313,141 +314,134 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    border-right: 1px solid var(--border);
-  }
-  .stacked .list-pane {
-    border-right: 0;
   }
   .search {
-    position: relative;
-    padding: 12px;
-    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex: none;
+    gap: 1ch;
+    margin-bottom: var(--lh);
   }
-  .s-ico {
-    position: absolute;
-    top: 20px;
-    left: 22px;
-    color: var(--fg-muted);
-  }
-  .search input {
-    padding-left: 30px;
+  .search .prompt {
+    flex: none;
+    white-space: nowrap;
   }
   .results {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding-bottom: 12px;
   }
   .pad {
-    padding: 14px;
+    padding: 0 1ch;
   }
   .skels {
     display: grid;
-    gap: 14px;
+    gap: var(--lh);
   }
   .indexing {
     display: grid;
-    gap: 10px;
-    line-height: 1.55;
+    gap: var(--lh);
   }
   .log {
     display: flex;
     flex-direction: column;
-    height: 160px;
+    height: calc(var(--lh) * 10);
     overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+  }
+  section + section {
+    margin-top: var(--lh);
   }
   h4 {
     position: sticky;
     top: 0;
     z-index: 1;
-    padding: 10px 14px 4px;
+    padding: 0 1ch;
     color: var(--fg-muted);
-    font-size: 11.5px;
-    font-weight: 500;
-    background: var(--bg-side);
+    font-weight: 400;
+    background: var(--bg);
   }
-  ul {
-    margin: 0;
-    padding: 0 6px;
-    list-style: none;
+  /* In a drawer the sticky heading covers rows in the drawer's colour. */
+  .stacked h4 {
+    background: var(--bg-raised);
   }
+  h4 .num {
+    margin-left: 1ch;
+    color: var(--fg-strong);
+    font-weight: 700;
+  }
+  /* Rows fill under the pointer; the open option is reverse video. */
+  /* The name keeps its width (wrapping only when it alone is too long); the type gets what is left. */
   .o-row {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
+    gap: 2ch;
     width: 100%;
-    min-width: 0;
-    overflow: hidden;
     height: auto;
-    padding: 6px 8px;
+    padding: 0 1ch;
+    color: var(--fg);
     font-weight: 400;
     text-align: left;
-    background: none;
-    border: 0;
+    white-space: normal;
   }
   .o-row:hover:not(:disabled) {
+    color: var(--fg);
     background: var(--bg-hover);
   }
   .sel .o-row,
   .sel .o-row:hover:not(:disabled) {
-    background: var(--bg-active);
+    color: var(--on-accent);
+    font-weight: 700;
+    background: var(--accent);
+  }
+  .o-row:focus-visible :is(.o-name, .o-type, .mark),
+  .sel .o-row :is(.o-name, .o-type, .mark) {
+    color: inherit;
   }
   .o-name {
-    color: var(--fg-strong);
-    font-size: 12.5px;
+    color: var(--accent);
     overflow-wrap: anywhere;
   }
   .o-line {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
-    max-width: 100%;
+    flex: 0 1 auto;
+    gap: 2ch;
+    min-width: 0;
   }
   .mark {
     flex: none;
-    padding: 0 5px;
-    color: var(--fg-muted);
-    font-size: 10.5px;
-    line-height: 16px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
+    color: var(--green);
   }
-  .mark.here {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  .mark::before {
+    content: '● ';
+  }
+  .mark.here::before {
+    content: '✎ ';
   }
   .landing {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
   }
   .landing.pad {
-    gap: 12px;
-    line-height: 1.5;
+    gap: var(--lh);
   }
-  h4 .num {
-    margin-left: 4px;
-    color: var(--fg-faint);
+  .o-row .o-type {
+    flex: 1 1 0;
   }
   .o-type,
   .o-desc {
     overflow: hidden;
+    min-width: 0;
     max-width: 100%;
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .flat > li + li {
+    margin-top: var(--lh);
+  }
   .en-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 8px;
-    border-radius: var(--r);
+    align-items: baseline;
+    gap: 2ch;
+    padding: 0 1ch;
   }
   .en-row:hover {
     background: var(--bg-hover);
@@ -456,26 +450,24 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 2px;
     min-width: 0;
-  }
-  .o-desc {
-    font-size: var(--fs-sm);
   }
   .form-pane {
     min-width: 0;
-    padding: 18px 22px 28px;
     overflow: auto;
   }
   .back {
-    margin: -6px 0 10px -8px;
+    margin-bottom: var(--lh);
   }
   .empty-form {
     display: grid;
     justify-items: center;
-    gap: 10px;
-    max-width: 280px;
-    margin: 18vh auto 0;
+    gap: var(--lh);
+    max-width: 40ch;
+    margin: calc(var(--lh) * 8) auto 0;
     text-align: center;
+  }
+  .empty-form :global(.ic) {
+    color: var(--accent);
   }
 </style>
