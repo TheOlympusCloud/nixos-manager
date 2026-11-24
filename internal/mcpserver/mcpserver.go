@@ -315,7 +315,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		m, _, _ := svc.Jobs.Model(ctx, "working") // the machines and their comin branches, when an evaluation is at hand
 		return svc.Deploys.Overview(ctx, m, time.Now())
 	})
-	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
+	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones, where home:<name> is a standalone home and its home-manager options), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
 		Names []string `json:"names"`
 		Hosts []string `json:"hosts,omitempty"`
 	}) (map[string][]core.OptionValues, error) {
@@ -361,8 +361,8 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		})
 		return map[string][]core.PackageResult{"results": res}, err
 	})
-	tool(s, "search_options", "Search the documented NixOS options of a machine (name, type, description, default, example). A prefix such as services.openssh lists that module's options, enable first.", func(ctx context.Context, in struct {
-		Host  string `json:"host"`
+	tool(s, "search_options", "Search the documented NixOS options of a machine (name, type, description, default, example), or with host home:<name> the home-manager options of a standalone home (homeConfigurations.<name>). A prefix such as services.openssh lists that module's options, enable first.", func(ctx context.Context, in struct {
+		Host  string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or home:<name> for a standalone home"`
 		Query string `json:"query"`
 		Limit int    `json:"limit,omitempty"`
 	}) (map[string][]core.OptionDoc, error) {
@@ -373,11 +373,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	})
 
 	type hostPackages struct {
-		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
+		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		Packages []string `json:"packages" jsonschema:"nixpkgs attribute names, e.g. htop or python3Packages.requests"`
 	}
 	type hostPath struct {
-		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
+		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		Path []string `json:"path" jsonschema:"option path as separate parts, e.g. [\"services\", \"openssh\", \"enable\"]"`
 	}
 	tool(s, "add_packages", "Install nixpkgs packages on a machine, through its managed.json (hosts/<host>/managed.json).", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
@@ -387,7 +387,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		return svc.RemovePackages(in.Host, in.Packages)
 	})
 	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. With host *, for every machine: a name a machine excludes takes a shared package out of it, a shared exclusion never takes out what either file adds, and a user's shared home packages apply where that machine's managed.json has the user's home. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
-		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		core.PackageEdit
 	}) (core.ManagedView, error) {
 		return svc.EditPackages(in.Host, in.PackageEdit)
@@ -418,14 +418,15 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		r, err := svc.Copy(in.Host, in.CopyRequest)
 		return copyOut{r}, err
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 5 needs for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 5 needs for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. With home, write modules/managed-home.nix instead, which applies a standalone home's homes/<name>/managed.json (host home:<name>; packages, removed packages and settings, plus custom.nix and files/<path> linked at ~/<path> next to it) once the home's modules in flake.nix have (import ./modules/managed-home.nix ./homes/<name>/managed.json), or (./homes + \"/<name>/managed.json\") for a name a Nix path cannot hold such as pablo@laptop; fleet_overview's homes show managedFile once it does. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
+		Home     bool   `json:"home,omitempty" jsonschema:"write modules/managed-home.nix, for standalone homes"`
 	}) (map[string]string, error) {
-		h, err := svc.UpdateManagedModule(in.BaseHash)
+		h, err := svc.UpdateManagedModule(in.BaseHash, in.Home)
 		return map[string]string{"hash": h}, err
 	})
 	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types.", func(ctx context.Context, in struct {
-		Host  string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
+		Host  string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
 		Path  []string `json:"path"`
 		Value any      `json:"value" jsonschema:"the JSON value: boolean, number, string, list or object"`
 	}) (core.ManagedView, error) {

@@ -16,6 +16,10 @@
   and connects the machines to nixos-manager: deployment reports, its binary cache and
   secrets (`secrets.nix`).
 - `home/`: home-manager configurations for users.
+- `homes/<name>/`: what nixos-manager sets for a standalone home-manager configuration
+  (`homeConfigurations.<name>`, for a machine that is not NixOS), applied by
+  `modules/managed-home.nix` once the home's modules load it:
+  `(import ./modules/managed-home.nix ./homes/<name>/managed.json)`.
 - `.forgejo/workflows/check.yml`: with Forgejo Actions, a runner checks every
   push to a branch (`nix flake check` and a build of every machine). nixos-manager's push
   webhook checks pushes on its own server too, so this file is optional.

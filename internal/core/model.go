@@ -165,7 +165,13 @@ type Home struct {
 	Name     string   `json:"name"`
 	Packages []string `json:"packages"`
 	Programs []string `json:"programs"`
-	Error    string   `json:"error,omitempty"`
+	Files    []string `json:"files"` // what it links into ~, relative to it
+	// ManagedFile is the managed.json it loads through modules/managed-home.nix
+	// (homes/<name>/managed.json, edited as HomePrefix+name), else nil: Code only.
+	ManagedFile *string `json:"managedFile"`
+	// ManagedPackages maps each attribute in managed.json to its package name.
+	ManagedPackages map[string]string `json:"managedPackages,omitempty"`
+	Error           string            `json:"error,omitempty"`
 }
 
 // Input is a direct flake input, as locked in flake.lock.

@@ -251,8 +251,9 @@ func (s *Server) apiMux() *http.ServeMux {
 	}))
 	api.HandleFunc("POST /api/managed-module", post(func(r *http.Request, in struct {
 		BaseHash string `json:"base_hash"`
+		Home     bool   // modules/managed-home.nix, for standalone homes
 	}) (any, error) {
-		hash, err := s.Svc.UpdateManagedModule(in.BaseHash)
+		hash, err := s.Svc.UpdateManagedModule(in.BaseHash, in.Home)
 		return map[string]string{"hash": hash}, err
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/settings", post(func(r *http.Request, in struct {

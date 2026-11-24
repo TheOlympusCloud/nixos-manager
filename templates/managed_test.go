@@ -209,3 +209,36 @@ func TestManagedHomeSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A standalone home applies its own managed.json through modules/managed-home.nix:
+// packages it adds, names it takes out of what hand-written Nix adds, its settings
+// over hand-written values, and custom.nix and files/ next to it.
+func TestManagedStandaloneHome(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+		"eval", "--impure", "--json", "--file", "testdata/managed-standalone-home.nix").Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("nix eval: %v\n%s", err, ee.Stderr)
+		}
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"packages":        []any{"hello", "jq"},
+		"sessionVariable": "managed",
+		"custom":          "custom",
+		"file":            "linked from files/\n",
+		"managedFile":     true,
+		"packageNames":    map[string]any{"jq": "jq"},
+		"activation":      true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+}

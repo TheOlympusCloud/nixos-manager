@@ -329,16 +329,72 @@ func TestManagedSharedByEveryMachine(t *testing.T) {
 
 func TestUpdateManagedModule(t *testing.T) {
 	s := newService(t)
-	must[string](t)(s.UpdateManagedModule("")) // a repository without one gets it
+	must[string](t)(s.UpdateManagedModule("", false)) // a repository without one gets it
 	write(t, s.Repo, "modules/managed.nix", "# an older one\nfile: { ... }: { }\n")
-	_, err := s.UpdateManagedModule("")
+	_, err := s.UpdateManagedModule("", false)
 	isErr(t, err, ErrExists)
-	_, err = s.UpdateManagedModule("stale")
+	_, err = s.UpdateManagedModule("stale", false)
 	isErr(t, err, ErrConflict)
 	_, cur, _ := s.Read("modules/managed.nix")
-	must[string](t)(s.UpdateManagedModule(cur))
+	must[string](t)(s.UpdateManagedModule(cur, false))
 	want, _ := fs.ReadFile(templates.Fleet, "modules/managed.nix")
 	if c, _, _ := s.Read("modules/managed.nix"); c != string(want) || !strings.Contains(c, "nixosManager.version") {
 		t.Fatalf("not the template:\n%s", c)
+	}
+}
+
+// A standalone home is edited as home:<name>, in homes/<name>/managed.json: its own
+// packages, removed packages and home-manager options at the top, as a machine's.
+func TestManagedStandaloneHome(t *testing.T) {
+	s := newService(t)
+	const h = HomePrefix + "pablo@laptop"
+	v := must[ManagedView](t)(s.EditPackages(h, PackageEdit{Add: []string{"ripgrep"}, Exclude: []string{"nano"}}))
+	if v.Path != "homes/pablo@laptop/managed.json" || !reflect.DeepEqual(v.Packages, []string{"ripgrep"}) || !reflect.DeepEqual(v.RemovedPackages, []string{"nano"}) {
+		t.Fatalf("view %+v", v)
+	}
+	must[ManagedView](t)(s.SetOption(h, []string{"programs", "git", "enable"}, true, nil))
+	content, _, _ := s.Read("homes/pablo@laptop/managed.json")
+	want := "{\n  \"packages\": [\n    \"ripgrep\"\n  ],\n  \"removedPackages\": [\n    \"nano\"\n  ],\n  \"settings\": {\n    \"programs\": {\n      \"git\": {\n        \"enable\": true\n      }\n    }\n  }\n}\n"
+	if content != want {
+		t.Fatalf("file content\n%s\nwant\n%s", content, want)
+	}
+
+	// Users, secrets and package overrides are a NixOS machine's.
+	_, err := s.EditPackages(h, PackageEdit{User: "pablo", Add: []string{"jq"}})
+	isErr(t, err, ErrInvalid)
+	_, err = s.SetHome(h, HomeEdit{User: "pablo", Enable: true})
+	isErr(t, err, ErrInvalid)
+	_, err = s.LinkHomeSecret(h, HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"})
+	isErr(t, err, ErrInvalid)
+	_, err = s.SetPackageOverride(h, "htop", &PackageOverride{Version: "1"}, nil)
+	isErr(t, err, ErrInvalid)
+	_, err = s.Copy("workstation", CopyRequest{Home: "pablo", To: []string{h}})
+	isErr(t, err, ErrInvalid)
+	write(t, s.Repo, "homes/pablo@laptop/managed.json", `{"packages": [], "home": {"pablo": {"packages": []}}}`)
+	_, err = s.ManagedView(h)
+	isErr(t, err, ErrInvalid)
+
+	for _, bad := range []string{HomePrefix, HomePrefix + "../x", HomePrefix + "a/b", HomePrefix + ".hidden", "pablo@laptop"} {
+		if _, err := s.ManagedView(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+		if validTarget(bad) {
+			t.Errorf("validTarget(%q)", bad)
+		}
+	}
+	if !validTarget(h) || !validTarget("workstation") {
+		t.Fatal("validTarget refuses a home or a machine")
+	}
+}
+
+func TestUpdateManagedHomeModule(t *testing.T) {
+	s := newService(t)
+	must[string](t)(s.UpdateManagedModule("", true))
+	want, _ := fs.ReadFile(templates.Fleet, "modules/managed-home.nix")
+	if c, _, _ := s.Read("modules/managed-home.nix"); c != string(want) || !strings.Contains(c, "nixosManager.managedFile") {
+		t.Fatalf("not the template:\n%s", c)
+	}
+	if _, _, err := s.Read("modules/managed.nix"); err == nil {
+		t.Fatal("managed.nix was written too")
 	}
 }

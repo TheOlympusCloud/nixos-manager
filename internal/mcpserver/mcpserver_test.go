@@ -201,6 +201,14 @@ func TestCustomisationTools(t *testing.T) {
 	if h.Hash == "" {
 		t.Fatal("no modules/managed.nix written")
 	}
+	call(t, cs, "update_managed_module", map[string]any{"home": true}, &h)
+	call(t, cs, "edit_packages", map[string]any{"host": "home:pablo@laptop", "add": []string{"jq"}}, &v)
+	if v.Path != "homes/pablo@laptop/managed.json" || v.Packages[0] != "jq" {
+		t.Fatalf("standalone home over MCP %+v", v)
+	}
+	if _, _, err := svc.Read("modules/managed-home.nix"); err != nil {
+		t.Fatalf("no modules/managed-home.nix written: %v", err)
+	}
 }
 
 func TestEditCheckCommitFlow(t *testing.T) {

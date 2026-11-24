@@ -32,6 +32,11 @@ import (
 // modules/managed.json has the same shape and applies to every machine that
 // loads managed.nix 3, below each machine's own file (see managed.nix for how
 // they merge). Every edit below takes SharedHost for it instead of a machine.
+//
+// A standalone home (homeConfigurations.<name>) has its own file,
+// homes/<name>/managed.json, which modules/managed-home.nix applies: packages,
+// removedPackages and settings, its home-manager options. Every edit below
+// takes HomePrefix+<name> for it instead of a machine.
 
 // ManagedView is a machine's managed file as the UI and MCP see it.
 type ManagedView struct {
@@ -99,13 +104,34 @@ var (
 	gitHubRepo  = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 )
 
+// A homeConfigurations name, such as pablo@laptop: a folder name in homes/.
+var homeConfigName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.@+-]{0,99}$`)
+
 // SharedHost stands for modules/managed.json where a machine name goes.
 // No machine can have this name.
 const SharedHost = "*"
 
+// HomePrefix, followed by a homeConfigurations name, stands for that standalone
+// home where a machine name goes: home:pablo@laptop. No machine name has a colon.
+const HomePrefix = "home:"
+
+// validTarget accepts a machine name or a standalone home (HomePrefix+name).
+func validTarget(t string) bool {
+	if name, ok := strings.CutPrefix(t, HomePrefix); ok {
+		return homeConfigName.MatchString(name)
+	}
+	return hostName.MatchString(t)
+}
+
 func managedPath(host string) (string, error) {
 	if host == SharedHost {
 		return "modules/managed.json", nil
+	}
+	if name, ok := strings.CutPrefix(host, HomePrefix); ok {
+		if !homeConfigName.MatchString(name) {
+			return "", errorf(ErrInvalid, "invalid home configuration name %q", name)
+		}
+		return "homes/" + name + "/managed.json", nil
 	}
 	if !hostName.MatchString(host) {
 		return "", errorf(ErrInvalid, "invalid machine name %q", host)
@@ -204,6 +230,9 @@ func strictDecode(raw, into any) error {
 // check validates what managed.nix will read, so a bad value is refused when
 // it is written (or read), not first at the next evaluation.
 func (v *ManagedView) check() error {
+	if strings.HasPrefix(v.Host, HomePrefix) && (len(v.Home) > 0 || len(v.PackageOverrides) > 0) {
+		return errorf(ErrInvalid, "a standalone home has packages, removedPackages and settings (its home-manager options); home-manager users and package overrides are for NixOS machines")
+	}
 	if err := checkPackageNames(v.RemovedPackages); err != nil {
 		return err
 	}
@@ -545,15 +574,23 @@ func (s *Service) LinkHomeSecret(host string, e HomeSecretEdit) (ManagedView, er
 
 // UpdateManagedModule writes this release's modules/managed.nix over the
 // repository's (or creates it), if it is still the version the caller saw.
-func (s *Service) UpdateManagedModule(base string) (string, error) {
-	b, err := fs.ReadFile(templates.Fleet, managedModule)
+// With home, modules/managed-home.nix, for standalone homes.
+func (s *Service) UpdateManagedModule(base string, home bool) (string, error) {
+	path := managedModule
+	if home {
+		path = managedHomeModule
+	}
+	b, err := fs.ReadFile(templates.Fleet, path)
 	if err != nil {
 		return "", err
 	}
-	return s.Write(managedModule, string(b), base)
+	return s.Write(path, string(b), base)
 }
 
-const managedModule = "modules/managed.nix"
+const (
+	managedModule     = "modules/managed.nix"
+	managedHomeModule = "modules/managed-home.nix"
+)
 
 func checkPath(path []string) error {
 	if len(path) == 0 || len(path) > 32 {

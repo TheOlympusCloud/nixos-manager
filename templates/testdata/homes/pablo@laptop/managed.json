@@ -1,0 +1,7 @@
+{
+  "packages": ["jq"],
+  "removedPackages": ["cowsay"],
+  "settings": {
+    "home": { "sessionVariables": { "NIXMGR": "managed" } }
+  }
+}

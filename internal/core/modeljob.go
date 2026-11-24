@@ -392,7 +392,7 @@ func (js *Jobs) runModel(ctx context.Context, job *Job) error {
 			if err := js.evalJSON(ctx, src, map[string]string{"host": n}, nixExpr("home.nix"), &h); err != nil {
 				h = Home{Name: n, Error: err.Error()}
 			}
-			h.Packages, h.Programs = orEmpty(h.Packages), orEmpty(h.Programs)
+			h.Packages, h.Programs, h.Files = orEmpty(h.Packages), orEmpty(h.Programs), orEmpty(h.Files)
 			homes[i] = h
 		})
 	}

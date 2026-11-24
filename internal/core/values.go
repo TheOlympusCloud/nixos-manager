@@ -83,7 +83,7 @@ func (js *Jobs) OptionValues(ctx context.Context, names, hosts []string) ([]Opti
 		}
 	}
 	for _, h := range hosts {
-		if !hostName.MatchString(h) {
+		if !validTarget(h) {
 			return nil, nil, errorf(ErrInvalid, "invalid machine name %q", h)
 		}
 	}

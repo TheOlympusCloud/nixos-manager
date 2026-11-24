@@ -812,6 +812,13 @@ func TestPackageCustomisationOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": ""}, nil); code != 409 {
 		t.Fatalf("module written over one the caller did not see: %d", code)
 	}
+	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": "", "home": true}, &mod); code != 200 || mod.Hash == "" {
+		t.Fatalf("home module: %d %+v", code, mod)
+	}
+	// A standalone home, escaped as the web client sends it.
+	if code := e.do(t, "POST", "/api/hosts/home%3Apablo%40laptop/packages", map[string]any{"add": []string{"jq"}}, &v); code != 200 || v.Path != "homes/pablo@laptop/managed.json" || v.Packages[0] != "jq" {
+		t.Fatalf("standalone home: %d %+v", code, v)
+	}
 }
 
 func TestSearchOverHTTP(t *testing.T) {

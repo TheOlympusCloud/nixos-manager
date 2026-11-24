@@ -1,1 +1,1 @@
-{"name": "pablo@laptop", "packages": ["neovim", "bat", "eza", "fzf"], "programs": ["git", "zsh"]}
+{"name": "pablo@laptop", "packages": ["neovim", "bat", "eza", "fzf"], "programs": ["git", "zsh"], "files": [".config/git/config", ".zshrc"], "managedFile": "homes/pablo@laptop/managed.json", "managedPackages": {"bat": "bat"}}

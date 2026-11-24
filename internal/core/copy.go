@@ -65,6 +65,9 @@ func (s *Service) Copy(from string, r CopyRequest) ([]CopyResult, error) {
 	if from == SharedHost {
 		return nil, errorf(ErrInvalid, "copy from a machine; every machine already gets modules/managed.json")
 	}
+	if strings.HasPrefix(from, HomePrefix) || slices.ContainsFunc(r.To, func(t string) bool { return strings.HasPrefix(t, HomePrefix) }) {
+		return nil, errorf(ErrInvalid, "copy between NixOS machines; a standalone home has no home-manager users or package overrides")
+	}
 	if len(r.To) == 0 {
 		return nil, errorf(ErrInvalid, "pick the machines to copy to")
 	}
