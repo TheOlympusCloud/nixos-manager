@@ -250,6 +250,36 @@ func TestManagedRefusesUnknownOverrideFields(t *testing.T) {
 	}
 }
 
+// SharedHost edits modules/managed.json with the same calls, and a machine's
+// own file stays untouched; home-manager is still turned on per machine.
+func TestManagedSharedByEveryMachine(t *testing.T) {
+	s := newService(t)
+	v := must[ManagedView](t)(s.ManagedView(SharedHost))
+	if v.Exists || v.Path != "modules/managed.json" || v.Host != SharedHost {
+		t.Fatalf("view of a missing shared file %+v", v)
+	}
+	edit := must[ManagedView](t)
+	edit(s.EditPackages(SharedHost, PackageEdit{Add: []string{"htop"}, Exclude: []string{"perl"}}))
+	edit(s.EditPackages(SharedHost, PackageEdit{User: "pablo", Add: []string{"ripgrep"}}))
+	edit(s.SetPackageOverride(SharedHost, "htop", &PackageOverride{Patches: []PackagePatch{{File: "patches/htop.patch"}}}, nil))
+	v = edit(s.SetOption(SharedHost, []string{"home-manager", "users", "pablo", "programs", "git", "enable"}, true, nil))
+	if !reflect.DeepEqual(v.Packages, []string{"htop"}) || !reflect.DeepEqual(v.RemovedPackages, []string{"perl"}) ||
+		!reflect.DeepEqual(v.Home["pablo"].Packages, []string{"ripgrep"}) || v.PackageOverrides["htop"].Patches[0].File != "patches/htop.patch" {
+		t.Fatalf("shared view %+v", v)
+	}
+	if c, _, err := s.Read("modules/managed.json"); err != nil || !strings.Contains(c, `"perl"`) || !strings.Contains(c, `"ripgrep"`) {
+		t.Fatalf("modules/managed.json %q %v", c, err)
+	}
+	if _, _, err := s.Read("hosts/web/managed.json"); err == nil {
+		t.Fatal("a shared edit wrote a machine's managed.json")
+	}
+	_, err := s.SetHome(SharedHost, HomeEdit{User: "pablo", Enable: true, StateVersion: "26.05"})
+	isErr(t, err, ErrInvalid)
+	// The name stands only for the shared file: no folder of that name is read or written.
+	_, err = s.ManagedView("**")
+	isErr(t, err, ErrInvalid)
+}
+
 func TestUpdateManagedModule(t *testing.T) {
 	s := newService(t)
 	must[string](t)(s.UpdateManagedModule("")) // a repository without one gets it

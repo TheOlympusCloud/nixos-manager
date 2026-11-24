@@ -297,3 +297,20 @@ func TestUncheckedCommitInsight(t *testing.T) {
 		t.Fatalf("no tip: %+v", in)
 	}
 }
+
+// managed.nix 2 ignores modules/managed.json, so it is older too; 3 is this console's.
+func TestInsightsManagedVersions(t *testing.T) {
+	m := &Model{Hosts: []Host{
+		{Name: "a", ManagedFile: managed("a"), ManagedVersion: 2, Ports: Ports{Firewall: true}},
+		{Name: "b", ManagedFile: managed("b"), ManagedVersion: 3, Ports: Ports{Firewall: true}},
+	}}
+	old := ""
+	for _, in := range Insights(m, nil, "", nil, time.Now()) {
+		if in.ID == "managed-old" {
+			old = strings.Join(in.Hosts, ",")
+		}
+	}
+	if old != "a" {
+		t.Errorf("managed-old for %q, want a", old)
+	}
+}

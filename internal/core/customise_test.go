@@ -27,7 +27,7 @@ new file mode 100755
 // fleet: NixOS's default packages removed and rebuilt, a package changed from
 // managed.json and from a raw Nix file, a machine's own custom.nix, and
 // home-manager users with packages, an option, a dotfile and a module of
-// their own. The check builds both machines, the built systems hold exactly
+// their own, and modules/managed.json for both. The check builds both machines, the built systems hold exactly
 // that, the model says so, and comin builds the same systems from the push.
 func TestCustomisedFleetWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
@@ -65,12 +65,17 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	if !strings.Contains(fileText(t, s.Repo, "hosts/ct/default.nix"), "pkgs.lua5_3") {
 		t.Fatalf("ct's default.nix did not take lua5_3:\n%s", def)
 	}
-	edit(s.EditPackages("ct", PackageEdit{Exclude: []string{"rsync", "strace"}}))
+	edit(s.EditPackages("ct", PackageEdit{Exclude: []string{"rsync", "strace", "jq"}}))
 	edit(s.EditPackages("ct", PackageEdit{Exclude: []string{"lua"}, Add: []string{"lua5_4"}}))
 	edit(s.SetPackageOverride("ct", "htop", &PackageOverride{Override: map[string]any{"withVimKeys": true}}, nil))
 	edit(s.SetOption("ct", []string{"users", "users", "anna", "isNormalUser"}, true, nil))
 	edit(s.SetHome("ct", HomeEdit{User: "anna", Enable: true, StateVersion: "26.05"}))
 	edit(s.EditPackages("ct", PackageEdit{User: "anna", Add: []string{"hello"}}))
+
+	// Every machine: jq, which ct takes out, and cowsay for pablo, whose home only
+	// example manages: ct has no pablo and must not get a home for him.
+	edit(s.EditPackages(SharedHost, PackageEdit{Add: []string{"jq"}}))
+	edit(s.EditPackages(SharedHost, PackageEdit{User: "pablo", Add: []string{"cowsay"}}))
 
 	if info := wait40(t, must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))); info.State != "passed" {
 		t.Fatalf("lock: %s", info.Output)
@@ -108,6 +113,8 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 	expect(read(ex+"/etc/nixmgr-custom") == "custom.nix", "example has its custom.nix")
 	pablo := ex + "/etc/profiles/per-user/pablo"
 	expect(exists(pablo+"/bin/hello") && !exists(pablo+"/bin/htop") && exists(pablo+"/bin/git"), "pablo has hello and git (by hand), and no htop")
+	expect(exists(ex+"/sw/bin/jq") && !exists(ct+"/sw/bin/jq"), "example has the shared jq, which ct takes out")
+	expect(exists(pablo+"/bin/cowsay") && !exists(ct+"/etc/profiles/per-user/anna/bin/cowsay"), "pablo has the shared cowsay, anna does not")
 	expect(strings.Contains(read(pablo+"/etc/profile.d/hm-session-vars.sh"), `NIXMGR_TEST="managed"`), "pablo's home has the option set by clicking")
 	expect(!exists(ct+"/sw/bin/rsync") && !exists(ct+"/sw/bin/strace") && exists(ct+"/sw/bin/perl") && exists(ct+"/sw/bin/htop"), "ct has no rsync or strace, and keeps perl and htop")
 	expect(exists(ct+"/etc/profiles/per-user/anna/bin/hello"), "anna has hello")
@@ -139,7 +146,13 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 		return HomeInfo{}
 	}
 	e, c := hosts["example"], hosts["ct"]
-	expect(e.ManagedVersion == 2 && e.HomeManager && c.ManagedVersion == 2, "the model sees managed.nix 2 and home-manager")
+	expect(e.ManagedVersion == 3 && e.HomeManager && c.ManagedVersion == 3, "the model sees managed.nix 3 and home-manager")
+	for _, p := range e.Packages {
+		if p.Name == "jq" {
+			expect(slices.Equal(p.Files, []string{"modules/managed.json"}), "the model lists example's jq from modules/managed.json: "+strings.Join(p.Files, ","))
+		}
+	}
+	expect(slices.Contains(pkgNames(e.Packages), "jq") && slices.Contains(pkgNames(c.RemovedPackages), "jq"), "the model lists jq on example and as removed on ct")
 	expect(slices.Contains(pkgNames(e.RemovedPackages), "perl") && !slices.Contains(pkgNames(e.Packages), "perl"), "the model lists perl as removed on example")
 	expect(slices.Contains(pkgNames(c.RemovedPackages), "rsync") && slices.Contains(pkgNames(c.RemovedPackages), "strace"), "the model lists rsync and strace as removed on ct")
 	p := home(e, "pablo")

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -38,5 +39,88 @@ func TestManagedSettingsKeepHandWrittenValues(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
+	}
+}
+
+// modules/managed.json joins each machine's own managed.json, which wins where
+// both set something, and a shared home reaches only machines that manage it.
+func TestManagedSharedByEveryMachine(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	dir := t.TempDir()
+	module, err := os.ReadFile("fleet/modules/managed.nix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		"modules/managed.nix":          string(module),
+		"modules/patches/nixmgr.patch": "",
+		"modules/managed.json": `{
+  "packages": ["hello", "jq"],
+  "removedPackages": ["perl", "rsync"],
+  "packageOverrides": {
+    "hello": { "overrideAttrs": { "NIXMGR_FROM": "shared" }, "patches": [{ "file": "patches/nixmgr.patch" }] },
+    "jq": { "overrideAttrs": { "NIXMGR_FROM": "shared" } }
+  },
+  "home": { "pablo": { "packages": ["cowsay"], "removedPackages": [] } },
+  "settings": {
+    "time": { "timeZone": "Europe/Madrid" },
+    "networking": { "firewall": { "allowedTCPPorts": [80] } },
+    "home-manager": { "users": { "pablo": { "home": { "sessionVariables": { "NIXMGR": "shared" } } } } }
+  }
+}`,
+		// a adds perl back, takes jq out, builds its own jq, and manages pablo's home.
+		"hosts/a/managed.json": `{
+  "packages": ["perl"],
+  "removedPackages": ["jq"],
+  "packageOverrides": { "jq": { "overrideAttrs": { "NIXMGR_FROM": "a" } } },
+  "home": { "pablo": { "packages": [], "removedPackages": [] } },
+  "settings": {
+    "networking": { "firewall": { "allowedTCPPorts": [22] } },
+    "users": { "users": { "pablo": { "isNormalUser": true } } },
+    "home-manager": { "users": { "pablo": { "home": { "stateVersion": "26.05" } } } }
+  }
+}`,
+		"hosts/b/managed.json": `{ "packages": [], "settings": {} }`,
+	} {
+		p := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+		"eval", "--impure", "--json", "--file", "testdata/managed-shared.nix", "--argstr", "dir", dir).Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("nix eval: %v\n%s", err, ee.Stderr)
+		}
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"a": map[string]any{
+			"packages": []any{"hello", "perl"}, "home": []any{"cowsay"}, "sessionVariable": "shared",
+			"helloFrom": "shared", "helloPatch": true, "jqFrom": "a",
+			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(3),
+			"helloFile": []any{"modules/managed.json"},
+		},
+		"b": map[string]any{
+			"packages": []any{"hello", "jq"}, "home": nil, "sessionVariable": nil,
+			"helloFrom": "shared", "helloPatch": true, "jqFrom": "shared",
+			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(3),
+			"helloFile": []any{"modules/managed.json"},
+		},
+	}
+	for _, m := range []string{"a", "b"} {
+		if !reflect.DeepEqual(got[m], want[m]) {
+			t.Errorf("%s: got %v\nwant %v", m, got[m], want[m])
+		}
 	}
 }

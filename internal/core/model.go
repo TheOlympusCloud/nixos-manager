@@ -40,7 +40,8 @@ type Host struct {
 	ManagedPackages map[string]string `json:"managedPackages"`
 	// ManagedVersion is what its modules/managed.nix applies: 1 knows only
 	// packages and settings; 2 adds removed packages, package overrides,
-	// home-manager users and the Nix files next to managed.json.
+	// home-manager users and the Nix files next to managed.json; 3 adds
+	// modules/managed.json, set for every machine.
 	ManagedVersion int       `json:"managedVersion"`
 	Packages       []Package `json:"packages"`
 	// RemovedPackages are defined by some module but taken out of the system by

@@ -367,11 +367,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	})
 
 	type hostPackages struct {
-		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		Packages []string `json:"packages" jsonschema:"nixpkgs attribute names, e.g. htop or python3Packages.requests"`
 	}
 	type hostPath struct {
-		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		Path []string `json:"path" jsonschema:"option path as separate parts, e.g. [\"services\", \"openssh\", \"enable\"]"`
 	}
 	tool(s, "add_packages", "Install nixpkgs packages on a machine, through its managed.json (hosts/<host>/managed.json).", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
@@ -380,14 +380,14 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	tool(s, "remove_packages", "Remove packages from a machine's managed.json. Packages added in hand-written Nix files must be edited there.", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
 		return svc.RemovePackages(in.Host, in.Packages)
 	})
-	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
-		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. With host *, for every machine: a name a machine excludes takes a shared package out of it, a shared exclusion never takes out what either file adds, and a user's shared home packages apply where that machine's managed.json has the user's home. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		core.PackageEdit
 	}) (core.ManagedView, error) {
 		return svc.EditPackages(in.Host, in.PackageEdit)
 	})
 	tool(s, "set_package_override", "Change how a package (by nixpkgs attribute) is built on a machine, for everything there that uses it: arguments for .override, attributes for .overrideAttrs, a version with its source (a URL or a GitHub repository at a revision), and patches (a URL or a file in the machine's folder). An empty hash makes run_check fail and print the right one. Without override, the package is put back as nixpkgs has it. For anything else, write hosts/<host>/packages/<attribute>.nix with write_file: { pkgs, prev, lib, ... }: pkg: <package>.", func(ctx context.Context, in struct {
-		Host     string                `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
+		Host     string                `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		Attr     string                `json:"attr" jsonschema:"nixpkgs attribute, e.g. htop"`
 		Override *core.PackageOverride `json:"override,omitempty"`
 	}) (core.ManagedView, error) {
@@ -399,14 +399,14 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	}) (core.ManagedView, error) {
 		return svc.SetHome(in.Host, in.HomeEdit)
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 2 needs for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 3 needs for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
 	}) (map[string]string, error) {
 		h, err := svc.UpdateManagedModule(in.BaseHash)
 		return map[string]string{"hash": h}, err
 	})
 	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types.", func(ctx context.Context, in struct {
-		Host  string   `json:"host"`
+		Host  string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3"`
 		Path  []string `json:"path"`
 		Value any      `json:"value" jsonschema:"the JSON value: boolean, number, string, list or object"`
 	}) (core.ManagedView, error) {

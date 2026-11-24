@@ -28,6 +28,10 @@ import (
 // modules/managed.nix in the flake turns it into NixOS configuration. The app
 // never rewrites hand-written Nix; JSON round-trips safely. Raw Nix and
 // dotfiles go in real files next to it (see managed.nix), edited as any file.
+//
+// modules/managed.json has the same shape and applies to every machine that
+// loads managed.nix 3, below each machine's own file (see managed.nix for how
+// they merge). Every edit below takes SharedHost for it instead of a machine.
 
 // ManagedView is a machine's managed file as the UI and MCP see it.
 type ManagedView struct {
@@ -90,7 +94,14 @@ var (
 	gitHubRepo  = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 )
 
+// SharedHost stands for modules/managed.json where a machine name goes.
+// No machine can have this name.
+const SharedHost = "*"
+
 func managedPath(host string) (string, error) {
+	if host == SharedHost {
+		return "modules/managed.json", nil
+	}
 	if !hostName.MatchString(host) {
 		return "", errorf(ErrInvalid, "invalid machine name %q", host)
 	}
@@ -451,6 +462,9 @@ var stateVersion = regexp.MustCompile(`^[0-9]{2}\.[0-9]{2}$`)
 func (s *Service) SetHome(host string, e HomeEdit) (ManagedView, error) {
 	if !userName.MatchString(e.User) {
 		return ManagedView{}, errorf(ErrInvalid, "invalid user name %q", e.User)
+	}
+	if host == SharedHost {
+		return ManagedView{}, errorf(ErrInvalid, "home-manager is turned on per machine; a user's packages and options for every machine apply where it is on for them")
 	}
 	if e.StateVersion != "" && (!e.Enable || !stateVersion.MatchString(e.StateVersion)) {
 		return ManagedView{}, errorf(ErrInvalid, "a state version is a release such as 26.05, given when turning home-manager on")

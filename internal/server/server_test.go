@@ -789,6 +789,13 @@ func TestPackageCustomisationOverHTTP(t *testing.T) {
 	if code := e.do(t, "POST", "/api/hosts/web/packages", map[string]any{"user": "pablo", "add": []string{"ripgrep"}}, &v); code != 200 || v.Home["pablo"].Packages[0] != "ripgrep" {
 		t.Fatalf("home package: %d %+v", code, v)
 	}
+	// * is modules/managed.json, for every machine, as the web client sends it (unescaped).
+	if code := e.do(t, "POST", "/api/hosts/*/packages", map[string]any{"exclude": []string{"perl"}}, &v); code != 200 || v.Path != "modules/managed.json" || v.RemovedPackages[0] != "perl" {
+		t.Fatalf("every machine: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/*/home", map[string]any{"user": "pablo", "enable": true}, nil); code != 400 {
+		t.Fatalf("home-manager turned on for every machine: %d", code)
+	}
 	var mod struct{ Hash string }
 	if code := e.do(t, "POST", "/api/managed-module", map[string]any{"base_hash": ""}, &mod); code != 200 || mod.Hash == "" {
 		t.Fatalf("module: %d %+v", code, mod)

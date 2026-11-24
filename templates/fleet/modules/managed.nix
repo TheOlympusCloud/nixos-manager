@@ -11,10 +11,25 @@
 #   changes that package on this machine; pkg already has managed.json's changes.
 # - home/<user>/custom.nix: a home-manager module for one user of managed.json's "home".
 # - home/<user>/files/<path>: a file linked at ~/<path> for that user (home.file).
+#
+# modules/managed.json, next to this module, has the same shape and is set for
+# every machine that loads it; where both set something, the machine's own wins:
+# - packages and removedPackages are joined. A name the machine removes takes a
+#   shared package out of it; a shared removal never takes out what either file adds.
+# - packageOverrides: the machine's entry for an attribute replaces the shared one.
+#   A shared patch file is relative to modules/.
+# - home.<user> applies where the machine's managed.json has home.<user> too (so
+#   no machine gets a home for a user it lacks), joined as the system's packages.
+# - settings apply at priority 95, below the machine's (90) but still above
+#   hand-written values; settings.home-manager.users.<user> applies as home does.
+# The files next to it (custom.nix, packages/, home/) are not read.
 file:
 { lib, pkgs, ... }:
 let
-  data = if builtins.pathExists file then lib.importJSON file else { };
+  read = f: if builtins.pathExists f then lib.importJSON f else { };
+  data = read file;
+  sharedFile = ./managed.json;
+  shared = read sharedFile;
   dir = dirOf file;
   ifExists = p: lib.optional (builtins.pathExists p) p;
   attrPath = lib.splitString ".";
@@ -22,16 +37,38 @@ let
   # message, and the fleet view still shows the rest of the machine.
   package = name: lib.attrByPath (attrPath name) (throw "managed.json: package ${name} is not in nixpkgs") pkgs;
   pname = p: p.pname or (builtins.parseDrvName p.name).name;
+  # null for a name not in nixpkgs, which fails where it is installed instead.
+  nameOf =
+    a:
+    let
+      r = builtins.tryEval (pname (package a));
+    in
+    if r.success then r.value else null;
+  # Shared attributes, less those whose package the machine's removed names take
+  # out: these are still defined, so the fleet view lists them as removed.
+  sharedFor = removedHere: builtins.filter (a: !builtins.elem (nameOf a) removedHere);
   # Removed packages go by name, whoever adds them (NixOS, an input or hand-written Nix),
   # except those added here: replacing nodejs_20 with nodejs_24 keeps nodejs_24.
   without = names: keep: builtins.filter (p: !(builtins.elem (pname p) names) || builtins.elem p keep);
   # Priority on each value, never on a whole attribute set: users.users or
   # services.openssh.settings set here must still merge with hand-written entries.
   # Lists are values, so a list set here replaces the hand-written one.
-  values = v: if builtins.isAttrs v then lib.mapAttrs (_: values) v else lib.mkOverride 90 v;
+  values = priority: v: if builtins.isAttrs v then lib.mapAttrs (_: values priority) v else lib.mkOverride priority v;
 
-  removed = data.removedPackages or [ ];
-  overrides = data.packageOverrides or { };
+  ownPackages = data.packages or [ ];
+  removed = lib.unique ((shared.removedPackages or [ ]) ++ (data.removedPackages or [ ]));
+  # What no removed name takes out.
+  added = map package (ownPackages ++ sharedFor (data.removedPackages or [ ]) (shared.packages or [ ]));
+  # attribute -> { o = override; base = the folder its patch files are in }
+  overrides =
+    lib.mapAttrs (_: o: {
+      inherit o;
+      base = dirOf sharedFile;
+    }) (shared.packageOverrides or { })
+    // lib.mapAttrs (_: o: {
+      inherit o;
+      base = dir;
+    }) (data.packageOverrides or { });
   packageDir = dir + "/packages";
   packageFiles = lib.optionalAttrs (builtins.pathExists packageDir) (
     lib.mapAttrs' (n: _: lib.nameValuePair (lib.removeSuffix ".nix" n) (packageDir + "/${n}")) (
@@ -56,9 +93,9 @@ let
         hash = hashOf s;
       };
   patch =
-    final: p:
+    final: base: p:
     if p ? file then
-      dir + "/${p.file}"
+      base + "/${p.file}"
     else
       final.fetchpatch {
         inherit (p) url;
@@ -67,7 +104,14 @@ let
   customise =
     final: prev: attr: pkg:
     let
-      o = overrides.${attr} or { };
+      inherit
+        (overrides.${attr} or {
+          o = { };
+          base = dir;
+        })
+        o
+        base
+        ;
       patches = o.patches or [ ];
       attrs =
         (o.overrideAttrs or { })
@@ -79,7 +123,7 @@ let
           overridden
         else
           overridden.overrideAttrs (
-            old: attrs // lib.optionalAttrs (patches != [ ]) { patches = (old.patches or [ ]) ++ map (patch final) patches; }
+            old: attrs // lib.optionalAttrs (patches != [ ]) { patches = (old.patches or [ ]) ++ map (patch final base) patches; }
           );
     in
     if packageFiles ? ${attr} then
@@ -108,34 +152,57 @@ let
     ) { } changed;
 
   homes = data.home or { };
+  sharedHomes = shared.home or { };
+  sharedSettings = shared.settings or { };
+  # Shared home-manager options go into the homes below, never onto a machine
+  # without the user; the rest of home-manager's settings apply as any setting.
+  sharedHomeSettings = sharedSettings.home-manager.users or { };
+  hmRest = builtins.removeAttrs (sharedSettings.home-manager or { }) [ "users" ];
+  sharedTop =
+    builtins.removeAttrs sharedSettings [ "home-manager" ]
+    // lib.optionalAttrs (hmRest != { }) { home-manager = hmRest; };
   homeModule =
     user: u:
     let
-      gone = u.removedPackages or [ ];
+      s = sharedHomes.${user} or { };
+      gone = lib.unique ((s.removedPackages or [ ]) ++ (u.removedPackages or [ ]));
+      kept = map package ((u.packages or [ ]) ++ sharedFor (u.removedPackages or [ ]) (s.packages or [ ]));
       files = dir + "/home/${user}/files";
     in
     {
       _file = file;
       imports = ifExists (dir + "/home/${user}/custom.nix");
       options = lib.optionalAttrs (gone != [ ]) {
-        home.packages = lib.mkOption { apply = without gone (map package (u.packages or [ ])); };
+        home.packages = lib.mkOption { apply = without gone kept; };
       };
-      config = {
-        home.packages = map package (u.packages or [ ]);
-        home.file = lib.optionalAttrs (builtins.pathExists files) (
-          builtins.listToAttrs (
-            map (f: lib.nameValuePair (lib.removePrefix "${toString files}/" (toString f)) { source = f; }) (
-              lib.filesystem.listFilesRecursive files
+      config = lib.mkMerge [
+        {
+          home.packages = map package ((u.packages or [ ]) ++ (s.packages or [ ]));
+          home.file = lib.optionalAttrs (builtins.pathExists files) (
+            builtins.listToAttrs (
+              map (f: lib.nameValuePair (lib.removePrefix "${toString files}/" (toString f)) { source = f; }) (
+                lib.filesystem.listFilesRecursive files
+              )
             )
-          )
-        );
-      };
+          );
+        }
+        (values 95 (sharedHomeSettings.${user} or { }))
+      ];
     };
 in
 {
   # Definitions below are reported as coming from the JSON file.
   _file = file;
-  imports = ifExists (dir + "/custom.nix");
+  imports = ifExists (dir + "/custom.nix") ++ [
+    {
+      # Reported as coming from modules/managed.json.
+      _file = sharedFile;
+      config = lib.mkMerge [
+        (values 95 sharedTop)
+        { environment.systemPackages = map package (shared.packages or [ ]); }
+      ];
+    }
+  ];
 
   options = {
     nixosManager.managedFile = lib.mkOption {
@@ -146,9 +213,9 @@ in
     };
     nixosManager.version = lib.mkOption {
       type = lib.types.int;
-      default = 2;
+      default = 3;
       internal = true;
-      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json.";
+      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json.";
     };
     nixosManager.packageNames = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
@@ -156,7 +223,14 @@ in
         map (name: {
           inherit name;
           value = pname (package name);
-        }) (lib.unique (data.packages or [ ] ++ changed ++ lib.concatMap (u: u.packages or [ ]) (builtins.attrValues homes)))
+        }) (
+          lib.unique (
+            ownPackages
+            ++ (shared.packages or [ ])
+            ++ changed
+            ++ lib.concatMap (u: u.packages or [ ]) (builtins.attrValues homes ++ builtins.attrValues sharedHomes)
+          )
+        )
       );
       internal = true;
       description = "The package name of each attribute managed.json names, so nixos-manager can match them.";
@@ -164,15 +238,15 @@ in
   }
   # A second declaration may add the apply function NixOS's own lacks.
   // lib.optionalAttrs (removed != [ ]) {
-    environment.systemPackages = lib.mkOption { apply = without removed (map package (data.packages or [ ])); };
+    environment.systemPackages = lib.mkOption { apply = without removed added; };
   };
 
   config = lib.mkMerge [
     # A value set by clicking is the machine's final value: it wins over hand-written
     # definitions of the same option (priority 90 beats the default 100), but not
     # over lib.mkForce. Lists are therefore written whole, not merged.
-    (values (data.settings or { }))
-    { environment.systemPackages = map package (data.packages or [ ]); }
+    (values 90 (data.settings or { }))
+    { environment.systemPackages = map package ownPackages; }
     # Changed packages are changed for everything on the machine that uses them,
     # home-manager included when it shares the system's pkgs (useGlobalPkgs).
     { nixpkgs.overlays = lib.optional (changed != [ ]) overlay; }
