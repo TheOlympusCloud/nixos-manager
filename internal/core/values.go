@@ -131,7 +131,12 @@ func (js *Jobs) runValues(ctx context.Context, job *Job) (err error) {
 	}
 	hosts := discovered["nixos"]
 	if len(job.Req.Hosts) > 0 {
-		hosts = slices.DeleteFunc(slices.Clone(hosts), func(h string) bool { return !slices.Contains(job.Req.Hosts, h) })
+		// A standalone home is read only when asked for: the fleet's values are the machines'.
+		hosts = slices.Clone(hosts)
+		for _, n := range discovered["home"] {
+			hosts = append(hosts, HomePrefix+n)
+		}
+		hosts = slices.DeleteFunc(hosts, func(h string) bool { return !slices.Contains(job.Req.Hosts, h) })
 	}
 	out := make([]OptionValues, len(job.Req.Names))
 	paths := make([][]string, len(job.Req.Names))
