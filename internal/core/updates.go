@@ -487,7 +487,7 @@ func (u *Updates) check(up *Update, again bool) {
 			state = "failed"
 		}
 	} else {
-		sum = &CheckSummary{Base: pass.Base, Changed: pass.Built, Built: pass.Built}
+		sum = &CheckSummary{Base: pass.Base, Changed: slices.Concat(pass.Built, pass.EvaluatedOnly), Built: pass.Built, EvaluatedOnly: pass.EvaluatedOnly}
 	}
 	diffs := u.changes(ctx, up)
 	u.mu.Lock()

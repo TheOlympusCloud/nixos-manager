@@ -323,14 +323,14 @@ func tipInsights(tip *CommitCheck) []Insight {
 	switch tip.State {
 	case "queued", "running":
 		in.Severity, in.Title = "info", fmt.Sprintf("%.7s on %s is being checked", tip.Commit, tip.Branch)
-		in.Detail = fmt.Sprintf("“%s” was pushed without the console's check, and comin deploys it anyway. The check builds every machine it changes; its log is in Changes → Checks.", tip.Subject)
+		in.Detail = fmt.Sprintf("“%s” was pushed without the console's check, and comin deploys it anyway. The check builds every machine it changes (dry-builds, with checks.build = false); its log is in Changes → Checks.", tip.Subject)
 	case "failed":
 		in.Severity, in.Title = "error", fmt.Sprintf("%.7s on %s failed its check", tip.Commit, tip.Branch)
 		in.Detail = fmt.Sprintf("“%s” is what comin deploys. A machine that does not build keeps its old system and reports a failed deployment. The check's log says what failed: fix it in a new commit, or revert this one in History.", tip.Subject)
 		in.Fix = &InsightFix{Label: "Check again", Check: tip.Commit}
 	default:
 		in.Severity, in.Title = "warning", fmt.Sprintf("%.7s on %s has not passed a check", tip.Commit, tip.Branch)
-		in.Detail = fmt.Sprintf("“%s” was pushed without the console's check (from another clone, Forgejo's web editor, or with Push without checks), and comin deploys it anyway. Checking it builds every machine it changes. With the push webhook (Settings → Forgejo), every push is checked by itself.", tip.Subject)
+		in.Detail = fmt.Sprintf("“%s” was pushed without the console's check (from another clone, Forgejo's web editor, or with Push without checks), and comin deploys it anyway. Checking it builds every machine it changes (dry-builds, with checks.build = false). With the push webhook (Settings → Forgejo), every push is checked by itself.", tip.Subject)
 		in.Fix = &InsightFix{Label: fmt.Sprintf("Check %.7s", tip.Commit), Check: tip.Commit}
 		in.Link = ""
 	}

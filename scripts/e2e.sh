@@ -73,6 +73,12 @@ if timeout 10 env NIXMGR_EVAL_JOBS=0 "$work/nixos-manager" > "$work/server.log" 
 fi
 : > "$work/server.log"
 echo "ok   a bad NIXMGR_EVAL_JOBS stops the start"
+if timeout 10 env NIXMGR_CHECK_BUILD=no "$work/nixos-manager" > "$work/server.log" 2>&1 ||
+  ! grep -q NIXMGR_CHECK_BUILD "$work/server.log"; then
+  fail "NIXMGR_CHECK_BUILD=no was accepted"
+fi
+: > "$work/server.log"
+echo "ok   a bad NIXMGR_CHECK_BUILD stops the start"
 export NIXMGR_EVAL_JOBS=2 # machines evaluated at once
 start() {
   "$work/nixos-manager" >> "$work/server.log" 2>&1 &

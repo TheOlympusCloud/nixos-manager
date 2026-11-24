@@ -118,6 +118,19 @@ in
       };
     };
 
+    checks.build = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Whether a check builds the system of every machine a change touches, on this server.
+        With `false` it runs `nix flake check`, evaluates every machine and dry-builds the changed
+        ones, but builds nothing: each machine builds itself when comin deploys the commit, and
+        keeps its running system if that build fails. Commits and pushes are accepted after such a
+        check. A dry build does not verify fixed-output hashes, so a wrong `fetchurl` hash only fails
+        on the machine. The binary cache then has no new systems to serve.
+      '';
+    };
+
     extraEnvironment = mkOption {
       type = types.attrsOf types.str;
       default = { };
@@ -194,6 +207,7 @@ in
         NIX_REMOTE = "daemon";
       }
       // lib.optionalAttrs (cfg.remote != null) { NIXMGR_REMOTE = cfg.remote; }
+      // lib.optionalAttrs (!cfg.checks.build) { NIXMGR_CHECK_BUILD = "0"; }
       // cfg.extraEnvironment;
 
       serviceConfig = {

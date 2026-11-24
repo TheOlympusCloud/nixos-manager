@@ -1,6 +1,6 @@
 # `nix flake check` runs this: it evaluates services.nixos-manager in the Proxmox LXC configuration the
 # README gives and asserts the generated service, then the same with the binary cache on, whose key
-# script it runs. The app itself is not built.
+# script it runs, and with checks that do not build. The app itself is not built.
 {
   nixpkgs,
   pkgs,
@@ -56,6 +56,7 @@ let
       openFirewall = true;
     };
   };
+  evalOnly = machine { services.nixos-manager.checks.build = false; };
   inherit (system) config;
   service = config.systemd.services.nixos-manager;
   path = service.environment.PATH;
@@ -88,6 +89,9 @@ let
       lib.elem "nixos-manager-cache-key.service" cached.config.systemd.services.harmonia.requires
       && lib.elem "nixos-manager-cache-key.service" cached.config.systemd.services.harmonia.after;
     "cache port" = lib.elem 5000 cached.config.networking.firewall.allowedTCPPorts;
+    "checks build by default" = !(service.environment ? NIXMGR_CHECK_BUILD);
+    "checks.build = false reaches the service" =
+      evalOnly.config.systemd.services.nixos-manager.environment.NIXMGR_CHECK_BUILD == "0";
   };
   makeKey = cached.config.systemd.services.nixos-manager-cache-key.serviceConfig.ExecStart;
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);

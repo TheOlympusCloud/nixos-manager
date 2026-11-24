@@ -47,6 +47,10 @@ type Jobs struct {
 	// from Nix's garbage collector, so the binary cache can still serve it; ""
 	// keeps none.
 	GCRoots string
+	// EvalOnly makes checks evaluate and dry-build the machines a change
+	// touches without building them (checks.build = false): each machine
+	// builds itself when comin deploys it.
+	EvalOnly bool
 
 	mu           sync.Mutex
 	jobs         []*Job // oldest first
@@ -405,7 +409,8 @@ func (js *Jobs) worker(lane <-chan *Job) {
 		}
 		if err == nil && job.Req.Kind == "check" {
 			js.mu.Lock()
-			passed, path := js.pass(CheckPass{Tree: job.tree, Base: job.Req.Base, Built: job.Info(false).Summary.Built}), js.checksPath
+			sum := job.Info(false).Summary
+			passed, path := js.pass(CheckPass{Tree: job.tree, Base: job.Req.Base, Built: sum.Built, EvaluatedOnly: sum.EvaluatedOnly}), js.checksPath
 			js.mu.Unlock()
 			if path != "" { // only the check lane saves, so the writes cannot overtake each other
 				b, _ := json.Marshal(checksFile{Checks: passed}) // strings always marshal

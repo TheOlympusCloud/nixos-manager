@@ -17,7 +17,7 @@ const outputTail = 20000
 
 const instructions = `This server edits a git-backed Nix flake repository (NixOS, home-manager and other flake outputs).
 Typical flow: list_files / read_file, write_file with the base_hash from read_file, stage, run_check, commit, push.
-Commits and pushes are only accepted after run_check passed for exactly that content; it builds every machine the change touches. Never write a secret in a file: set_secret stores it encrypted for the machines (sops-nix).`
+Commits and pushes are only accepted after run_check passed for exactly that content; it builds every machine the change touches, or, when the server sets checks.build = false, only evaluates and dry-builds them (summary.evaluatedOnly) and each machine builds itself when comin deploys. Never write a secret in a file: set_secret stores it encrypted for the machines (sops-nix).`
 
 type done struct {
 	Done bool `json:"done"`
@@ -39,7 +39,7 @@ type copyOut struct {
 type jobOut struct {
 	ID      string             `json:"id"`
 	State   string             `json:"state" jsonschema:"queued, running, passed or failed"`
-	Summary *core.CheckSummary `json:"summary,omitempty" jsonschema:"for a check: the machines it compared, built or failed, and what Nix built and downloaded"`
+	Summary *core.CheckSummary `json:"summary,omitempty" jsonschema:"for a check: the machines it compared, built, only evaluated (evaluatedOnly: checks.build = false) or failed, and what Nix built and downloaded"`
 	Output  string             `json:"output" jsonschema:"the end of the command output"`
 }
 
@@ -187,7 +187,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		return done{true}, svc.Discard(ctx, in.Paths)
 	})
 	// Agents never get the force flag: only a person in the web UI may skip a check.
-	tool(s, "commit", "Commit the staged changes. Refused unless run_check passed for exactly these staged changes.", func(ctx context.Context, in struct {
+	tool(s, "commit", "Commit the staged changes. Refused unless run_check passed for exactly these staged changes; a pass that only evaluated the machines (checks.build = false) counts.", func(ctx context.Context, in struct {
 		Message string `json:"message"`
 	}) (map[string]string, error) {
 		sha, err := svc.Commit(ctx, in.Message, false)
@@ -246,11 +246,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		msg, err := svc.Merge(ctx, in.Branch)
 		return map[string]string{"message": msg}, err
 	})
-	tool(s, "push", "Push the current branch to the remote. Refused until the commit being pushed has passed run_check, which built every machine the push changes (e.g. after a pull rebased local commits: run_check, then push).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
+	tool(s, "push", "Push the current branch to the remote. Refused until the commit being pushed has passed run_check, which built every machine the push changes, or only evaluated and dry-built them when the server sets checks.build = false (e.g. after a pull rebased local commits: run_check, then push).", func(ctx context.Context, _ struct{}) (map[string]string, error) {
 		out, err := svc.Push(ctx, false)
 		return map[string]string{"output": out}, err
 	})
-	tool(s, "try_on_machine", "Try changes on one machine before main: the staged changes (or, with nothing staged, the commits not pushed yet) are committed on the testing branch its comin follows (testing-<host> by default), on top of the main branch, and pushed. comin deploys that branch on this machine only, with switch-to-configuration test, so a reboot brings back what main gave it. Needs the main branch checked out and up to date with the remote (pull first), and a run_check that built this machine. The working copy then stays on the testing branch: commit and push there to try more, and watch the machine with deployments. To promote: switch_branch to the main branch, merge_branch the testing branch, run_check, commit, push. To stop: end_trial. Refused when the testing branch holds an earlier trial the main branch does not have, unless replace.", func(ctx context.Context, in struct {
+	tool(s, "try_on_machine", "Try changes on one machine before main: the staged changes (or, with nothing staged, the commits not pushed yet) are committed on the testing branch its comin follows (testing-<host> by default), on top of the main branch, and pushed. comin deploys that branch on this machine only, with switch-to-configuration test, so a reboot brings back what main gave it. Needs the main branch checked out and up to date with the remote (pull first), and a run_check that built this machine (or evaluated it, with checks.build = false). The working copy then stays on the testing branch: commit and push there to try more, and watch the machine with deployments. To promote: switch_branch to the main branch, merge_branch the testing branch, run_check, commit, push. To stop: end_trial. Refused when the testing branch holds an earlier trial the main branch does not have, unless replace.", func(ctx context.Context, in struct {
 		Host    string `json:"host"`
 		Message string `json:"message,omitempty" jsonschema:"the commit message for the staged changes"`
 		Replace bool   `json:"replace,omitempty" jsonschema:"drop an earlier trial on the testing branch that the main branch does not have"`
@@ -339,7 +339,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		}
 		return core.Host{}, &core.Error{Kind: core.ErrNotFound, Msg: "no machine named " + in.Host}
 	})
-	tool(s, "model_diff", "What the uncommitted changes do to each machine, compared with the last commit: packages, services/programs, users and ports added or removed, package and kernel versions. status is changed whenever the machine's system derivation changes; changed with none of those lists means another setting (a sysctl, a file outside /etc...). reboot: the kernel, its modules, the initrd or the kernel parameters change, which only a reboot applies. units: what switching does to each changed systemd unit if it runs (restart, reload, stop, keep: it runs the old version until restarted), or start for a new unit, started if a running target wants it. etc: the /etc files added, removed or changed. closure, only when this server has built both systems (a check builds them): every dependency whose version or size changes (delta in bytes) and the closure size before and after.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
+	tool(s, "model_diff", "What the uncommitted changes do to each machine, compared with the last commit: packages, services/programs, users and ports added or removed, package and kernel versions. status is changed whenever the machine's system derivation changes; changed with none of those lists means another setting (a sysctl, a file outside /etc...). reboot: the kernel, its modules, the initrd or the kernel parameters change, which only a reboot applies. units: what switching does to each changed systemd unit if it runs (restart, reload, stop, keep: it runs the old version until restarted), or start for a new unit, started if a running target wants it. etc: the /etc files added, removed or changed. closure, only when this server has built both systems (a check builds them, unless checks.build = false): every dependency whose version or size changes (delta in bytes) and the closure size before and after.", func(ctx context.Context, _ struct{}) (map[string]any, error) {
 		head, err := ready(ctx, func() (*core.Model, *core.Job, error) { return svc.Jobs.Model(ctx, "head") })
 		if err != nil {
 			return nil, err
@@ -459,8 +459,8 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		t, err := svc.Jobs.Targets(ctx)
 		return map[string][]core.Target{"targets": t}, err
 	})
-	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with the newest pushed commit that passed a check (every machine when none has), then a dry build of each extra target. Commit and push need it to pass. With commit, check that commit instead, compared with the newest commit before it that passed a check (for a commit pushed without one). Waits for the result.", func(ctx context.Context, in struct {
-		Targets []string `json:"targets,omitempty" jsonschema:"extra attributes from list_targets to dry-build (evaluate only); the changed machines are always built"`
+	tool(s, "run_check", "Validate the staged changes: nix flake check, then a real build of every machine whose system they change compared with the newest pushed commit that passed a check (every machine when none has), then a dry build of each extra target. When the server sets checks.build = false, the changed machines get a dry build only and are listed in summary.evaluatedOnly instead of built: each builds itself when comin deploys, and a wrong fixed-output hash only fails there. Commit and push need it to pass. With commit, check that commit instead, compared with the newest commit before it that passed a check (for a commit pushed without one). Waits for the result.", func(ctx context.Context, in struct {
+		Targets []string `json:"targets,omitempty" jsonschema:"extra attributes from list_targets to dry-build (evaluate only); the changed machines are always built, or dry-built with checks.build = false"`
 		Commit  string   `json:"commit,omitempty" jsonschema:"a full commit SHA to check instead of the staged changes; takes no targets"`
 	}) (jobOut, error) {
 		j, err := svc.Jobs.Submit(ctx, core.JobRequest{Kind: "check", Targets: in.Targets, Commit: in.Commit})

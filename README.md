@@ -122,10 +122,23 @@ An MCP server gives automation the same features.
   queue, so a long check never holds up the fleet views, search, Lock or Update.
   The systems they build can be served to the machines as a [binary
   cache](#binary-cache).
+- **Checks that only evaluate**: with `services.nixos-manager.checks.build = false;`
+  (`NIXMGR_CHECK_BUILD=0` with Docker), a check still runs `nix flake check`,
+  evaluates and compares every machine, and dry-builds the changed ones, which
+  says what Nix would build and download. It builds nothing, and keeps no GC
+  root for those machines (an older one goes). Each machine builds itself when
+  comin deploys the commit, and keeps its running system if that build fails.
+  This suits a small server: the machines build their systems anyway, so the
+  server's builds are a second copy. The log says, per machine, `hades: not
+  built here; it builds itself when comin deploys (checks.build = false).`; the
+  result lists those machines under `evaluatedOnly` instead of `built`, and
+  commits, pushes and **Try on <machine>** accept it like any passing check. A
+  dry build does not verify fixed-output hashes, so a wrong `fetchurl` hash
+  only fails on the machine.
 - **Checks of pushed commits**: a commit pushed without the console's check
   (from a laptop, Forgejo's web editor, or with Push without checks) is checked
   when the push webhook announces it, on any branch: `nix flake check`, then a
-  build of every machine whose system differs from the newest commit before it
+  build (a dry build, with `checks.build = false`) of every machine whose system differs from the newest commit before it
   (on its first-parent line) whose tree passed a check, or of every machine
   when none of the last 100 did. A commit whose tree already passed (a push
   from the console) is not checked again. The result shows in Changes →
@@ -198,6 +211,10 @@ container's own nixpkgs, which needs Go 1.26: NixOS 26.05 or newer.
    - Size: every machine is a full NixOS evaluation, so memory goes first.
      4 GB RAM is a good start (8 GB past a dozen machines), and 30 GB of disk
      holds a few nixpkgs revisions and the machines' systems the checks build.
+     Large systems (a gaming desktop with Steam and the NVIDIA driver) need
+     more, or set `services.nixos-manager.checks.build = false;` so checks only
+     evaluate and each machine builds itself (Checks that only evaluate, at the
+     top).
      More cores make checks faster. The fleet views evaluate two machines at once (about 1 GB
      each), and a check can run next to them, as can one evaluation of what a
      newly deployed machine should run (Deployments). On a tight container set
@@ -529,7 +546,8 @@ container, or `"127.0.0.1:8080:8080"` as the published port with Docker.
 1. Edit files; **Ctrl+S** saves, **Shift+Alt+F** formats.
 2. In **Changes**, stage what you want to commit.
 3. In **Checks**, run the check: it builds every machine the staged changes
-   touch. Tick other configurations to dry-build them too.
+   touch (with `checks.build = false`, only evaluates and dry-builds them).
+   Tick other configurations to dry-build them too.
 4. Commit with a message, then **Push**. The push dialog shows what each
    machine gets compared with what is pushed; comin deploys it on each machine.
 
@@ -577,7 +595,8 @@ risky change on a remote machine.
    machines) commits the staged changes on the machine's testing branch, on
    top of `main`, and pushes that branch. With nothing staged it pushes the
    commits not pushed yet. It needs `main` up to date with the remote (Pull
-   first), and a check that built that machine. If the testing branch holds an
+   first), and a check that built that machine (or evaluated it, with
+   `checks.build = false`). If the testing branch holds an
    earlier trial whose changes `main` does not have, it asks before replacing
    it.
 3. The console is now on the testing branch, and Changes shows how the machine
@@ -1108,7 +1127,8 @@ cache on, the server serves its Nix store to the machines, signed, so comin
 downloads those systems instead of building them: a Raspberry Pi no longer
 compiles anything the server already built. It needs the NixOS module (the
 LXC setup above); with Docker, checks build as well, but nothing serves the
-results.
+results. With `checks.build = false` checks build nothing, so the cache has no
+new systems to serve.
 
 1. On the server, add to its configuration and switch:
 
@@ -1154,7 +1174,8 @@ the roots of machines removed from the flake go with the next check.
 
 A check builds every changed machine on the server, so an `aarch64-linux`
 machine (a Raspberry Pi) on an `x86_64-linux` server needs one of these, or
-its builds fail and so does the check:
+its builds fail and so does the check (unless checks only evaluate, with
+`checks.build = false`):
 
 - **Emulation, server in a VM or on bare metal.** Add
   `boot.binfmt.emulatedSystems = [ "aarch64-linux" ];` and switch. Builds that
@@ -1290,6 +1311,7 @@ this release:
 | `NIXMGR_TRUSTED_PROXIES` | Reverse proxies besides loopback, as addresses or CIDR ranges, whose `X-Forwarded-For` names the client for the login limits (e.g. the Docker gateway) |
 | `NIXMGR_NIX`, `NIXMGR_NIXFMT`, `NIXMGR_NIXD` | Tool commands (default `nix`, `nixfmt`, `nixd`) |
 | `TZ` | Time zone of the update schedule (default the system's; UTC in the Docker image) |
+| `NIXMGR_CHECK_BUILD` | `0`: checks evaluate and dry-build the machines a change touches without building them, and each machine builds itself when comin deploys (`services.nixos-manager.checks.build = false`). Default `1`: checks build them on the server |
 | `NIXMGR_EVAL_JOBS` | Machines evaluated at once for the fleet views (default 2, or 1 on a single CPU). Each is a whole NixOS evaluation, about 1 GB of memory, and a check can run at the same time. **Evaluate again** after a failure re-evaluates only the machines that failed |
 
 Sessions last 7 days and survive a restart: `$NIXMGR_DATA/sessions.json` keeps
