@@ -1447,6 +1447,44 @@ Changes, checks and pushes show each home's packages, programs and files that
 move, next to the system's. **Stop managing here** removes what is set here for
 the user; the files stay until you delete them.
 
+### Standalone homes
+
+A standalone home-manager configuration (`homeConfigurations.<name>`, for a
+machine that is not NixOS or not managed here) has its own page: its card
+under **Machines** → Home configurations, or the fleet graph's inspector,
+opens it. It has the Home tab's **Packages**, **Options** (home-manager's
+options at the top: `programs.git.enable`), **Files in ~** and **Nix**, kept
+in `homes/<name>/`:
+
+- `managed.json`: `packages`, `removedPackages` and `settings`, as a machine's
+  has them for its system;
+- `files/<path>`: linked at `~/<path>`, copied to the Nix store as on a
+  machine: never a token or password;
+- `custom.nix`: a home-manager module of the home's own.
+
+`modules/managed-home.nix` applies them. A home is editable once its modules in
+`flake.nix` load it; **Turn on editing** on its page gives the line and
+creates the module:
+
+```nix
+homeConfigurations."pablo@laptop" = home-manager.lib.homeManagerConfiguration {
+  inherit pkgs;
+  modules = [
+    ./home/pablo.nix
+    (import ./modules/managed-home.nix (./homes + "/pablo@laptop/managed.json"))
+  ];
+};
+```
+
+A name a Nix path can hold needs no string: `./homes/pablo/managed.json`. A
+home has no secrets (it has no host key), package customisation or Copy to…,
+and `modules/managed.json` does not reach it. A check does not build it unless
+you tick it among the other configurations. A home is deployed as before, with
+`home-manager switch --flake .#<name>` on its machine. MCP: the tools that
+take a machine take `home:<name>` too (`edit_packages`, `set_option`,
+`unset_option`, `search_options`, `compare_option`), and
+`update_managed_module` with `home` writes the module.
+
 ### Copy to other machines
 
 **Copy to…**, in a package's **Customise** drawer and on the **Home** tab,
@@ -1494,7 +1532,9 @@ editing on for it (the machine page shows it too):
 ```
 
 and create `modules/managed.nix`: **Create it** on the machine page's Turn on
-editing card writes it (or copy it from `templates/fleet/modules/`).
+editing card writes it (or copy it from `templates/fleet/modules/`). A
+[standalone home](#standalone-homes) loads `modules/managed-home.nix` the same
+way.
 
 ## Development
 
@@ -1533,7 +1573,8 @@ one, a check builds the one machine an edit changes and fails on a system that
 does not build, a commit pushed from elsewhere is built against the last
 checked commit before it, the starter fleet's Forgejo Actions check passes on
 the starter fleet and fails on a machine that does not build, a standalone
-home-manager configuration shows its packages and programs, the installer
+home-manager configuration shows its packages and programs, and the packages,
+options, files and Nix its managed.json and managed-home.nix give it, the installer
 ISO of a machine with a disk layout evaluates and its `fleet-install` builds
 (with ShellCheck), and the flake
 builds the package and passes `nix flake check`, which also makes and keeps a
