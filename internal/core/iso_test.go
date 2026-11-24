@@ -344,9 +344,13 @@ func TestISOEvaluatesWithRealNix(t *testing.T) {
 	bin := nix("build", "--no-link", "--print-out-paths", "--expr", "("+call+").fleetInstall") + "/bin/fleet-install"
 	b, err := os.ReadFile(bin)
 	ok(t, err)
-	for _, want := range []string{"host='pc'", "url='https://forgejo.example.lan/pablo/nixos-config.git'", "branch='main'", "baked=/nix/store/"} {
-		if !strings.Contains(string(b), want) {
-			t.Errorf("fleet-install lacks %s", want)
+	// lib.escapeShellArg quotes only what needs it, so either form is right.
+	for _, v := range [][2]string{{"host", "pc"}, {"url", "https://forgejo.example.lan/pablo/nixos-config.git"}, {"branch", "main"}} {
+		if !strings.Contains(string(b), v[0]+"="+v[1]+"\n") && !strings.Contains(string(b), v[0]+"='"+v[1]+"'\n") {
+			t.Errorf("fleet-install lacks %s=%s", v[0], v[1])
 		}
+	}
+	if !strings.Contains(string(b), "baked=/nix/store/") {
+		t.Error("fleet-install lacks baked=/nix/store/…")
 	}
 }
