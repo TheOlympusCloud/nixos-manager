@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/TheOlympusCloud/nixos-manager/templates"
 )
@@ -359,7 +360,7 @@ func TestISOEvaluatesWithRealNix(t *testing.T) {
 // computer but in QEMU (testdata/install-vm.nix): fleet-install --yes --offline
 // installs it on an empty disk, and its home-manager user logs in with the
 // packages clicked for them on the PATH and their file in ~. It takes KVM, a few
-// GB of downloads and a quarter of an hour, so it runs only with
+// GB of downloads and about six minutes, so it runs only with
 // NIXMGR_VM_TESTS=1 (.github/workflows/vm-tests.yml).
 func TestInstallInVMWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_VM_TESTS") == "" {
@@ -410,7 +411,13 @@ func TestInstallInVMWithRealNix(t *testing.T) {
 	session := `echo ~; echo "$PATH"; command -v jq hello-customised cowsay git strace; cat ~/.config/nixmgr/hello.txt`
 	call := "(" + string(vm) + "\n) { flakeRef = " + nixString(ref) + "; host = \"pc\"; user = \"pablo\"; password = \"nixmgr\"; command = " + nixString(session) +
 		"; iso = " + isoCall(ref, "pc", sha, "Pablo", "pablo@example.invalid") + "; }"
-	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "build", "-L", "--no-link", "--print-out-paths", "--expr", call)
+	// Stopped before go test's own timeout, which would leave nix running and its output open.
+	if d, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, d.Add(-time.Minute))
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "nix", "--extra-experimental-features", "nix-command flakes", "build", "-L", "--no-link", "--print-out-paths", "--expr", call)
 	cmd.Stderr = os.Stderr // the VMs' consoles, as they run
 	out, err := cmd.Output()
 	if err != nil {

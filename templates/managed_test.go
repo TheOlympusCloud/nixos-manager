@@ -136,9 +136,15 @@ func TestManagedPackageFromAnotherInput(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
 	}
+	// The JSON on success, Nix's messages on failure: another nix process fetching the same
+	// input makes this one say so on stderr, which must not reach the JSON.
 	eval := func(attr string) ([]byte, error) {
-		return exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
-			"eval", "--impure", "--json", "--file", "testdata/managed-from-input.nix", attr).CombinedOutput()
+		out, err := exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+			"eval", "--impure", "--json", "--file", "testdata/managed-from-input.nix", attr).Output()
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.Stderr, err
+		}
+		return out, err
 	}
 	out, err := eval("ok")
 	if err != nil {

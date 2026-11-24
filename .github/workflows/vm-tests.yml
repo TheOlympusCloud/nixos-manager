@@ -1,7 +1,7 @@
 name: VM tests
 
 # A machine installed from its installer ISO and booted, in QEMU with KVM: a few GB
-# of downloads and a quarter of an hour, so not on every push like ci.yml.
+# of downloads and about six minutes, so not on every push like ci.yml.
 on:
   schedule:
     - cron: "30 4 * * *" # nightly on main, after ci.yml's
@@ -28,7 +28,7 @@ jobs:
   install:
     name: Install from the ISO and boot
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -37,5 +37,9 @@ jobs:
       - uses: cachix/install-nix-action@v31 # also opens /dev/kvm to Nix's builds
       - name: Install a customised machine from its ISO, boot it and log in
         run: |
-          NIXMGR_VM_TESTS=1 go test -v -timeout 80m -run 'InVMWithRealNix$' ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
+          NIXMGR_VM_TESTS=1 go test -v -timeout 40m -run 'InVMWithRealNix$' ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
             { scripts/ci-annotate.sh "VM tests" "$RUNNER_TEMP/tests.log"; exit 1; }
+          # A skipped test passes too: say that it ran, and how long it took.
+          passed=$(grep -- '--- PASS: TestInstallInVMWithRealNix' "$RUNNER_TEMP/tests.log") ||
+            { echo "::error title=VM tests::TestInstallInVMWithRealNix did not run"; exit 1; }
+          echo "::notice title=VM tests::$passed"
