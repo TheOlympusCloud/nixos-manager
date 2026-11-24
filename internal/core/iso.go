@@ -167,6 +167,13 @@ func (is *ISOs) info(b *isoBuild) ISO {
 
 // run builds the ISO into its folder, then records its size and SHA-256 and
 // keeps only the newest keepISOs. A failed build leaves no folder.
+// isoCall is the Nix expression of host's installer ISO, from the locked flake ref
+// of commit; fleet-install commits as gitName <gitEmail>.
+func isoCall(ref, host, commit, gitName, gitEmail string) string {
+	return "(" + nixExpr("iso.nix") + "\n) { flakeRef = " + nixString(ref) + "; host = " + nixString(host) + "; commit = " + nixString(commit) +
+		"; installer = " + nixString(nixExpr("fleet-install.sh")) + "; gitName = " + nixString(gitName) + "; gitEmail = " + nixString(gitEmail) + "; }"
+}
+
 func (is *ISOs) run(ctx context.Context, job *Job, iso ISO) (err error) {
 	fmt.Fprintf(job, "Building the installer ISO of %s at commit %.12s (%s).\n", iso.Host, iso.Commit, iso.Branch)
 	src, cleanup, err := is.Jobs.snapshot(ctx, job.tree)
@@ -189,8 +196,7 @@ func (is *ISOs) run(ctx context.Context, job *Job, iso ISO) (err error) {
 	}()
 	result := filepath.Join(dir, "result")
 	r := is.Jobs.Repo
-	call := "(" + nixExpr("iso.nix") + "\n) { flakeRef = " + nixString(ref) + "; host = " + nixString(iso.Host) + "; commit = " + nixString(iso.Commit) +
-		"; installer = " + nixString(nixExpr("fleet-install.sh")) + "; gitName = " + nixString(r.AuthorName) + "; gitEmail = " + nixString(r.AuthorEmail) + "; }"
+	call := isoCall(ref, iso.Host, iso.Commit, r.AuthorName, r.AuthorEmail)
 	fmt.Fprintf(job, "$ nix build -L --out-link %s --expr <nix/iso.nix>\n", result)
 	cmd := is.Jobs.nixCmd(ctx, is.Jobs.nixArgs("build", "-L", "--out-link", result, "--expr", call)...)
 	cmd.Dir = src

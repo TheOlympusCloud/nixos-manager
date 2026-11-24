@@ -66,5 +66,9 @@ if cfg.boot.isContainer then
   throw "${host} is a container: it is not installed from an ISO."
 else
   # Fails here, not halfway through an install, when the machine does not evaluate.
-  # fleetInstall alone is for the tests.
-  builtins.seq cfg.system.build.toplevel.drvPath iso.config.system.build.isoImage // { inherit fleetInstall; }
+  # fleetInstall alone, and extendModules for an ISO the VM test can drive, are for the tests.
+  builtins.seq cfg.system.build.toplevel.drvPath iso.config.system.build.isoImage
+  // {
+    inherit fleetInstall;
+    inherit (iso) extendModules;
+  }

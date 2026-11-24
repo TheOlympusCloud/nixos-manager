@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -325,8 +326,7 @@ func TestISOEvaluatesWithRealNix(t *testing.T) {
 	ok(t, err)
 	defer cleanup()
 	ref := must[string](t)(s.Jobs.lockedFlake(ctx, src))
-	call := "(" + nixExpr("iso.nix") + "\n) { flakeRef = " + nixString(ref) + "; host = \"pc\"; commit = \"" + sha + "\"; installer = " + nixString(nixExpr("fleet-install.sh")) +
-		"; gitName = \"Pablo\"; gitEmail = \"pablo@example.invalid\"; }"
+	call := isoCall(ref, "pc", sha, "Pablo", "pablo@example.invalid")
 	nix := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command("nix", append([]string{"--extra-experimental-features", "nix-command flakes"}, args...)...).Output()
@@ -352,5 +352,92 @@ func TestISOEvaluatesWithRealNix(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "baked=/nix/store/") {
 		t.Error("fleet-install lacks baked=/nix/store/…")
+	}
+}
+
+// A customised machine installs from its installer ISO and starts, as on a real
+// computer but in QEMU (testdata/install-vm.nix): fleet-install --yes --offline
+// installs it on an empty disk, and its home-manager user logs in with the
+// packages clicked for them on the PATH and their file in ~. It takes KVM, a few
+// GB of downloads and a quarter of an hour, so it runs only with
+// NIXMGR_VM_TESTS=1 (.github/workflows/vm-tests.yml).
+func TestInstallInVMWithRealNix(t *testing.T) {
+	if os.Getenv("NIXMGR_VM_TESTS") == "" {
+		t.Skip("needs real Nix, KVM and network access: set NIXMGR_VM_TESTS=1")
+	}
+	ctx := context.Background()
+	s := newService(t)
+	s.Jobs.Nix = "nix"
+	if _, err := s.Repo.Seed(templates.Fleet); err != nil {
+		t.Fatal(err)
+	}
+	must[MachineCreated](t)(s.CreateMachine(MachineSpec{Name: "pc", System: "x86_64-linux", Role: "minimal", Disk: "ext4", Device: "/dev/vda",
+		User: &MachineUser{Name: "pablo", Wheel: true, Home: true}}))
+	// Customised as by clicking: packages added, a NixOS default removed, a package
+	// built differently, the user's own package and a file in their ~.
+	must[ManagedView](t)(s.EditPackages("pc", PackageEdit{Add: []string{"hello", "jq"}, Exclude: []string{"strace"}}))
+	must[ManagedView](t)(s.SetPackageOverride("pc", "hello", &PackageOverride{OverrideAttrs: map[string]any{"postInstall": "ln -s hello $out/bin/hello-customised"}}, nil))
+	must[ManagedView](t)(s.EditPackages("pc", PackageEdit{User: "pablo", Add: []string{"cowsay"}}))
+	must[ManagedView](t)(s.SetOption("pc", []string{"users", "users", "pablo", "initialPassword"}, "nixmgr", nil))
+	write(t, s.Repo, "hosts/pc/home/pablo/files/.config/nixmgr/hello.txt", "from managed.json's folder\n")
+	// The VM's own hardware configuration, not the placeholder, which fleet-install would
+	// replace: the VM, without network, then installs what was built here, building nothing.
+	write(t, s.Repo, "hosts/pc/hardware-configuration.nix", `# The test VM's.
+{ lib, modulesPath, ... }:
+{
+  imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
+  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+}
+`)
+	// The test driver's shell on the installed machine, as in nixpkgs' installer tests.
+	write(t, s.Repo, "hosts/pc/custom.nix", `{ modulesPath, ... }:
+{
+  imports = [ (modulesPath + "/testing/test-instrumentation.nix") ];
+}
+`)
+	lock := must[*Job](t)(s.Jobs.Submit(ctx, JobRequest{Kind: "lock"}))
+	<-lock.Done() // fetching the inputs takes longer than wait allows
+	if info := lock.Info(true); info.State != "passed" {
+		t.Fatalf("lock: %s", info.Output)
+	}
+	sha := commitAll(t, s.Repo, "pc")
+	src, cleanup, err := s.Jobs.snapshot(ctx, gitOut(t, s.Repo.Dir, "rev-parse", "HEAD^{tree}"))
+	ok(t, err)
+	defer cleanup()
+	ref := must[string](t)(s.Jobs.lockedFlake(ctx, src))
+	vm, err := os.ReadFile("testdata/install-vm.nix")
+	ok(t, err)
+	session := `echo ~; echo "$PATH"; command -v jq hello-customised cowsay git strace; cat ~/.config/nixmgr/hello.txt`
+	call := "(" + string(vm) + "\n) { flakeRef = " + nixString(ref) + "; host = \"pc\"; user = \"pablo\"; password = \"nixmgr\"; command = " + nixString(session) +
+		"; iso = " + isoCall(ref, "pc", sha, "Pablo", "pablo@example.invalid") + "; }"
+	cmd := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "build", "-L", "--no-link", "--print-out-paths", "--expr", call)
+	cmd.Stderr = os.Stderr // the VMs' consoles, as they run
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("nix build: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(strings.TrimSpace(string(out)), "session.txt"))
+	ok(t, err)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	want := []string{
+		"/home/pablo",
+		"", // PATH, below
+		"/run/current-system/sw/bin/jq",
+		"/run/current-system/sw/bin/hello-customised",
+		"/etc/profiles/per-user/pablo/bin/cowsay",
+		"/run/current-system/sw/bin/git", // and no strace
+		"from managed.json's folder",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("the login session printed:\n%s", b)
+	}
+	for _, dir := range []string{"/etc/profiles/per-user/pablo/bin", "/run/current-system/sw/bin"} {
+		if !slices.Contains(strings.Split(lines[1], ":"), dir) {
+			t.Errorf("PATH %s lacks %s", lines[1], dir)
+		}
+	}
+	lines[1] = ""
+	if !slices.Equal(lines, want) {
+		t.Errorf("the login session printed:\n%s", b)
 	}
 }
