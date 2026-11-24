@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { frame } from '../lib/ascii'
   import { dialog } from '../lib/ui.svelte'
+  import Dither from './cell/Dither.svelte'
 
   let el: HTMLDialogElement
   let value = $state('')
@@ -21,22 +23,31 @@
 
 <!-- Escape fires "cancel"; closing by any other route also resolves as cancelled. The close event comes a
      moment after close(): when a next dialog has opened since (a push after its review), it is not about that one. -->
-<dialog bind:this={el} class:wide={dialog.spec?.wide} onclose={() => !el.open && dialog.spec && dialog.resolve(null)} aria-labelledby="dialog-title">
+<dialog bind:this={el} class="screen" onclose={() => !el.open && dialog.spec && dialog.resolve(null)} aria-labelledby="dialog-title">
+  <Dither />
   {#if dialog.spec}
     {@const spec = dialog.spec}
-    <form onsubmit={submit}>
-      <h2 id="dialog-title">{spec.title}</h2>
-      {#if spec.message}<p>{spec.message}</p>{/if}
-      {#if spec.pre !== undefined}<pre>{spec.pre}</pre>{/if}
-      {#if spec.body}
-        {@const Body = spec.body}
-        <Body />
-      {/if}
-      {#if spec.input}
-        <label for="dialog-input">{spec.input.label}</label>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input id="dialog-input" bind:value autofocus spellcheck="false" autocomplete="off" />
-      {/if}
+    <!-- The only double frame on screen; a danger question has a red one. -->
+    <form class="modal" class:wide={spec.wide} data-tone={spec.danger ? 'err' : undefined} onsubmit={submit} use:frame={{ kind: 'double', shadow: true, animate: true, title: spec.title }}>
+      <h2 id="dialog-title" class="sr-only">{spec.title}</h2>
+      <!-- The text scrolls, not the framed (and shadowed) box. -->
+      <div class="content">
+        {#if spec.message}<p>{spec.message}</p>{/if}
+        {#if spec.pre !== undefined}<pre>{spec.pre}</pre>{/if}
+        {#if spec.body}
+          {@const Body = spec.body}
+          <Body />
+        {/if}
+        {#if spec.input}
+          <div class="field">
+            <label for="dialog-input">{spec.input.label}</label>
+            <span class="prompt-row"
+              ><b class="prompt">λ ›</b>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input id="dialog-input" bind:value autofocus spellcheck="false" autocomplete="off" /></span>
+          </div>
+        {/if}
+      </div>
       <div class="actions">
         <!-- Destructive questions start on Cancel so a stray Enter does no harm. -->
         {#if spec.cancel !== null}
@@ -51,51 +62,46 @@
 </dialog>
 
 <style>
-  dialog {
-    width: min(520px, 92vw);
-    padding: 0;
-    color: var(--fg);
-    background: var(--bg-side);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-3);
+  .modal,
+  .content {
+    display: grid;
+    gap: var(--lh);
   }
-  dialog.wide {
-    width: min(760px, 94vw);
+  .content {
+    max-height: round(down, calc(100vh - var(--lh) * 10), var(--lh));
+    overflow: auto;
   }
-  dialog::backdrop {
-    background: var(--scrim);
+  .modal.wide {
+    width: 90ch;
   }
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 18px 20px;
+  /* app.css gives every .modal frame --line-strong, after the tones: a danger question keeps its red. */
+  .modal[data-tone='err'] > :global(.fr) {
+    color: var(--red);
   }
-  h2 {
-    margin: 0;
-    font-size: 15px;
+  .modal .actions {
+    margin-top: 0;
   }
   p {
-    margin: 0;
-    line-height: 1.5;
     overflow-wrap: anywhere;
   }
   pre {
-    margin: 0;
-    max-height: 50vh;
+    max-height: calc(var(--lh) * 20);
+    padding: 0 1ch;
     overflow: auto;
-    padding: 10px;
-    background: var(--bg-deep);
-    border-radius: 4px;
-    font: 12px/1.5 var(--mono);
+    color: var(--fg);
     white-space: pre-wrap;
     word-break: break-word;
+    background: var(--bg-input);
   }
-  .actions {
+  .field {
+    display: grid;
+  }
+  label {
+    color: var(--fg-muted);
+  }
+  .prompt-row {
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 6px;
+    gap: 1ch;
+    white-space: nowrap;
   }
 </style>

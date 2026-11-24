@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte'
-  import { cubicOut } from 'svelte/easing'
-  import { fade, fly } from 'svelte/transition'
+  import { cell, frame, sweep } from '../lib/ascii'
+  import Dither from './cell/Dither.svelte'
   import Icon from './Icon.svelte'
 
-  /** A side sheet over the page, for work that keeps the page in view (configure, add). Modal: focus stays inside. */
+  /** A side sheet over the view, for work that keeps the page in view (configure, add). Modal: focus stays inside. width is in px, drawn as whole cells. */
   let { title, onclose, children, width = 640 }: { title: string; onclose: () => void; children: Snippet; width?: number } = $props()
   let el: HTMLElement
 
   onMount(() => {
+    sweep(el)
     const before = document.activeElement as HTMLElement | null
     ;(el.querySelector<HTMLElement>('[data-search]') ?? el.querySelector<HTMLElement>('.close'))?.focus()
     return () => before?.isConnected && before.focus() // back to the button that opened it
@@ -43,47 +44,51 @@
 <svelte:window {onkeydown} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Escape closes it from the keyboard) -->
-<div class="scrim" aria-hidden="true" onclick={onclose} transition:fade={{ duration: 200 }}></div>
-<div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" bind:this={el} style:width="min({width}px, calc(100vw - 80px))" transition:fly={{ x: 48, duration: 320, easing: cubicOut }}>
-  <header>
-    <h2 id="drawer-title">{title}</h2>
-    <button class="icon close" aria-label="Close" title="Close (Esc)" onclick={onclose}><Icon name="x" /></button>
-  </header>
+<div class="scrim" aria-hidden="true" onclick={onclose}><Dither /></div>
+<div
+  class="drawer"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="drawer-title"
+  bind:this={el}
+  style:width="min({Math.round(width / cell.cw)}ch, calc(100% - 4ch))"
+  use:frame={{ kind: 'heavy', title, tag: 'Esc', animate: true }}>
+  <h2 id="drawer-title" class="sr-only">{title}</h2>
+  <button class="icon close" aria-label="Close" title="Close (Esc)" onclick={onclose}><Icon name="x" /></button>
   <div class="d-body">{@render children()}</div>
 </div>
 
 <style>
+  /* Both sit in the view (.content), not over the rail and the top bar. */
   .scrim {
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 29;
     background: var(--scrim);
   }
   .drawer {
-    position: fixed;
-    top: 56px;
-    right: 8px;
-    bottom: 8px;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
     z-index: 30;
     display: flex;
     flex-direction: column;
-    background: var(--bg-side);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge), var(--shadow-3);
+    height: round(down, 100%, var(--lh));
+    background: var(--bg-raised);
   }
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 10px 10px 18px;
-    border-bottom: 1px solid var(--border);
-  }
-  h2 {
-    font-size: var(--fs-lg);
+  /* On the top line, left of the Esc tag: ━ × ━ Esc ━┓ */
+  .close {
+    position: absolute;
+    top: 0;
+    right: 8ch;
+    z-index: 2;
+    width: 3ch;
+    background: var(--bg-raised);
   }
   .d-body {
     flex: 1;
     min-height: 0;
+    overflow: auto;
   }
 </style>
