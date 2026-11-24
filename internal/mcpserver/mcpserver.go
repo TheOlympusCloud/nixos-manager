@@ -58,7 +58,7 @@ var toolScope = map[string]auth.Scope{
 	"revert_commit": auth.ScopeEdit, "merge_branch": auth.ScopeEdit, "pull": auth.ScopeEdit,
 	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
-	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit,
+	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit, "link_home_secret": auth.ScopeEdit,
 	"copy_to_machines":      auth.ScopeEdit,
 	"update_managed_module": auth.ScopeEdit,
 	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
@@ -399,11 +399,17 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	}) (core.ManagedView, error) {
 		return svc.SetPackageOverride(in.Host, in.Attr, in.Override, nil)
 	})
-	tool(s, "set_home_manager", "Turn home-manager on (with stateVersion for a user without it yet, e.g. the machine's release 26.05) or off for a user of a machine, through its managed.json. Then edit_packages with user, and set_option on home-manager.users.<user>.… (search_options with that prefix). Dotfiles are files in hosts/<host>/home/<user>/files/ (linked at ~/), and hosts/<host>/home/<user>/custom.nix is a home-manager module of your own. Needs home-manager's NixOS module in the machine's flake modules.", func(ctx context.Context, in struct {
+	tool(s, "set_home_manager", "Turn home-manager on (with stateVersion for a user without it yet, e.g. the machine's release 26.05) or off for a user of a machine, through its managed.json. Then edit_packages with user, and set_option on home-manager.users.<user>.… (search_options with that prefix). Dotfiles are files in hosts/<host>/home/<user>/files/ (linked at ~/, copied to the Nix store: never a secret; see link_home_secret), and hosts/<host>/home/<user>/custom.nix is a home-manager module of your own. Needs home-manager's NixOS module in the machine's flake modules.", func(ctx context.Context, in struct {
 		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute)"`
 		core.HomeEdit
 	}) (core.ManagedView, error) {
 		return svc.SetHome(in.Host, in.HomeEdit)
+	})
+	tool(s, "link_home_secret", "Link a secret the machine gets (host_details' secrets, from set_secret or Nix by hand) as a whole file in a user's home, e.g. ~/.netrc, through managed.json's home.<user>.secrets: the secret becomes the user's, and the file a link into /run/secrets, so its value never reaches the Nix store. Without secret, the link at path goes. For a file mixing text and secrets, write hosts/<host>/home/<user>/templates/<path> with write_file: it is linked at ~/<path>, with every @secret:<name>@ in it replaced by that secret on the machine. Both need managed.nix 5 (update_managed_module) and sops-nix (modules/secrets.nix).", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine whose managed.json has the user's home (modules/managed.json)"`
+		core.HomeSecretEdit
+	}) (core.ManagedView, error) {
+		return svc.LinkHomeSecret(in.Host, in.HomeSecretEdit)
 	})
 	tool(s, "copy_to_machines", "Copy, from one machine to others, how a package is changed (packageOverride) or a user's home (home), as that machine's managed.json and folder have it. A machine that already has another value for something copied is refused whole and listed with its conflicts; nothing is overwritten. Home package lists are joined; home.stateVersion is not copied, so a machine where the user has no home yet also needs set_home_manager with its stateVersion.", func(ctx context.Context, in struct {
 		Host string `json:"host" jsonschema:"the machine to copy from"`
@@ -412,7 +418,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		r, err := svc.Copy(in.Host, in.CopyRequest)
 		return copyOut{r}, err
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 4 needs for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 5 needs for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
 	}) (map[string]string, error) {
 		h, err := svc.UpdateManagedModule(in.BaseHash)

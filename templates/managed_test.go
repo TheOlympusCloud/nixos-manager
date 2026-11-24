@@ -163,3 +163,41 @@ func TestManagedPackageFromAnotherInput(t *testing.T) {
 		}
 	}
 }
+
+// A secret linked into a home becomes its user's and ~/.netrc a link to it in
+// /run/secrets; a template in home/<user>/templates/ is rendered by sops-nix,
+// for its user, with the secret's placeholder where @secret:<name>@ was, and
+// linked into ~. A secret the machine lacks fails, saying so.
+func TestManagedHomeSecrets(t *testing.T) {
+	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
+		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
+	}
+	eval := func(attr string) ([]byte, error) {
+		return exec.Command("nix", "--extra-experimental-features", "nix-command flakes",
+			"eval", "--impure", "--json", "--file", "testdata/managed-home-secrets.nix", attr).CombinedOutput()
+	}
+	out, err := eval("ok")
+	if err != nil {
+		t.Fatalf("nix eval: %v\n%s", err, out)
+	}
+	var got struct {
+		NetrcOwner, Netrc, Hosts, TemplateOwner, TemplatePath string
+		Rendered, System                                      bool
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rendered := "/run/secrets/rendered/home-pablo-.config-gh-hosts.yml"
+	if got.NetrcOwner != "pablo" || got.TemplateOwner != "pablo" || got.TemplatePath != rendered || !got.Rendered || !got.System ||
+		!strings.Contains(got.Netrc, "/run/secrets/netrc") || !strings.Contains(got.Hosts, rendered) {
+		t.Errorf("got %+v", got)
+	}
+	for attr, msg := range map[string]string{
+		"missing": "managed.json links ~/.netrc of pablo to the secret nope, which this machine does not have",
+		"unknown": "home/pablo/templates/.config/x.conf: @secret:nope@ is not one of this machine's secrets",
+	} {
+		if out, err := eval(attr); err == nil || !strings.Contains(string(out), msg) {
+			t.Errorf("%s: want a failure saying %q, got %v:\n%s", attr, msg, err, out)
+		}
+	}
+}

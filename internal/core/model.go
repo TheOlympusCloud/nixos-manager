@@ -42,7 +42,7 @@ type Host struct {
 	// packages and settings; 2 adds removed packages, package overrides,
 	// home-manager users and the Nix files next to managed.json; 3 adds
 	// modules/managed.json, set for every machine; 4 packages taken from
-	// another flake input (packageOverrides' from).
+	// another flake input (packageOverrides' from); 5 secrets in homes.
 	ManagedVersion int       `json:"managedVersion"`
 	Packages       []Package `json:"packages"`
 	// RemovedPackages are defined by some module but taken out of the system by

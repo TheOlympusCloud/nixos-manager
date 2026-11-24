@@ -107,6 +107,8 @@ func TestCopyHome(t *testing.T) {
 	edit(s.SetOption("web", hm("home", "sessionVariables", "EDITOR"), "vim", nil))
 	write(t, s.Repo, "hosts/web/home/pablo/files/.config/a.conf", "a\n")
 	write(t, s.Repo, "hosts/web/home/pablo/custom.nix", "{ }\n")
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"}))
+	write(t, s.Repo, "hosts/web/home/pablo/templates/.config/gh/hosts.yml", "oauth_token: @secret:gh@\n")
 	write(t, s.Repo, "hosts/web/home/pablo/files/.local/bin/tool", "#!/bin/sh\n")
 	ok(t, os.Chmod(filepath.Join(s.Repo.Dir, "hosts/web/home/pablo/files/.local/bin/tool"), 0o755)) // git keeps the bit
 	write(t, s.Repo, "hosts/web/home/anna/files/.bashrc", "anna\n")
@@ -115,17 +117,19 @@ func TestCopyHome(t *testing.T) {
 	edit(s.AddPackages("laptop", []string{"git"}))
 	edit(s.SetHome("srv", HomeEdit{User: "pablo", Enable: true, StateVersion: "25.05"}))
 	edit(s.EditPackages("srv", PackageEdit{User: "pablo", Add: []string{"fd"}}))
+	edit(s.LinkHomeSecret("srv", HomeSecretEdit{User: "pablo", Path: ".config/rclone/rclone.conf", Secret: "rclone"}))
 	write(t, s.Repo, "hosts/srv/home/pablo/files/.bashrc", "srv\n")
 	edit(s.SetOption("ct", hm("programs", "git", "enable"), false, nil))
 	write(t, s.Repo, "hosts/ct/home/pablo/files/.local/bin/tool", "#!/bin/sh\n") // the same text, not executable
 	edit(s.EditPackages("db", PackageEdit{User: "pablo", Add: []string{"htop"}}))
+	edit(s.LinkHomeSecret("db", HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "db-netrc"}))
 
 	got := must[[]CopyResult](t)(s.Copy("web", CopyRequest{Home: "pablo", To: []string{"laptop", "srv", "ct", "db"}}))
 	want := []CopyResult{
 		{Host: "laptop", Changed: true},
 		{Host: "srv", Changed: true},
 		{Host: "ct", Conflicts: []string{"settings.home-manager.users.pablo.programs.git.enable", "hosts/ct/home/pablo/files/.local/bin/tool"}},
-		{Host: "db", Conflicts: []string{"home.pablo.packages: htop"}},
+		{Host: "db", Conflicts: []string{"home.pablo.packages: htop", "home.pablo.secrets: .netrc"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("results\n%+v\nwant\n%+v", got, want)
@@ -134,15 +138,16 @@ func TestCopyHome(t *testing.T) {
 		return v.Settings["home-manager"].(map[string]any)["users"].(map[string]any)["pablo"]
 	}
 	laptop := must[ManagedView](t)(s.ManagedView("laptop"))
-	if want := (HomeManaged{Packages: []string{"ripgrep"}, RemovedPackages: []string{"htop"}}); !reflect.DeepEqual(laptop.Home["pablo"], want) ||
+	if want := (HomeManaged{Packages: []string{"ripgrep"}, RemovedPackages: []string{"htop"}, Secrets: map[string]string{".netrc": "netrc"}}); !reflect.DeepEqual(laptop.Home["pablo"], want) ||
 		!reflect.DeepEqual(opts(laptop), map[string]any{"programs": map[string]any{"git": map[string]any{"enable": true}}, "home": map[string]any{"sessionVariables": map[string]any{"EDITOR": "vim"}}}) ||
 		readFile(s, "hosts/laptop/home/pablo/files/.config/a.conf") != "a\n" || readFile(s, "hosts/laptop/home/pablo/custom.nix") != "{ }\n" ||
+		readFile(s, "hosts/laptop/home/pablo/templates/.config/gh/hosts.yml") != "oauth_token: @secret:gh@\n" ||
 		readFile(s, "hosts/laptop/home/anna/files/.bashrc") != "" || readFile(s, "hosts/laptop/home/pablo/files/.profile") != "" ||
 		modeOf(t, s, "hosts/laptop/home/pablo/files/.local/bin/tool") != 0o755 || modeOf(t, s, "hosts/laptop/home/pablo/files/.config/a.conf") != 0o644 {
 		t.Fatalf("laptop %+v", laptop)
 	}
 	srv := must[ManagedView](t)(s.ManagedView("srv"))
-	if want := (HomeManaged{Packages: []string{"fd", "ripgrep"}, RemovedPackages: []string{"htop"}}); !reflect.DeepEqual(srv.Home["pablo"], want) ||
+	if want := (HomeManaged{Packages: []string{"fd", "ripgrep"}, RemovedPackages: []string{"htop"}, Secrets: map[string]string{".netrc": "netrc", ".config/rclone/rclone.conf": "rclone"}}); !reflect.DeepEqual(srv.Home["pablo"], want) ||
 		opts(srv).(map[string]any)["home"].(map[string]any)["stateVersion"] != "25.05" || readFile(s, "hosts/srv/home/pablo/files/.bashrc") != "srv\n" {
 		t.Fatalf("srv %+v", srv)
 	}

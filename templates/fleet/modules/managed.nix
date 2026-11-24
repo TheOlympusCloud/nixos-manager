@@ -11,6 +11,15 @@
 #   changes that package on this machine; pkg already has managed.json's changes.
 # - home/<user>/custom.nix: a home-manager module for one user of managed.json's "home".
 # - home/<user>/files/<path>: a file linked at ~/<path> for that user (home.file).
+#   It is copied to the Nix store, which every user can read: never a secret.
+# - home/<user>/templates/<path>: a file with secrets, linked at ~/<path> for that
+#   user. Each @secret:<name>@ in it is that secret of the machine, which
+#   sops-nix fills in on the machine (sops.templates); the rest is plain text.
+#
+# managed.json's home.<user>.secrets links a secret of the machine as a whole
+# file in ~ ({ ".netrc": "netrc" }): the secret becomes the user's, and
+# ~/.netrc a link to it in /run/secrets. Neither way puts a secret in the store.
+# A secret comes from modules/secrets.nix (Settings → Secrets) or Nix by hand.
 #
 # modules/managed.json, next to this module, has the same shape and is set for
 # every machine that loads it; where both set something, the machine's own wins:
@@ -19,7 +28,8 @@
 # - packageOverrides: the machine's entry for an attribute replaces the shared one.
 #   A shared patch file is relative to modules/.
 # - home.<user> applies where the machine's managed.json has home.<user> too (so
-#   no machine gets a home for a user it lacks), joined as the system's packages.
+#   no machine gets a home for a user it lacks), joined as the system's packages;
+#   in secrets, the machine's link at a path wins.
 # - settings apply at priority 95, below the machine's (90) but still above
 #   hand-written values; settings.home-manager.users.<user> applies as home does.
 # The files next to it (custom.nix, packages/, home/) are not read.
@@ -33,6 +43,7 @@ file:
   lib,
   pkgs,
   config,
+  options,
   ...
 }@args:
 let
@@ -42,6 +53,14 @@ let
   shared = read sharedFile;
   dir = dirOf file;
   ifExists = p: lib.optional (builtins.pathExists p) p;
+  # Each file under folder d, by its path relative to d; none without d.
+  filesUnder =
+    d:
+    lib.optionalAttrs (builtins.pathExists d) (
+      builtins.listToAttrs (
+        map (f: lib.nameValuePair (lib.removePrefix "${toString d}/" (toString f)) f) (lib.filesystem.listFilesRecursive d)
+      )
+    );
   attrPath = lib.splitString ".";
   # throw (not abort): a misspelled name fails this machine's build with a clear
   # message, and the fleet view still shows the rest of the machine.
@@ -200,16 +219,45 @@ let
   # without the user; the rest of home-manager's settings apply as any setting.
   sharedHomeSettings = sharedSettings.home-manager.users or { };
   hmRest = builtins.removeAttrs (sharedSettings.home-manager or { }) [ "users" ];
+  # Secrets in homes, by user: home.<user>.secrets (path in ~ -> secret) and the
+  # files in home/<user>/templates/ (path in ~ -> file).
+  links = lib.mapAttrs (user: u: (sharedHomes.${user}.secrets or { }) // (u.secrets or { })) homes;
+  templates = lib.mapAttrs (user: _: filesUnder (dir + "/home/${user}/templates")) homes;
+  # Rendered at /run/secrets/rendered/<name>.
+  # shortcut: two paths of one user that differ only in characters a store name
+  # cannot hold (/ included) share a name; add a hash of the path if one ever does.
+  templateName = user: p: lib.strings.sanitizeDerivationName "home-${user}-${p}";
+  # @secret:<name>@ becomes that secret's placeholder, which sops-nix replaces on the machine.
+  render =
+    what: f:
+    lib.concatMapStrings (
+      x:
+      if builtins.isList x then
+        config.sops.placeholder.${builtins.head x}
+          or (throw "${what}: @secret:${builtins.head x}@ is not one of this machine's secrets; add it in Settings → Secrets")
+      else
+        x
+    ) (builtins.split "@secret:([A-Za-z0-9][A-Za-z0-9._-]*)@" (builtins.readFile f));
+  # Whether a module other than this one declares the secret (modules/secrets.nix, or
+  # Nix by hand). A linked secret gets its owner only then, so a missing one fails with
+  # the message in homeModule instead of sops-nix's about its default file.
+  declared =
+    name:
+    lib.any (d: toString d.file != toString file && d.value ? ${name}) options.sops.secrets.definitionsWithLocations;
   sharedTop =
     builtins.removeAttrs sharedSettings [ "home-manager" ]
     // lib.optionalAttrs (hmRest != { }) { home-manager = hmRest; };
   homeModule =
-    user: u:
+    user: u: hm:
     let
       s = sharedHomes.${user} or { };
       gone = lib.unique ((s.removedPackages or [ ]) ++ (u.removedPackages or [ ]));
       kept = map package ((u.packages or [ ]) ++ sharedFor (u.removedPackages or [ ]) (s.packages or [ ]));
-      files = dir + "/home/${user}/files";
+      link = hm.config.lib.file.mkOutOfStoreSymlink;
+      secretPath =
+        p: name:
+        config.sops.secrets.${name}.path
+          or (throw "managed.json links ~/${p} of ${user} to the secret ${name}, which this machine does not have; add it in Settings → Secrets, or unlink it");
     in
     {
       _file = file;
@@ -220,14 +268,11 @@ let
       config = lib.mkMerge [
         {
           home.packages = map package ((u.packages or [ ]) ++ (s.packages or [ ]));
-          home.file = lib.optionalAttrs (builtins.pathExists files) (
-            builtins.listToAttrs (
-              map (f: lib.nameValuePair (lib.removePrefix "${toString files}/" (toString f)) { source = f; }) (
-                lib.filesystem.listFilesRecursive files
-              )
-            )
-          );
+          home.file = lib.mapAttrs (_: f: { source = f; }) (filesUnder (dir + "/home/${user}/files"));
         }
+        # Separate definitions, so a path in ~ set twice fails as a conflict.
+        { home.file = lib.mapAttrs (p: name: { source = link (secretPath p name); }) links.${user}; }
+        { home.file = lib.mapAttrs (p: _: { source = link config.sops.templates.${templateName user p}.path; }) templates.${user}; }
         (values 95 (sharedHomeSettings.${user} or { }))
       ];
     };
@@ -255,9 +300,9 @@ in
     };
     nixosManager.version = lib.mkOption {
       type = lib.types.int;
-      default = 4;
+      default = 5;
       internal = true;
-      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from).";
+      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from); 5 adds secrets in homes (home.<user>.secrets and home/<user>/templates/).";
     };
     nixosManager.packageNames = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
@@ -293,5 +338,25 @@ in
     # home-manager included when it shares the system's pkgs (useGlobalPkgs).
     { nixpkgs.overlays = lib.optional (changed != [ ]) overlay; }
     (lib.optionalAttrs (homes != { }) { home-manager.users = lib.mapAttrs homeModule homes; })
+    # A secret linked into a home is its user's; two users cannot both own one.
+    (lib.optionalAttrs (lib.any (l: l != { }) (builtins.attrValues links)) {
+      sops.secrets = lib.mkMerge (
+        lib.mapAttrsToList (user: l: lib.genAttrs (builtins.attrValues l) (name: lib.mkIf (declared name) { owner = user; })) links
+      );
+    })
+    (lib.optionalAttrs (lib.any (t: t != { }) (builtins.attrValues templates)) {
+      sops.templates = lib.mkMerge (
+        lib.mapAttrsToList (
+          user:
+          lib.mapAttrs' (
+            p: f:
+            lib.nameValuePair (templateName user p) {
+              content = render "home/${user}/templates/${p}" f;
+              owner = user;
+            }
+          )
+        ) templates
+      );
+    })
   ];
 }

@@ -203,9 +203,10 @@ func (s *Service) overridePlan(src managedDoc, attr string) (copyPlan, error) {
 	return p, nil
 }
 
-// homePlan copies a user's home: managed.json's home entry (lists joined),
-// the home-manager options set for them except home.stateVersion, which
-// stays each machine's own, custom.nix and the files linked into ~.
+// homePlan copies a user's home: managed.json's home entry (lists and secret
+// links joined), the home-manager options set for them except
+// home.stateVersion, which stays each machine's own, custom.nix and the files
+// and templates linked into ~.
 func (s *Service) homePlan(src managedDoc, user string) (copyPlan, error) {
 	h, ok := src.view.Home[user]
 	if !ok {
@@ -229,7 +230,7 @@ func (s *Service) homePlan(src managedDoc, user string) (copyPlan, error) {
 	p := copyPlan{files: map[string]copyFile{}}
 	for _, e := range entries {
 		f, in := strings.CutPrefix(e.Path, dir)
-		if e.Dir || !in || (f != home+"custom.nix" && !strings.HasPrefix(f, home+"files/")) {
+		if e.Dir || !in || (f != home+"custom.nix" && !strings.HasPrefix(f, home+"files/") && !strings.HasPrefix(f, home+"templates/")) {
 			continue
 		}
 		// shortcut: files are read as text, so a binary dotfile stops the copy; copy bytes if one is needed.
@@ -261,8 +262,18 @@ func (s *Service) homePlan(src managedDoc, user string) (copyPlan, error) {
 			}
 			return out
 		}
-		next := HomeManaged{Packages: join(cur.Packages, h.Packages), RemovedPackages: join(cur.RemovedPackages, h.RemovedPackages)}
-		changed := !had || len(next.Packages) > len(cur.Packages) || len(next.RemovedPackages) > len(cur.RemovedPackages)
+		next := HomeManaged{Packages: join(cur.Packages, h.Packages), RemovedPackages: join(cur.RemovedPackages, h.RemovedPackages), Secrets: maps.Clone(cur.Secrets)}
+		for p, name := range h.Secrets {
+			if other, ok := next.Secrets[p]; ok && other != name {
+				conflicts = append(conflicts, "home."+user+".secrets: "+p)
+			} else if !ok {
+				if next.Secrets == nil {
+					next.Secrets = map[string]string{}
+				}
+				next.Secrets[p] = name
+			}
+		}
+		changed := !had || len(next.Packages) > len(cur.Packages) || len(next.RemovedPackages) > len(cur.RemovedPackages) || len(next.Secrets) > len(cur.Secrets)
 		v.Home[user] = next
 		if addMissing(v.Settings, settings, "settings", &conflicts) {
 			changed = true

@@ -104,7 +104,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/merge": auth.ScopeEdit, "POST /api/pull": auth.ScopeEdit, "POST /api/hosts/{host}/packages": auth.ScopeEdit,
 	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
 	"POST /api/hosts/{host}/package-overrides": auth.ScopeEdit, "POST /api/hosts/{host}/home": auth.ScopeEdit,
-	"POST /api/managed-module": auth.ScopeEdit, "POST /api/hosts/{host}/copy": auth.ScopeEdit,
+	"POST /api/hosts/{host}/home-secrets": auth.ScopeEdit, "POST /api/managed-module": auth.ScopeEdit, "POST /api/hosts/{host}/copy": auth.ScopeEdit,
 	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
 	"POST /api/updates/discard": auth.ScopeEdit,
 
@@ -242,6 +242,9 @@ func (s *Server) apiMux() *http.ServeMux {
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/home", post(func(r *http.Request, in core.HomeEdit) (any, error) {
 		return s.Svc.SetHome(r.PathValue("host"), in)
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/home-secrets", post(func(r *http.Request, in core.HomeSecretEdit) (any, error) {
+		return s.Svc.LinkHomeSecret(r.PathValue("host"), in)
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/copy", post(func(r *http.Request, in core.CopyRequest) (any, error) {
 		return s.Svc.Copy(r.PathValue("host"), in)

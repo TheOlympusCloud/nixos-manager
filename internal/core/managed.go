@@ -21,7 +21,7 @@ import (
 //	  "packages": ["git", "python3Packages.requests"],
 //	  "removedPackages": ["perl"],
 //	  "packageOverrides": { "htop": { "override": { "sensorsSupport": false }, "patches": [{ "file": "patches/htop.patch" }] } },
-//	  "home": { "pablo": { "packages": ["ripgrep"], "removedPackages": [] } },
+//	  "home": { "pablo": { "packages": ["ripgrep"], "removedPackages": [], "secrets": { ".netrc": "netrc" } } },
 //	  "settings": { "services": { "openssh": { "enable": true } } }
 //	}
 //
@@ -84,6 +84,9 @@ type PackagePatch struct {
 type HomeManaged struct {
 	Packages        []string `json:"packages"`
 	RemovedPackages []string `json:"removedPackages"`
+	// Secrets links a secret of the machine at a path in ~ (".netrc": "netrc"),
+	// which makes it the user's (managed.nix 5).
+	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
 var (
@@ -176,7 +179,8 @@ func (s *Service) readManaged(host string) (managedDoc, error) {
 		md.view.Home = map[string]HomeManaged{}
 	}
 	for u, h := range md.view.Home {
-		md.view.Home[u] = HomeManaged{Packages: orEmpty(h.Packages), RemovedPackages: orEmpty(h.RemovedPackages)}
+		h.Packages, h.RemovedPackages = orEmpty(h.Packages), orEmpty(h.RemovedPackages)
+		md.view.Home[u] = h
 	}
 	if err := md.view.check(); err != nil {
 		return md, errorf(ErrInvalid, "%s: %v; fix it in the code view", p, err)
@@ -218,6 +222,22 @@ func (v *ManagedView) check() error {
 		if err := checkPackageNames(h.RemovedPackages); err != nil {
 			return err
 		}
+		for p, name := range h.Secrets {
+			if err := checkHomePath(p); err != nil {
+				return err
+			}
+			if !secretName.MatchString(name) {
+				return errorf(ErrInvalid, "invalid secret name %q", name)
+			}
+		}
+	}
+	return nil
+}
+
+// checkHomePath accepts a path inside a home folder, such as .config/gh/hosts.yml.
+func checkHomePath(p string) error {
+	if c, err := cleanPath(p); err != nil || c != p || strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return errorf(ErrInvalid, "invalid path in ~ %q: a path inside the home folder, such as .config/gh/hosts.yml", p)
 	}
 	return nil
 }
@@ -339,7 +359,8 @@ func (s *Service) editManaged(host string, base *string, edit func(v *ManagedVie
 	}
 	md.view.Packages, md.view.RemovedPackages = sortSet(md.view.Packages), sortSet(md.view.RemovedPackages)
 	for u, h := range md.view.Home {
-		md.view.Home[u] = HomeManaged{Packages: sortSet(h.Packages), RemovedPackages: sortSet(h.RemovedPackages)}
+		h.Packages, h.RemovedPackages = sortSet(h.Packages), sortSet(h.RemovedPackages)
+		md.view.Home[u] = h
 	}
 	md.doc["packages"], md.doc["settings"] = md.view.Packages, md.view.Settings
 	// The newer keys only when used, so a file that needs none still works with an older managed.nix.
@@ -486,6 +507,37 @@ func (s *Service) SetHome(host string, e HomeEdit) (ManagedView, error) {
 		}
 		if e.StateVersion != "" {
 			return setIn(v.Settings, append(hmPath, "home", "stateVersion"), e.StateVersion)
+		}
+		return nil
+	})
+}
+
+// HomeSecretEdit links a secret of the machine as a file in a user's home, or
+// with Secret empty, takes the link at Path away.
+type HomeSecretEdit struct {
+	User   string `json:"user" jsonschema:"a home-manager user of the machine"`
+	Path   string `json:"path" jsonschema:"the file in ~, e.g. .netrc or .config/rclone/rclone.conf"`
+	Secret string `json:"secret,omitempty" jsonschema:"a secret the machine gets (host_details' secrets): the whole file; empty to unlink"`
+}
+
+// LinkHomeSecret sets or removes a link of managed.json's home.<user>.secrets.
+// The secret becomes the user's on the machine; a missing one fails its check.
+func (s *Service) LinkHomeSecret(host string, e HomeSecretEdit) (ManagedView, error) {
+	if !userName.MatchString(e.User) {
+		return ManagedView{}, errorf(ErrInvalid, "invalid user name %q", e.User)
+	}
+	return s.editManaged(host, nil, func(v *ManagedView) error {
+		h, known := v.Home[e.User]
+		if e.Secret == "" {
+			delete(h.Secrets, e.Path)
+		} else {
+			if h.Secrets == nil {
+				h.Secrets = map[string]string{}
+			}
+			h.Secrets[e.Path] = e.Secret
+		}
+		if known || len(h.Secrets) > 0 { // as EditPackages: the first link adds a user with home-manager by hand
+			v.Home[e.User] = h
 		}
 		return nil
 	})

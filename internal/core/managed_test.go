@@ -182,6 +182,44 @@ func TestManagedHomeManager(t *testing.T) {
 	}
 }
 
+// A secret linked into a home survives other edits, an empty map leaves the file,
+// and only a path inside ~ and a secret name are taken.
+func TestManagedHomeSecrets(t *testing.T) {
+	s := newService(t)
+	edit := must[ManagedView](t)
+	edit(s.SetHome("web", HomeEdit{User: "pablo", Enable: true, StateVersion: "26.05"}))
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"}))
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".config/rclone/rclone.conf", Secret: "rclone"}))
+	v := edit(s.EditPackages("web", PackageEdit{User: "pablo", Add: []string{"ripgrep"}}))
+	if want := map[string]string{".netrc": "netrc", ".config/rclone/rclone.conf": "rclone"}; !reflect.DeepEqual(v.Home["pablo"].Secrets, want) {
+		t.Fatalf("secrets after a package edit %+v", v.Home["pablo"])
+	}
+	if c, _, _ := s.Read("hosts/web/managed.json"); !strings.Contains(c, `".netrc": "netrc"`) {
+		t.Fatalf("file:\n%s", c)
+	}
+	// Every machine: modules/managed.json gets the user's entry with the first link.
+	if v := edit(s.LinkHomeSecret(SharedHost, HomeSecretEdit{User: "pablo", Path: ".netrc", Secret: "netrc"})); v.Home["pablo"].Secrets[".netrc"] != "netrc" {
+		t.Fatalf("shared %+v", v.Home)
+	}
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".netrc"}))
+	edit(s.LinkHomeSecret("web", HomeSecretEdit{User: "pablo", Path: ".config/rclone/rclone.conf"}))
+	if c, _, _ := s.Read("hosts/web/managed.json"); strings.Contains(c, "secrets") || !strings.Contains(c, "ripgrep") {
+		t.Fatalf("after unlinking both:\n%s", c)
+	}
+	for _, bad := range []HomeSecretEdit{
+		{User: "pablo", Path: "/etc/passwd", Secret: "x"}, {User: "pablo", Path: "../x", Secret: "x"}, {User: "pablo", Path: "a//b", Secret: "x"},
+		{User: "pablo", Path: "", Secret: "x"}, {User: "pablo", Path: ".netrc", Secret: "a b"}, {User: "pablo", Path: "a\nb", Secret: "x"},
+		{User: "Pablo", Path: ".netrc", Secret: "x"},
+	} {
+		_, err := s.LinkHomeSecret("web", bad)
+		isErr(t, err, ErrInvalid)
+	}
+	// Written by hand, a bad link is refused when read, as any other value.
+	write(t, s.Repo, "hosts/db/managed.json", `{"home": {"pablo": {"packages": [], "removedPackages": [], "secrets": {"../x": "netrc"}}}}`)
+	_, err := s.ManagedView("db")
+	isErr(t, err, ErrInvalid)
+}
+
 func TestPackageOverrides(t *testing.T) {
 	s := newService(t)
 	o := PackageOverride{

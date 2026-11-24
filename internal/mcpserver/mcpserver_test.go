@@ -187,8 +187,10 @@ func TestCustomisationTools(t *testing.T) {
 	call(t, cs, "set_package_override", map[string]any{"host": "web", "attr": "btop", "override": map[string]any{"overrideAttrs": map[string]any{"doCheck": false}}}, &v)
 	call(t, cs, "set_home_manager", map[string]any{"host": "web", "user": "pablo", "enable": true, "stateVersion": "26.05"}, &v)
 	call(t, cs, "edit_packages", map[string]any{"host": "web", "user": "pablo", "add": []string{"ripgrep"}}, &v)
+	call(t, cs, "link_home_secret", map[string]any{"host": "web", "user": "pablo", "path": ".netrc", "secret": "netrc"}, &v)
 	got, err := svc.ManagedView("web")
-	if err != nil || got.RemovedPackages[0] != "perl" || got.PackageOverrides["btop"].OverrideAttrs["doCheck"] != false || got.Home["pablo"].Packages[0] != "ripgrep" {
+	if err != nil || got.RemovedPackages[0] != "perl" || got.PackageOverrides["btop"].OverrideAttrs["doCheck"] != false || got.Home["pablo"].Packages[0] != "ripgrep" ||
+		got.Home["pablo"].Secrets[".netrc"] != "netrc" {
 		t.Fatalf("managed file after MCP edits %+v %v", got, err)
 	}
 	if res := call(t, cs, "set_package_override", map[string]any{"host": "web", "attr": "btop", "override": map[string]any{"src": map[string]any{"url": "file:///etc/shadow"}}}, nil); !res.IsError {
