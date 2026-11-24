@@ -1584,9 +1584,9 @@ builds the package and passes `nix flake check`, which also makes and keeps a
 binary cache key with the module's script, and an update of a local input is
 locked on `flake-update`, checked and merged.
 
-`NIXMGR_VM_TESTS=1 go test -v -timeout 80m -run InVMWithRealNix ./internal/core`
+`NIXMGR_VM_TESTS=1 go test -v -timeout 40m -run InVMWithRealNix ./internal/core`
 installs a machine as on a real computer, in QEMU (KVM, a few GB of downloads
-and about a quarter of an hour; `internal/core/testdata/install-vm.nix`). A
+and about six minutes on GitHub's runners; `internal/core/testdata/install-vm.nix`). A
 machine made in New machine with a disk layout and a home-manager user, then
 customised as by clicking (packages added, a NixOS default removed, a package
 built differently, the user's own package and a file in their `~`), has its
