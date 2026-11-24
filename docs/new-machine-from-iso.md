@@ -24,6 +24,57 @@ that reports to nixos-manager. There are two ways:
 
 ## The installer ISO from the console
 
+1. **Machines → New machine**: its name, architecture and role, your user
+   with your SSH key, **Physical machine** (or **Proxmox VM**) with a disk
+   layout (**ext4** or **Btrfs**) and the disk to erase. Commit and push it in **Changes**. A machine that is
+   already in the repository with its real hardware configuration works too.
+2. **Machines → Installer ISO**: pick it, **Build ISO**, and wait for the
+   build (its log shows meanwhile). **Download** it, check its SHA-256, and
+   write it to a USB stick: **Install steps** gives the `dd` command.
+3. Boot the machine from the stick and run `sudo fleet-install`. It shows the
+   machine's addresses and the SSH host key it will keep. Wi-Fi: `nmtui`
+   first.
+4. Under **Install steps** in the console: the address, **Fetch host key**,
+   compare the fingerprint with the one on the machine, **Use it for secrets**
+   (this stores its report token too). Commit and push in **Changes**.
+5. On the machine, press Enter. It fetches the repository (a private one asks
+   for your Forgejo user and a token), lists the disks, and erases the one in
+   the disk layout once you type the machine's name. It installs, offers to
+   set the users' passwords, and pushes the hardware configuration it wrote
+   (a token that can write). Take out the stick and reboot.
+
+Users come from the console (the wizard's **User** step, or **Users → Add
+user** before step 2), with their SSH keys: the install sets no root password.
+Then [check it is in](#5-check-it-is-in). What fleet-install does, step by step, and what it
+needs: [Install from an installer ISO](../README.md#install-from-an-installer-iso).
+
+## By hand, from the NixOS ISO
+
+The console never connects to the machine: you copy three things from it, and
+switch it once by hand.
+
+### 1. Install NixOS
+
+Install from the ISO as usual and reboot into it. The host name, user and
+password you pick are fine as they are.
+
+### 2. Copy three things from the machine
+
+As root (`sudo -i`):
+
+```sh
+nixos-generate-config --show-hardware-config     # the hardware configuration
+ssh-keygen -A                                     # makes the SSH host keys if the install has none
+cat /etc/ssh/ssh_host_ed25519_key.pub             # the machine's key, for its secrets
+grep -nE 'boot\.|networking|stateVersion' /etc/nixos/configuration.nix   # boot loader, network, stateVersion
+```
+
+Paste them into the console from a browser on the machine, or turn on
+`services.openssh.enable = true;` in the installer's configuration and copy them
+over SSH.
+
+### 3. Add it in the console
+
 1. **Machines → New machine**: its name (it becomes the host name, which comin
    finds its configuration by), architecture and role; under **User**, the
    user from the installer, same name, **Administrator** on, with your SSH
