@@ -78,7 +78,7 @@ export type Host = {
   managedFile: string | null
   /** managed.json attribute -> package name (nodejs_22 -> nodejs), to remove a model package by attribute. */
   managedPackages?: Record<string, string>
-  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager; 3 adds modules/managed.json. */
+  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager; 3 adds modules/managed.json; 4 packages from another nixpkgs. */
   managedVersion?: number
   packages: Package[]
   /** Packages some module adds but managed.json's removedPackages takes out. */
@@ -232,7 +232,8 @@ export type PackageSource = { url?: string; github?: string; rev?: string; hash?
 /** A patch from a URL, or a file in the machine's folder (patches/fix.patch). */
 export type PackagePatch = { url?: string; hash?: string; file?: string }
 /** .override with override, then .overrideAttrs with overrideAttrs, version, src, and patches after the package's own. */
-export type PackageOverride = { override?: Record<string, unknown>; overrideAttrs?: Record<string, unknown>; version?: string; src?: PackageSource; patches?: PackagePatch[] }
+/** from: a flake input, another nixpkgs, to take the package from (managed.nix 4). */
+export type PackageOverride = { from?: string; override?: Record<string, unknown>; overrideAttrs?: Record<string, unknown>; version?: string; src?: PackageSource; patches?: PackagePatch[] }
 /** What a copy did on one machine. conflicts: what it already has with another value, so nothing was written there. */
 export type CopyResult = { host: string; changed: boolean; conflicts?: string[]; error?: string }
 /** user: a home-manager user's home.packages. exclude/restore: package names, wherever they are added. */

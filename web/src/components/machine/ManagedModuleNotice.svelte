@@ -5,10 +5,15 @@
   import { codeLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
 
-  /** A machine whose modules/managed.nix predates modules/managed.json (2), or also removed packages, overrides and home-manager (1). */
+  /** A machine whose modules/managed.nix predates packages from another nixpkgs (3), modules/managed.json (2), or also removed packages, overrides and home-manager (1). */
   let { host }: { host: Host } = $props()
   const version = $derived(host.managedVersion ?? 1)
-  const old = $derived(!!host.managedFile && !host.error && version < 3)
+  const old = $derived(!!host.managedFile && !host.error && version < 4)
+  const lacks = $derived([
+    ...(version < 2 ? ['remove or change packages', 'manage home-manager users'] : []),
+    ...(version < 3 ? ['apply what is set for every machine'] : []),
+    'take a package from another nixpkgs',
+  ])
   let busy = $state(false)
 
   async function update() {
@@ -22,9 +27,7 @@
   <section class="card notice" data-tone="warn" use:frame={{ title: 'An older managed.nix' }} role="status">
     <p>
       <Icon name="alert" />
-      {host.name} loads a <a class="mono" href={codeLink('modules/managed.nix')}>modules/managed.nix</a> from an older nixos-manager. It applies packages and options set here, but not what is set for every machine{version < 2
-        ? ', and it cannot remove or change packages, or manage home-manager users'
-        : ''}.
+      {host.name} loads a <a class="mono" href={codeLink('modules/managed.nix')}>modules/managed.nix</a> from an older nixos-manager. It applies packages and options set here, but cannot {lacks.length > 1 ? `${lacks.slice(0, -1).join(', ')} or ${lacks.at(-1)}` : lacks[0]}.
     </p>
     <button class="primary" disabled={busy} onclick={update}><Icon name="refresh" /> {busy ? 'Updating…' : 'Update managed.nix'}</button>
   </section>

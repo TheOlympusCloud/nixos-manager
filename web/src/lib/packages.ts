@@ -1,12 +1,14 @@
 // Customising packages: the rows of a machine's (or a home's) packages, and
 // the text forms of a package override.
-import type { CopyResult, Host, Managed, Package, PackageOverride } from './api'
+import type { CopyResult, Host, Input, Managed, Package, PackageOverride } from './api'
 
 /** Edits take this in place of a machine name to change modules/managed.json, set for every machine. */
 export const SHARED = '*'
 export const SHARED_FILE = 'modules/managed.json'
 /** Whether the machine's modules/managed.nix applies modules/managed.json (version 3). */
 export const appliesShared = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 3
+/** Whether the machine's modules/managed.nix takes a package from another nixpkgs (version 4). */
+export const takesFromInputs = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 4
 
 /** One row of a packages table. */
 export type PackageRow = {
@@ -172,6 +174,7 @@ export function parseArgs(text: string): { args: Record<string, unknown> } | { p
 export function overrideSummary(o: PackageOverride | undefined, rawFile: boolean): string {
   const parts: string[] = []
   const n = (x: object | undefined) => Object.keys(x ?? {}).length
+  if (o?.from) parts.push(`from ${o.from}`)
   if (n(o?.override)) parts.push(`${n(o?.override)} argument${n(o?.override) > 1 ? 's' : ''}`)
   if (n(o?.overrideAttrs)) parts.push(`${n(o?.overrideAttrs)} attribute${n(o?.overrideAttrs) > 1 ? 's' : ''}`)
   if (o?.version) parts.push(`version ${o.version}`)
@@ -183,7 +186,9 @@ export function overrideSummary(o: PackageOverride | undefined, rawFile: boolean
 
 /** Drops empty parts, so an override with nothing left puts the package back. */
 export function cleanOverride(o: PackageOverride): PackageOverride | null {
+  // In managed.json's order, so a saved override compares equal to the form's.
   const out: PackageOverride = {}
+  if (o.from?.trim()) out.from = o.from.trim()
   if (Object.keys(o.override ?? {}).length) out.override = o.override
   if (Object.keys(o.overrideAttrs ?? {}).length) out.overrideAttrs = o.overrideAttrs
   if (o.version?.trim()) out.version = o.version.trim()
@@ -196,6 +201,14 @@ export function cleanOverride(o: PackageOverride): PackageOverride | null {
   if (patches.length) out.patches = patches
   return Object.keys(out).length ? out : null
 }
+
+// ---- another nixpkgs to take a package from ----
+
+/** The locked flake inputs that are a nixpkgs (a fork too), less the one named nixpkgs: the machines' own. */
+export const otherNixpkgs = (inputs: Input[]) => inputs.filter((i) => i.name !== 'nixpkgs' && /^github:[^/]+\/nixpkgs(\/|$)/i.test(i.url)).map((i) => i.name)
+
+/** The line that adds a branch of NixOS/nixpkgs to flake.nix's inputs. */
+export const nixpkgsInputLine = (name: string, branch: string) => `${name}.url = "github:NixOS/nixpkgs/${branch}";`
 
 // ---- starters for the files next to managed.json ----
 

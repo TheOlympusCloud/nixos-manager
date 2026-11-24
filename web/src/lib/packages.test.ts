@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Managed } from './api'
-import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeRows, homeStateVersion, overriddenAttrs, overrideSummary, packageFile, parseArgs, systemRows } from './packages'
+import { SHARED_FILE, cleanOverride, copySummary, copyTargets, formatArgs, homeRows, homeStateVersion, nixpkgsInputLine, otherNixpkgs, overriddenAttrs, overrideSummary, packageFile, parseArgs, systemRows, takesFromInputs } from './packages'
 import { host } from './testmodel'
 
 const mf = 'hosts/pc/managed.json'
@@ -143,6 +143,32 @@ describe('override text', () => {
       src: { github: 'a/b', rev: 'v1' },
       patches: [{ file: 'p.patch' }, { url: 'https://x' }],
     })
+  })
+  it('keeps the nixpkgs a package comes from, first as managed.json writes it', () => {
+    expect(overrideSummary({ from: 'nixpkgs-unstable', patches: [{ url: 'u' }] }, false)).toBe('from nixpkgs-unstable · 1 patch')
+    expect(JSON.stringify(cleanOverride({ version: '2', from: ' nixpkgs-unstable ' }))).toBe('{"from":"nixpkgs-unstable","version":"2"}')
+    expect(cleanOverride({ from: ' ' })).toBeNull()
+  })
+})
+
+describe('another nixpkgs', () => {
+  const input = (name: string, url: string) => ({ name, type: 'github', url, rev: '', lastModified: 0 })
+  it('offers the locked inputs that are a nixpkgs, other than the machine’s own', () => {
+    const inputs = [
+      input('nixpkgs', 'github:NixOS/nixpkgs/nixos-26.05'),
+      input('nixpkgs-unstable', 'github:nixos/nixpkgs/nixos-unstable'),
+      input('home-manager', 'github:nix-community/home-manager/release-26.05'),
+      input('fork', 'github:pablo/nixpkgs'),
+      input('nixpkgs-wayland', 'github:nix-community/nixpkgs-wayland'),
+    ]
+    expect(otherNixpkgs(inputs)).toEqual(['nixpkgs-unstable', 'fork'])
+  })
+  it('writes the line flake.nix needs', () => {
+    expect(nixpkgsInputLine('nixpkgs-unstable', 'nixos-unstable')).toBe('nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";')
+  })
+  it('needs managed.nix 4', () => {
+    expect([3, 4].map((v) => takesFromInputs(host('pc', { managedVersion: v })))).toEqual([false, true])
+    expect(takesFromInputs(host('code', { managedFile: null, managedVersion: 4 }))).toBe(false)
   })
 })
 

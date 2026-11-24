@@ -2,15 +2,16 @@
   import { untrack } from 'svelte'
   import { api, type Host, type PackagePatch } from '../../lib/api'
   import { copyToMachines, fleet, openOrCreate, setPackageOverride, targetName } from '../../lib/fleet.svelte'
-  import { SHARED, cleanOverride, copyTargets, formatArgs, overrideSummary, packageFile, packageFileTemplate, parseArgs } from '../../lib/packages'
+  import { SHARED, cleanOverride, copyTargets, formatArgs, nixpkgsInputLine, otherNixpkgs, overrideSummary, packageFile, packageFileTemplate, parseArgs, takesFromInputs } from '../../lib/packages'
   import { link } from '../../lib/router.svelte'
-  import { app, refresh } from '../../lib/state.svelte'
+  import { app, refresh, startJob } from '../../lib/state.svelte'
   import { confirmBox, report } from '../../lib/ui.svelte'
+  import { copyText } from '../../lib/util'
   import CopyTo from '../CopyTo.svelte'
   import Icon from '../Icon.svelte'
 
   /**
-   * How one package is built on a machine: .override arguments, .overrideAttrs
+   * How one package is built on a machine: the nixpkgs it comes from, .override arguments, .overrideAttrs
    * attributes, another version and source, patches, and a Nix file for the rest.
    * The change is an overlay: everything on the machine that uses the package gets it.
    * target: the machine's name (default) or SHARED, to change it on every machine.
@@ -40,13 +41,32 @@
   let hash = $state(start?.src?.hash ?? '')
   let patches = $state<PackagePatch[]>((start?.patches ?? []).map((p) => ({ ...p })))
 
+  // The nixpkgs it comes from: the machine's own (''), or a flake input.
+  const inputs = $derived(fleet.model?.inputs ?? [])
+  const choices = $derived(otherNixpkgs(inputs))
+  let from = $state(start?.from ?? '')
+  // An input other than those offered: its name, and the branch for the line flake.nix needs.
+  let adding = $state(!!start?.from && !otherNixpkgs(untrack(() => fleet.model?.inputs ?? [])).includes(start.from))
+  let branch = $state('nixos-unstable')
+  const fromProblem = $derived(from.trim() && !/^[A-Za-z0-9_][A-Za-z0-9_'-]*$/.test(from.trim()) ? 'A flake input name, such as nixpkgs-unstable.' : '')
+  // Not locked yet: flake.nix needs the line, then Lock.
+  const unlocked = $derived(!!from.trim() && !fromProblem && !!fleet.model && !inputs.some((i) => i.name === from.trim()))
+  const inputLine = $derived(nixpkgsInputLine(from.trim(), branch.trim() || 'nixos-unstable'))
+  let lineCopied = $state(false)
+  async function copyLine() {
+    if (!(await copyText(inputLine))) return
+    lineCopied = true
+    setTimeout(() => (lineCopied = false), 2000)
+  }
+
   const args = $derived(parseArgs(argsText))
   const attrs = $derived(parseArgs(attrsText))
   const attrProblem = $derived(/^[A-Za-z0-9_+-][A-Za-z0-9_+'-]*(\.[A-Za-z0-9_+-][A-Za-z0-9_+'-]*)*$/.test(attr) ? '' : 'An attribute such as htop or python3Packages.requests.')
-  const problem = $derived(attrProblem || ('problem' in args ? args.problem : '') || ('problem' in attrs ? attrs.problem : ''))
+  const problem = $derived(attrProblem || fromProblem || ('problem' in args ? args.problem : '') || ('problem' in attrs ? attrs.problem : ''))
   const override = $derived(
     'args' in args && 'args' in attrs
       ? cleanOverride({
+          from,
           override: args.args,
           overrideAttrs: attrs.args,
           version,
@@ -87,7 +107,13 @@
   }
   // A copy takes what is saved, so it waits for the form to be saved.
   const saved = $derived(JSON.stringify(override) === JSON.stringify(current ?? null))
-  const copyHosts = $derived(everywhere ? [] : copyTargets(fleet.model?.hosts ?? [], host.name).map((h) => ({ name: h.name })))
+  const copyHosts = $derived(
+    everywhere
+      ? []
+      : copyTargets(fleet.model?.hosts ?? [], host.name)
+          .filter((h) => !current?.from || takesFromInputs(h))
+          .map((h) => ({ name: h.name })),
+  )
   const feature = $derived(host.features.find((f) => (f.group === 'programs' || f.group === 'services') && f.name === name))
 </script>
 
@@ -105,6 +131,38 @@
     <input class="mono" bind:value={attr} disabled={!!given || !!current} spellcheck="false" aria-invalid={!!attrProblem} />
     {#if attrProblem}<span class="problem small">{attrProblem}</span>{/if}
   </label>
+
+  <section>
+    <h3>From another nixpkgs</h3>
+    <p class="muted small">Take {attr} from another nixpkgs in flake.nix's inputs, such as nixos-unstable for a newer version. The changes below apply on top.</p>
+    <div class="seg" role="radiogroup" aria-label="The nixpkgs it comes from">
+      <button role="radio" aria-checked={!adding && !from} class:on={!adding && !from} onclick={() => ((adding = false), (from = ''))}>{everywhere ? 'Each machine’s' : `${host.name}’s`}</button>
+      {#each choices as c (c)}
+        <button role="radio" class="mono" aria-checked={!adding && from === c} class:on={!adding && from === c} onclick={() => ((adding = false), (from = c))}>{c}</button>
+      {/each}
+      <button role="radio" aria-checked={adding} class:on={adding} onclick={() => ((adding = true), (from = choices.includes('nixpkgs-unstable') ? '' : 'nixpkgs-unstable'))}>Another input…</button>
+    </div>
+    {#if adding}
+      <div class="row">
+        <label class="field"><span class="label">Input name</span><input class="mono" bind:value={from} placeholder="nixpkgs-unstable" spellcheck="false" aria-invalid={!!fromProblem} /></label>
+        {#if unlocked}<label class="field"><span class="label">Branch of NixOS/nixpkgs</span><input class="mono" bind:value={branch} placeholder="nixos-unstable" spellcheck="false" /></label>{/if}
+      </div>
+      {#if fromProblem}<span class="problem small">{fromProblem}</span>{/if}
+    {/if}
+    {#if unlocked}
+      <p class="warn small">
+        <Icon name="alert" /> <span class="mono">{from.trim()}</span> is not in flake.lock yet: add this line to the inputs in <span class="mono">flake.nix</span>, then Lock. Until then, the check fails where {attr} comes from it.
+      </p>
+      <div class="row">
+        <pre class="snippet">{inputLine}</pre>
+        <button class="small" onclick={copyLine}><Icon name={lineCopied ? 'tick' : 'copy'} /> {lineCopied ? 'Copied' : 'Copy'}</button>
+        <button class="small" onclick={() => startJob({ kind: 'lock' })}><Icon name="key" /> Lock</button>
+      </div>
+    {/if}
+    {#if from.trim() && !takesFromInputs(host)}
+      <p class="warn small"><Icon name="alert" /> {host.name} loads an older modules/managed.nix, which ignores this: update it on the Packages tab.</p>
+    {/if}
+  </section>
 
   <section>
     <h3>Arguments <span class="mono muted">.override</span></h3>
@@ -240,6 +298,22 @@
   }
   .problem {
     color: var(--red);
+  }
+  .warn {
+    margin: 0;
+    color: var(--yellow);
+  }
+  .warn :global(.ic) {
+    color: inherit;
+  }
+  .snippet {
+    flex-basis: 100%;
+    margin: 0;
+    padding: 0 1ch;
+    overflow: auto;
+    color: var(--fg-strong);
+    background: var(--bg-input);
+    white-space: pre;
   }
   .problem::before {
     content: '✖ ';
