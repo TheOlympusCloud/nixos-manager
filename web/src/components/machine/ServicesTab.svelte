@@ -4,6 +4,7 @@
   import { groupLabel, groupOrder } from '../../lib/matrix'
   import { machineLink } from '../../lib/router.svelte'
   import { managedFeatures, sourceOf } from '../../lib/values'
+  import { frame } from '../../lib/ascii'
   import Drawer from '../Drawer.svelte'
   import Icon from '../Icon.svelte'
   import OptionBrowser from '../OptionBrowser.svelte'
@@ -62,19 +63,19 @@
 </script>
 
 <div class="toolbar">
-  <input class="search" type="search" placeholder="Filter services and programs" aria-label="Filter services and programs" data-search bind:value={filter} />
+  <span class="filter"><Icon name="filter" /><input class="search" type="search" placeholder="Filter services and programs" aria-label="Filter services and programs" data-search bind:value={filter} /></span>
   {#if fleet.computing && cards.some((f) => pendingOf(f))}<span class="badge busy">Re-evaluating {host.name}</span>{/if}
   <span class="spacer"></span>
   {#if host.managedFile}
-    <button disabled={!editable} onclick={() => (drawer = { kind: 'catalog' })}><Icon name="grid" size={14} />Popular services</button>
-    <button class="primary" disabled={!editable} onclick={() => (drawer = { kind: 'add' })}><Icon name="plus" size={14} />Add service or program</button>
+    <button disabled={!editable} onclick={() => (drawer = { kind: 'catalog' })}><Icon name="grid" /> Popular services</button>
+    <button class="primary" disabled={!editable} onclick={() => (drawer = { kind: 'add' })}><Icon name="plus" /> Add service or program</button>
   {:else}
     <span class="muted small">{host.name} is Code only: <a href={machineLink(host.name)}>turn on editing</a> to switch services by clicking.</span>
   {/if}
 </div>
 
 {#if !cards.length}
-  <div class="empty card">
+  <div class="empty card" use:frame={'dash'}>
     <p><strong>No services or programs are enabled on {host.name}.</strong></p>
     <p class="muted">Features show up here as soon as something turns them on: a hand-written module, a flake input, or {host.managedFile ? 'the Add button above' : 'this app once editing is on'}.</p>
   </div>
@@ -86,14 +87,14 @@
   {@const fs = shown.filter((f) => f.group === g)}
   {#if fs.length}
     <section class="section">
-      <h2 class="g-head"><span class="dot" style:--c="var(--g-{g})"></span>{groupLabel[g]} <span class="muted num">{fs.length}</span></h2>
+      <h2 class="g-head g-{g}">{groupLabel[g]} <span class="muted num">{fs.length}</span></h2>
       <div class="cards">
         {#each fs as f (f.name)}
           {@const pending = pendingOf(f)}
           {@const on = isOn(f)}
-          <article class="card feat g-{g}" class:off={!on} class:pending={!!pending}>
+          <article class="card feat g-{g}" class:off={!on} class:pending={!!pending} use:frame={{ title: f.name, kind: pending ? 'dash' : 'round', lift: true }}>
             <div class="f-top">
-              <h3>{f.name}</h3>
+              <h3 class="sr-only">{f.name}</h3>
               {#if editable}
                 <Switch checked={on} busy={busy === g + f.name} label="{f.name} on {host.name}" onchange={(v) => toggle(f, v)} />
               {/if}
@@ -107,10 +108,10 @@
                 {/if}
                 <SourceTag source={sourceFor(f)} />
                 {#if editable && setHere(f) !== undefined && f.inModel && handFiles(f).length}
-                  <button class="small ghost" disabled={busy === g + f.name} onclick={() => reset(f)} title="Remove the value set here; {handFiles(f)[0]} decides again">Reset</button>
+                  <button class="small ghost reset" disabled={busy === g + f.name} onclick={() => reset(f)} title="Remove the value set here; {handFiles(f)[0]} decides again">Reset</button>
                 {/if}
               </div>
-              {#if f.inModel}<button class="small ghost" onclick={() => ((selected = ''), (drawer = { kind: 'configure', f }))}><Icon name="sliders" size={13} />Configure</button>{/if}
+              {#if f.inModel}<button class="small ghost configure" onclick={() => ((selected = ''), (drawer = { kind: 'configure', f }))}><Icon name="sliders" /> Configure</button>{/if}
             </div>
           </article>
         {/each}
@@ -135,66 +136,41 @@
 
 <style>
   .toolbar {
-    margin-bottom: var(--s2);
+    margin-bottom: var(--lh);
+  }
+  .filter {
+    display: flex;
+    gap: 1ch;
   }
   .empty {
     display: grid;
-    gap: 6px;
-    max-width: 640px;
-    margin-top: var(--s4);
-    padding: 16px 18px;
-    line-height: 1.5;
+    max-width: 80ch;
+    margin-top: var(--lh);
+    color: var(--fg);
   }
   .g-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .g-head .dot {
-    background: var(--c);
+    color: var(--c);
   }
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: var(--s3);
+    grid-template-columns: repeat(auto-fill, minmax(38ch, 1fr));
+    gap: var(--lh) 2ch;
   }
   .feat {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px 14px;
-    transition:
-      opacity var(--t) var(--ease),
-      border-color var(--t) var(--ease);
   }
   .feat.off:not(.pending) {
     opacity: 0.6;
   }
-  .feat.pending {
-    border-style: dashed;
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-  }
-  .feat.pending.off h3 {
-    color: var(--fg-muted);
-    text-decoration: line-through;
-    text-decoration-color: var(--fg-faint);
-  }
   .f-top {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
-  h3 {
-    overflow-wrap: anywhere;
-    font-size: var(--fs-md);
+    gap: 2ch;
   }
   .desc {
     display: -webkit-box;
     overflow: hidden;
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.5;
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -202,13 +178,22 @@
   .f-foot {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
-    gap: 8px;
+    gap: 0 2ch;
     margin-top: auto;
   }
   .f-foot .chips {
-    align-items: center;
+    gap: 0 2ch;
     min-width: 0;
+  }
+  .reset:not(:hover, :focus-visible) {
+    color: var(--fg-muted);
+  }
+  .configure:not(:hover, :focus-visible) {
+    color: var(--accent);
+  }
+  .configure:not(:hover, :focus-visible) :global(.ic) {
+    color: inherit;
   }
 </style>

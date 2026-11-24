@@ -134,9 +134,9 @@
             {#if secrets && !secretsOn}
               <span class="muted small">Secrets are off on this server ({secrets.missing.join(', ')} not found).</span>
             {:else if secretsOn && approved?.key === key.key}
-              <span class="ok-text"><Icon name="tick" size={13} />{host}'s secrets are encrypted for this key.</span>
+              <span class="ok-text"><Icon name="tick" /> {host}'s secrets are encrypted for this key.</span>
             {:else if secretsOn}
-              {#if approved}<span class="warn"><Icon name="alert" size={13} />Not the key approved for {host}: its secrets do not open with this one.</span>{/if}
+              {#if approved}<span class="warn"><Icon name="alert" /> Not the key approved for {host}: its secrets do not open with this one.</span>{/if}
               <button class="small primary" onclick={approve} disabled={!!busy}>{busy === 'approve' ? 'Approving…' : 'Use it for secrets'}</button>
             {/if}
           </div>
@@ -154,7 +154,7 @@
             onclick={copy}
             disabled={!canCopy}
             title={!ready ? 'Enter its address first' : generate === null ? 'hardware-configuration.nix could not be read' : undefined}
-            ><Icon name={copied ? 'tick' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button
+            ><Icon name={copied ? 'tick' : 'copy'} /> {copied ? 'Copied' : 'Copy'}</button
           >
         </div>
         <span class="muted small">
@@ -173,38 +173,45 @@
 </section>
 
 <style>
-  summary {
-    list-style-position: outside;
-  }
   summary h2 {
     display: inline;
-    font-size: var(--fs-lg);
+  }
+  summary h2::before {
+    content: none;
   }
   .lead {
-    margin: var(--s3) 0 0;
-    line-height: 1.55;
+    margin-top: var(--lh);
   }
   .steps {
     display: grid;
-    gap: var(--s3);
-    margin: var(--s3) 0 0;
-    padding-left: 20px;
-    line-height: 1.55;
+    gap: var(--lh);
+    margin-top: var(--lh);
+    counter-reset: step;
   }
-  .fetch,
-  .key,
-  .cmd,
-  .steps .error-text,
-  .steps li > .muted {
-    margin-top: 6px;
+  .steps > li {
+    position: relative;
+    padding-left: 3ch;
+    counter-increment: step;
+  }
+  .steps > li::before {
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-weight: 700;
+    content: counter(step) '.';
   }
   .steps .error-text,
   .steps li > .muted {
     display: block;
   }
+  .fetch,
+  .key,
+  .cmd {
+    margin-top: var(--lh);
+  }
   .fetch {
     display: flex;
-    gap: 8px;
+    gap: 0 2ch;
   }
   .fetch input {
     flex: 1;
@@ -213,32 +220,28 @@
   .key {
     display: grid;
     justify-items: start;
-    gap: 4px;
   }
-  .ok-text,
-  .warn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+  .ok-text {
     color: var(--green);
-    font-size: var(--fs-sm);
   }
   .warn {
     color: var(--yellow);
   }
+  .ok-text :global(.ic),
+  .warn :global(.ic) {
+    color: inherit;
+  }
   .cmd {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 0 2ch;
   }
   .cmd code {
     flex: 1;
     min-width: 0;
-    padding: 6px 10px;
+    padding: 0 1ch;
     color: var(--fg-strong);
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    background: var(--bg-input);
   }
   .nw {
     white-space: nowrap;

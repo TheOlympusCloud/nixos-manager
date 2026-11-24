@@ -8,6 +8,7 @@
   import { machineLink } from '../../lib/router.svelte'
   import { confirmBox } from '../../lib/ui.svelte'
   import { effective, type Effective } from '../../lib/values'
+  import { frame } from '../../lib/ascii'
   import Icon from '../Icon.svelte'
   import SourceTag from '../SourceTag.svelte'
   import Switch from '../Switch.svelte'
@@ -101,28 +102,28 @@
 </script>
 
 {#if !host.managedFile}
-  <p class="banner"><Icon name="info" size={14} />{host.name} is Code only: these are its current settings. <a href={machineLink(host.name)}>Turn on editing</a> to change them by clicking.</p>
+  <p class="banner"><Icon name="info" /> {host.name} is Code only: these are its current settings. <a href={machineLink(host.name)}>Turn on editing</a> to change them by clicking.</p>
 {/if}
 
 {#if vals.error}
-  <div class="card failed" role="alert">
+  <div class="card failed" role="alert" data-tone="err" use:frame={'round'}>
     <p><strong>Could not read the settings of {host.name}.</strong></p>
     <pre>{vals.error}</pre>
   </div>
 {/if}
 
 {#if !vals.values && !vals.error}
-  <p class="computing" role="status"><span class="dot busy"></span>Reading {plural(essentialOptions.length, 'setting')} from {host.name}'s evaluation…</p>
+  <p class="computing" role="status"><span class="dot busy"></span> Reading {plural(essentialOptions.length, 'setting')} from {host.name}'s evaluation…</p>
 {/if}
 
 <div class="groups">
   {#each essentials as g (g.title)}
-    <section class="group">
-      <header>
+    <section class="card group" use:frame={{ title: g.title, tag: g.note }}>
+      <header class="sr-only">
         <h2>{g.title}</h2>
-        <p class="muted small">{g.note}</p>
+        <p>{g.note}</p>
       </header>
-      <ul class="card rows">
+      <ul class="items">
         {#each g.items as item (item.option)}
           {@const e = effOf(item.option)}
           {@const v = e?.state === 'value' ? e.value : undefined}
@@ -135,22 +136,22 @@
             </div>
             <div class="how">
               {#if !e}
-                <span class="skel" style:width="90px"></span>
+                <span class="skel" style:width="12ch"></span>
               {:else if e.state === 'missing'}
-                <span class="muted small">Not available on {host.name}</span>
+                <span class="muted">Not available on {host.name}</span>
               {:else if e.state === 'error'}
-                <span class="error-text small" title={e.error}>Does not evaluate</span>
+                <span class="error-text" title={e.error}>Does not evaluate</span>
               {:else}
                 <SourceTag source={e.source} pending={e.pending} />
                 {#if editable && e.source.kind === 'here' && !e.pending}
                   <button class="icon" aria-label="Reset {item.label}" title="Remove it from {host.managedFile}: the hand-written or default value applies again" disabled={busy === item.option} onclick={() => reset(item)}
-                    ><Icon name="undo" size={13} /></button>
+                    ><Icon name="undo" /></button>
                 {/if}
                 {#if editing === item.option}
                   <form class="edit" onsubmit={(ev) => submit(ev, item)}>
                     {#if item.kind === 'retention'}
                       <input class="days num" type="number" min="1" max="3650" aria-label="{item.label} (days)" bind:value={text} bind:this={inputEl} />
-                      <span class="muted small">days</span>
+                      <span class="muted">days</span>
                     {:else}
                       <input class="mono" list="list-{item.option}" aria-label={item.label} spellcheck="false" autocomplete="off" bind:value={text} bind:this={inputEl} aria-invalid={!!problem(item)} />
                       {#if item.suggest}<datalist id="list-{item.option}">{#each item.suggest() as s (s)}<option value={s}></option>{/each}</datalist>{/if}
@@ -173,7 +174,7 @@
                     {#each item.choices ?? [] as c (c)}<option value={c}>{c}</option>{/each}
                   </select>
                 {:else if editable}
-                  <button class="value" onclick={() => startEdit(item, e)} title="Change {item.label.toLowerCase()}">{shown(item, v)}<Icon name="edit" size={12} /></button>
+                  <button class="value bare" onclick={() => startEdit(item, e)} title="Change {item.label.toLowerCase()}">{shown(item, v)} <Icon name="edit" /></button>
                 {:else}
                   <span class="state" class:risky={risky(item, v)}>{shown(item, v)}</span>
                 {/if}
@@ -189,71 +190,42 @@
 
 <style>
   .banner {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: var(--s4);
-    padding: 10px 14px;
-    color: var(--fg);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--edge);
+    margin-bottom: var(--lh);
   }
-  .banner :global(svg) {
+  .banner :global(.ic) {
     color: var(--accent);
   }
   .computing {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: var(--s3);
+    margin-bottom: var(--lh);
     color: var(--fg-muted);
   }
   .failed {
     display: grid;
-    gap: 8px;
-    margin-bottom: var(--s4);
-    padding: 12px 14px;
-    border-color: color-mix(in srgb, var(--red) 30%, var(--border));
+    margin-bottom: var(--lh);
   }
   .failed pre {
-    margin: 0;
     color: var(--fg-muted);
-    font: 12px/1.5 var(--mono);
     white-space: pre-wrap;
   }
   .groups {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-    gap: var(--s5) var(--s4);
+    grid-template-columns: repeat(auto-fit, minmax(62ch, 1fr));
+    gap: var(--lh) 2ch;
     align-items: start;
   }
-  .group header {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
-  h2 {
-    font-size: var(--fs-lg);
-  }
-  .rows {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+  .items {
+    display: grid;
+    gap: var(--lh);
   }
   .row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 16px;
-    align-items: center;
-    min-height: 58px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
+    gap: 0 2ch;
+    margin: 0 -1ch;
+    padding: 0 1ch;
   }
-  .row:last-child {
-    border-bottom: 0;
+  .row:hover {
+    background: var(--bg-hover);
   }
   /* Editing: the field gets the full width under the label. */
   .row.editing {
@@ -261,50 +233,61 @@
   }
   .row.editing .how {
     flex-direction: row-reverse;
+    flex-wrap: wrap-reverse;
     justify-content: flex-end;
   }
   .row.editing .problem {
     text-align: left;
   }
+  /* The name and the control share the first line; the help and the option path run the full width under it. */
   .what {
-    display: grid;
-    gap: 1px;
-    min-width: 0;
+    display: contents;
+  }
+  .help,
+  .opt {
+    grid-column: 1 / -1;
+  }
+  .row:not(.editing) .how {
+    grid-row: 1;
+    grid-column: 2;
   }
   .name {
+    min-width: 0;
     color: var(--fg-strong);
-    font-weight: 500;
   }
   .help {
     color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    line-height: 1.45;
   }
   .opt {
     overflow: hidden;
     color: var(--fg-faint);
-    font-size: 10.5px;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .row.off .name,
+  .row.off .name {
+    color: var(--fg-faint);
+  }
   .row.off .how {
     opacity: 0.55;
   }
   .how {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 0 2ch;
     min-width: 0;
   }
   .how > :global(.src) {
-    max-width: 220px;
+    max-width: 30ch;
   }
   .state {
-    min-width: 28px;
     color: var(--fg-strong);
+    font-weight: 700;
     text-align: right;
+    white-space: nowrap;
+  }
+  .state.risky::before {
+    content: '▲ ';
   }
   .risky {
     color: var(--yellow);
@@ -313,34 +296,36 @@
     color: var(--yellow);
   }
   .value {
-    max-width: 260px;
+    max-width: 32ch;
     overflow: hidden;
     color: var(--fg-strong);
-    font-weight: 400;
+    font-weight: 700;
     text-overflow: ellipsis;
   }
-  .value :global(svg) {
-    color: var(--fg-muted);
+  .value :global(.ic) {
+    min-width: 1ch;
+    font-weight: 400;
+  }
+  .value:is(:hover, :focus-visible) :global(.ic) {
+    color: inherit;
   }
   .short {
-    width: 190px;
+    width: 22ch;
   }
   .edit {
     display: flex;
-    align-items: center;
-    gap: 6px;
+    align-items: baseline;
+    gap: 0 2ch;
   }
   .edit input {
-    width: 210px;
-    height: 26px;
+    width: 26ch;
   }
   .edit input.days {
-    width: 80px;
+    width: 8ch;
   }
   .problem {
     grid-column: 1 / -1;
     color: var(--red);
-    font-size: var(--fs-sm);
     text-align: right;
   }
   @media (max-width: 1180px) {
