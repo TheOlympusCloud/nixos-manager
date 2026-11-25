@@ -48,10 +48,31 @@ let
       map (show (depth - 1)) v
     else
       v;
+  # The option at path, through submodules' own options: users.users.pablo.shell,
+  # and home-manager.users.pablo.olympus.x, which only pablo's own modules declare.
+  optionAt =
+    node: path:
+    let
+      h = builtins.head path;
+      meta = node.valueMeta or { };
+    in
+    if path == [ ] then
+      node
+    else if lib.isOption node then
+      if meta ? attrs then
+        if meta.attrs ? ${h} && meta.attrs.${h} ? configuration then optionAt meta.attrs.${h}.configuration.options (builtins.tail path) else null
+      else if meta ? configuration then
+        optionAt meta.configuration.options path
+      else
+        null
+    else if builtins.isAttrs node && node ? ${h} then
+      optionAt node.${h} (builtins.tail path)
+    else
+      null;
   one =
     path:
     let
-      opt = lib.attrByPath path null options;
+      opt = try (optionAt options path) null;
       found = opt != null && builtins.isAttrs opt && lib.isOption opt;
       forced =
         let

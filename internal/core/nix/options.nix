@@ -12,6 +12,22 @@ let
   lib = machine.pkgs.lib;
   try = v: default: let r = builtins.tryEval v; in if r.success then r.value else default;
   text = v: if v == null then null else if builtins.isString v then v else if builtins.isAttrs v then v.text or null else null;
+  docs = lib.optionAttrSetToDocList machine.options;
+  # The options under home-manager.users.<name> are those every home has (the
+  # type's). Each user's own home also has what their own modules declare
+  # (olympus.supersonic.enable): listed by name, home-manager.users.pablo.….
+  known = builtins.listToAttrs (map (o: lib.nameValuePair o.name true) docs);
+  ownHomeOptions = lib.concatLists (
+    lib.mapAttrsToList (
+      user: meta:
+      let
+        prefix = "${lib.showOption [ "home-manager" "users" user ]}.";
+      in
+      builtins.filter (o: !(known ? "home-manager.users.<name>.${lib.removePrefix prefix o.name}")) (
+        try (lib.optionAttrSetToDocList meta.configuration.options) [ ]
+      )
+    ) (if isHome then { } else machine.options.home-manager.users.valueMeta.attrs or { })
+  );
 in
 map (o: {
   inherit (o) name;
@@ -20,4 +36,4 @@ map (o: {
   default = try (text (o.default or null)) null;
   example = try (text (o.example or null)) null;
   readOnly = o.readOnly or false;
-}) (builtins.filter (o: (o.visible or true) != false && !(o.internal or false)) (lib.optionAttrSetToDocList machine.options))
+}) (builtins.filter (o: (o.visible or true) != false && !(o.internal or false)) (docs ++ ownHomeOptions))
