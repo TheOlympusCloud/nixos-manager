@@ -265,3 +265,28 @@ func TestFleetDependencies(t *testing.T) {
 		t.Fatalf("without a model, the machines that report: %d", n)
 	}
 }
+
+func TestLookupDependencies(t *testing.T) {
+	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), newRepo(t)))
+	sys := storePath('a', "pi")
+	reported(t, d, "pi", sys)
+	ok(t, d.RecordClosure("pi", sys, smallClosure(sys), time.Now()))
+	md := must[MachineDeps](t)(d.MachineDependencies("pi"))
+	got, more := md.Lookup("GLIBC", 25)
+	if len(got) != 1 || more != 0 {
+		t.Fatalf("glibc: %+v %d", got, more)
+	}
+	g := got[0]
+	if g.Name != "glibc" || g.Version != "2.40-66" || g.Size != 4000 || len(g.Uses) != 0 ||
+		!slices.Equal(g.UsedBy, []string{"bash-5.2p37", "hello-2.12.2"}) || !slices.Equal(g.Why, []string{"nixos-system-pi", "bash-5.2p37", "glibc-2.40-66"}) {
+		t.Fatalf("glibc: %+v", g)
+	}
+	// Exact names first, then by name; at most limit, and how many more.
+	all, more := md.Lookup("", 2)
+	if len(all) != 2 || more != 2 || all[0].Name != "bash" {
+		t.Fatalf("everything, 2 at most: %+v %d", all, more)
+	}
+	if got, _ := md.Lookup("hello", 5); len(got) != 1 || !slices.Equal(got[0].Uses, []string{"glibc-2.40-66"}) {
+		t.Fatalf("hello: %+v", got)
+	}
+}

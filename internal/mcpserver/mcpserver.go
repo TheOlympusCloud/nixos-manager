@@ -4,6 +4,8 @@ package mcpserver
 import (
 	"context"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -50,7 +52,7 @@ var toolScope = map[string]auth.Scope{
 	"list_branches": auth.ScopeRead, "fleet_overview": auth.ScopeRead, "fleet_insights": auth.ScopeRead,
 	"deployments": auth.ScopeRead, "compare_option": auth.ScopeRead, "host_details": auth.ScopeRead,
 	"model_diff": auth.ScopeRead, "search_packages": auth.ScopeRead, "search_options": auth.ScopeRead,
-	"list_targets": auth.ScopeRead, "list_secrets": auth.ScopeRead,
+	"list_targets": auth.ScopeRead, "list_secrets": auth.ScopeRead, "machine_dependencies": auth.ScopeRead, "fleet_dependencies": auth.ScopeRead,
 
 	"write_file": auth.ScopeEdit, "create_folder": auth.ScopeEdit, "move_path": auth.ScopeEdit, "delete_path": auth.ScopeEdit,
 	"stage": auth.ScopeEdit, "unstage": auth.ScopeEdit, "discard": auth.ScopeEdit, "commit": auth.ScopeEdit,
@@ -314,6 +316,32 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	tool(s, "deployments", "What each machine runs, as comin reports it after deploying: the last commit it deployed (or built and found unchanged) and when, a failure with comin's error, and how many commits it is behind the branch its comin follows (the main branch set in services.comin.remotes, or its testing branch, testing-<host> by default, when that is on top). States: current, behind, failed, unknown (its commit is not in this working copy: pull first), never (has not reported a deployment: the token or the url in modules/common.nix is missing, unless lastSeen shows its heartbeats). silent, whatever the state: no report or heartbeat for more than silentAfter hours (0: never flagged; 168 and behind for machines without heartbeats). system is what it last said it runs, boots and boots next, and whether a reboot is pending; expected is what its commit builds, as comin evaluates it, and drift is manual (it runs a system no deployment made: nixos-rebuild by hand or a rollback) or unfinished (a switch that stopped or failed partway). branch is the main branch most machines follow and commits are its newest. Each machine also names its main and testing branch (try_on_machine pushes to the latest). culprits, for a machine whose deployment failed on its main branch, are the commits since the last one it deployed, newest first: revert_commit with rev the newest culprit and since the machine's commit stages their inverse, which rolls it back. A push is a deploy: call this after pushing to watch the machines catch up.", func(ctx context.Context, _ struct{}) (core.DeployOverview, error) {
 		m, _, _ := svc.Jobs.Model(ctx, "working") // the machines and their comin branches, when an evaluation is at hand
 		return svc.Deploys.Overview(ctx, m, time.Now())
+	})
+	tool(s, "machine_dependencies", "What one machine has installed, as it reported it: the closure of the system it runs, every store path with its version and size and what it references (needs the report module from the starter fleet that sends closures). Without name: the state and totals. state is ready, none (the machine does not report), shared (it reports with the shared fleet token, which cannot send closures: give it its own), old (its report module sends no closures: copy report-deployment.sh and report-deployments.nix from the starter fleet), waiting (asked; it arrives with its next report, within 15 minutes), refused or error (message says why). current is what it runs now; system, what the closure is of. With name: up to 25 entries whose name contains it, exact names first, each with uses and usedBy (at most 100 each) and why, a shortest chain from the system to it; more counts the matches left out.", func(ctx context.Context, in struct {
+		Host string `json:"host"`
+		Name string `json:"name,omitempty"`
+	}) (map[string]any, error) {
+		md, err := svc.Deploys.MachineDependencies(in.Host)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]any{"host": md.Host, "state": md.State, "message": md.Message, "system": md.System, "current": md.Current, "at": md.At, "size": md.Size, "count": len(md.Nodes)}
+		if in.Name != "" {
+			out["matches"], out["more"] = md.Lookup(in.Name, 25)
+		}
+		return out, nil
+	})
+	tool(s, "fleet_dependencies", "Which dependencies are installed on which machines, from the closures the machines report (see machine_dependencies): one row per name with a version (store paths without one, like unit files, are left out), with each machine's versions in hosts order (empty: not there). differs: the machines that have it disagree on its versions. Filter by a part of the name, and with differs only those rows. At most 300 rows; total counts every row that matched.", func(ctx context.Context, in struct {
+		Name    string `json:"name,omitempty"`
+		Differs bool   `json:"differs,omitempty"`
+	}) (map[string]any, error) {
+		m, _, _ := svc.Jobs.Model(ctx, "working") // the fleet's machines, when an evaluation is at hand
+		f := svc.Deploys.FleetDependencies(m)
+		q := strings.ToLower(in.Name)
+		rows := slices.DeleteFunc(f.Rows, func(r core.DepRow) bool {
+			return in.Differs && !r.Differs || !strings.Contains(strings.ToLower(r.Name), q)
+		})
+		return map[string]any{"hosts": f.Hosts, "rows": rows[:min(len(rows), 300)], "total": len(rows)}, nil
 	})
 	tool(s, "compare_option", "The effective value of NixOS options on every machine (or the given ones, where home:<name> is a standalone home and its home-manager options), with the files that set each value. Names are full option names such as services.openssh.settings.PermitRootLogin; quote segments containing dots.", func(ctx context.Context, in struct {
 		Names []string `json:"names"`

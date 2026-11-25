@@ -343,10 +343,7 @@ var storeOutputs = map[string]bool{"bin": true, "lib": true, "dev": true, "man":
 // (the version starts at the first dash followed by a non-letter), with a
 // trailing output name kept apart.
 func splitStoreName(path string) (name, version, output string) {
-	name = path[strings.LastIndexByte(path, '/')+1:]
-	if len(name) > 33 && name[32] == '-' {
-		name = name[33:] // the hash
-	}
+	name = storeLabel(path)
 	for i := 0; i+1 < len(name); i++ {
 		if c := name[i+1]; name[i] == '-' && !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z') {
 			name, version = name[:i], name[i+1:]
@@ -450,4 +447,78 @@ func (d *Deployments) FleetDependencies(model *Model) FleetDeps {
 	}
 	slices.SortFunc(f.Rows, func(a, b DepRow) int { return strings.Compare(a.Name, b.Name) })
 	return f
+}
+
+// DepEntry is one entry of a machine's closure with what is around it.
+type DepEntry struct {
+	Path    string   `json:"path"`
+	Name    string   `json:"name"`
+	Version string   `json:"version,omitempty"`
+	Output  string   `json:"output,omitempty"`
+	Size    int64    `json:"size"`   // its own NAR size in bytes
+	Uses    []string `json:"uses"`   // what it references
+	UsedBy  []string `json:"usedBy"` // what references it
+	Why     []string `json:"why"`    // a shortest chain from the system to it
+}
+
+// maxNeighbours caps Uses and UsedBy: glibc is used by most of a system.
+const maxNeighbours = 100
+
+// Lookup returns the entries whose name contains name, in any case (all of
+// them for ""), exact names first and then by name, at most limit of them,
+// and how many more matched.
+func (md MachineDeps) Lookup(name string, limit int) ([]DepEntry, int) {
+	q := strings.ToLower(name)
+	var hits []int
+	for i, n := range md.Nodes {
+		if strings.Contains(strings.ToLower(n.Name), q) {
+			hits = append(hits, i)
+		}
+	}
+	slices.SortFunc(hits, func(a, b int) int {
+		x, y := md.Nodes[a], md.Nodes[b]
+		if ex, ey := strings.EqualFold(x.Name, name), strings.EqualFold(y.Name, name); ex != ey {
+			if ex {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(storeLabel(x.Path), storeLabel(y.Path))
+	})
+	more := max(0, len(hits)-limit)
+	hits = hits[:len(hits)-more]
+	usedBy := map[int][]int{}
+	for i, n := range md.Nodes {
+		for _, r := range n.Refs {
+			usedBy[r] = append(usedBy[r], i)
+		}
+	}
+	labels := func(is []int) []string {
+		out := []string{}
+		for _, i := range is[:min(len(is), maxNeighbours)] {
+			out = append(out, storeLabel(md.Nodes[i].Path))
+		}
+		slices.Sort(out)
+		return out
+	}
+	out := []DepEntry{}
+	for _, i := range hits {
+		n := md.Nodes[i]
+		e := DepEntry{Path: n.Path, Name: n.Name, Version: n.Version, Output: n.Output, Size: n.NarSize, Uses: labels(n.Refs), UsedBy: labels(usedBy[i])}
+		for j := i; j >= 0; j = md.Nodes[j].Via {
+			e.Why = append(e.Why, storeLabel(md.Nodes[j].Path))
+		}
+		slices.Reverse(e.Why)
+		out = append(out, e)
+	}
+	return out, more
+}
+
+// storeLabel is a store path's name without the store and the hash.
+func storeLabel(path string) string {
+	name := path[strings.LastIndexByte(path, '/')+1:]
+	if len(name) > 33 && name[32] == '-' {
+		return name[33:]
+	}
+	return name
 }
