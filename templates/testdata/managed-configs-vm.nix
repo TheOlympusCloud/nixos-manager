@@ -56,7 +56,11 @@ pkgs.testers.runNixOSTest {
       format = "json";
     });
     services.gnome.gnome-keyring.enable = true;
-    environment.systemPackages = [ pkgs.libsecret ];
+    # secret-tool, and secretstorage to look in the login collection as go-keyring does.
+    environment.systemPackages = [
+      pkgs.libsecret
+      (pkgs.python3.withPackages (ps: [ ps.secretstorage ]))
+    ];
   };
   testScript =
     { nodes, ... }:
@@ -140,8 +144,11 @@ pkgs.testers.runNixOSTest {
           assert "label = Password for 'a1' on 'supersonic'" in found, found
           assert "attribute.username = a1" in found and "attribute.service = supersonic" in found, found
           # In the login collection, where go-keyring looks first (secret-tool shortens the item's path).
-          login = alice("busctl --user call org.freedesktop.secrets /org/freedesktop/secrets/collection/login org.freedesktop.Secret.Collection SearchItems a{ss} 2 service supersonic username a1")
-          assert login.startswith("ao 1 ") and '"/org/freedesktop/secrets/collection/login/' in login, login
+          login = alice("python3 -c " + shlex.quote(
+              "import secretstorage as s; c = s.Collection(s.dbus_init(), '/org/freedesktop/secrets/collection/login'); "
+              "c.is_locked(); print([i.get_label() for i in c.search_items({'service': 'supersonic', 'username': 'a1'})])"
+          ))
+          assert login.strip() == '["Password for ' + "'a1' on 'supersonic'" + '"]', login
           # Unchanged, it is not stored again.
           alice("systemctl --user restart nixos-manager-keyring.service")
           # As root, --user-unit would match root's own units only.
