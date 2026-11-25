@@ -86,6 +86,9 @@ func TestRecordClosure(t *testing.T) {
 		"path":       func(c *ClosureIn) { c.Paths[2].Path = "/nix/store/short-hello" },
 		"size":       func(c *ClosureIn) { c.Paths[2].NarSize = -1 },
 		"duplicate":  func(c *ClosureIn) { c.Paths[2].Path = c.Paths[1].Path },
+		"same ref":   func(c *ClosureIn) { c.Paths[1].Refs = []int{3, 3} },
+		"self ref":   func(c *ClosureIn) { c.Paths[1].Refs = []int{1} },
+		"many refs":  func(c *ClosureIn) { c.Paths[0].Refs = []int{1, 2, 3, 1, 2} },
 		"no system":  func(c *ClosureIn) { c.Paths[0].Path = storeP('h', "other") },
 		"empty":      func(c *ClosureIn) { c.Paths = nil },
 		"long error": func(c *ClosureIn) { c.Paths = nil; c.Error = strings.Repeat("e", maxClosureError+1) },
@@ -194,6 +197,17 @@ func TestMachineDependenciesStates(t *testing.T) {
 	ok(t, d.RefuseClosure("pi", sys, "larger than 64 MiB", time.Now()))
 	if s := state("pi"); s.State != "refused" || s.Message != "larger than 64 MiB" {
 		t.Fatalf("refused: %+v", s)
+	}
+	// A refusal of the system it ran before says nothing about the one it runs now.
+	next := storePath('b', "pi")
+	reported(t, d, "pi", next)
+	if s := state("pi"); s.State != "waiting" || s.Message != "" {
+		t.Fatalf("refused for an older system: %+v", s)
+	}
+	ok(t, d.RecordClosure("pi", next, ClosureIn{Error: "nix: cannot connect"}, time.Now()))
+	reported(t, d, "pi", sys)
+	if s := state("pi"); s.State != "waiting" {
+		t.Fatalf("an error for an older system: %+v", s)
 	}
 	ok(t, d.RecordClosure("pi", sys, smallClosure(sys), time.Now()))
 	s := state("pi")

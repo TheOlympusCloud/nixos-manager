@@ -23,11 +23,11 @@ import (
 
 const maxClosureError = 4096
 
-// The largest closure taken, in bytes (a desktop's is about half a MiB) and in
-// store paths; variables for tests.
+// The largest closure taken, in bytes and in store paths (a desktop's has a few
+// thousand, well under a MiB); variables for tests.
 var (
-	MaxClosureBody  int64 = 64 << 20
-	maxClosurePaths       = 100_000
+	MaxClosureBody  int64 = 16 << 20
+	maxClosurePaths       = 50_000
 )
 
 // closurePath is a store path as Nix allows its name (reportPath caps it lower).
@@ -75,7 +75,10 @@ func checkClosure(system string, in ClosureIn) string {
 		return fmt.Sprintf("it has more than %d paths", maxClosurePaths)
 	}
 	seen := make(map[string]bool, len(in.Paths))
-	for _, p := range in.Paths {
+	// Each path references every other one at most once, which bounds what a
+	// closure can hold whatever its size: mark[r] == i+1 when path i references r.
+	mark := make([]int, len(in.Paths))
+	for i, p := range in.Paths {
 		switch {
 		case !closurePath.MatchString(p.Path):
 			return fmt.Sprintf("%.200q is not a store path", p.Path)
@@ -83,12 +86,20 @@ func checkClosure(system string, in ClosureIn) string {
 			return fmt.Sprintf("%s is listed twice", p.Path)
 		case p.NarSize < 0:
 			return fmt.Sprintf("%s has a negative size", p.Path)
+		case len(p.Refs) >= len(in.Paths):
+			return fmt.Sprintf("%s references more paths than the closure has", p.Path)
 		}
 		seen[p.Path] = true
 		for _, r := range p.Refs {
-			if r < 0 || r >= len(in.Paths) {
+			switch {
+			case r < 0 || r >= len(in.Paths):
 				return fmt.Sprintf("%s references entry %d of %d", p.Path, r, len(in.Paths))
+			case r == i:
+				return fmt.Sprintf("%s references itself", p.Path)
+			case mark[r] == i+1:
+				return fmt.Sprintf("%s references entry %d twice", p.Path, r)
 			}
+			mark[r] = i + 1
 		}
 	}
 	if !seen[system] {
@@ -266,7 +277,11 @@ func (d *Deployments) closureView(host string) closureView {
 }
 
 func (v closureView) state() (state, message string) {
-	switch r := v.rec; {
+	r := v.rec
+	if r != nil && r.Paths == nil && v.live.System != nil && v.live.System.Current != "" && r.System != v.live.System.Current {
+		r = nil // a refusal or an error of a system it no longer runs: it is asked again
+	}
+	switch {
 	case !v.alive:
 		return "none", ""
 	case v.shared:

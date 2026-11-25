@@ -990,12 +990,13 @@ report script then reads it through the machine's Nix daemon
 (`nix path-info --recursive --json`) and posts it to `/api/deployments/closure`
 with the machine's own token, typically well under a megabyte. It arrives
 right after each deployment that changes the system, or with the next
-heartbeat. When Nix fails on the machine the script posts the error instead,
-which the tab shows; an upload that fails is asked for again by the next
-report. A machine that reports with the shared fleet token gets no tree: give
-it its own. nixos-manager refuses a closure with an invalid entry, or one larger
-than 64 MiB or 100 000 store paths, shows why, and asks again only once the
-machine runs another system. It keeps the latest closure of each machine in
+heartbeat; never between comin's build and its deployment. When Nix fails on
+the machine, or takes more than 30 seconds, the script posts the error
+instead, which the tab shows; an upload that fails is asked for again by the
+next report. A machine that reports with the shared fleet token gets no tree:
+give it its own. nixos-manager refuses a closure with an invalid entry, or one
+larger than 16 MiB or 50 000 store paths, shows why, and asks again only once
+the machine runs another system. It keeps the latest closure of each machine in
 `$NIXMGR_DATA/closures/<host>.json`, and deletes it with the machine's reports.
 
 A repository made from an older starter fleet sends no closures: copy both
