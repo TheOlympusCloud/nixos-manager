@@ -12,6 +12,23 @@ let
   lib = machine.pkgs.lib;
   try = v: default: let r = builtins.tryEval v; in if r.success then r.value else default;
   text = v: if v == null then null else if builtins.isString v then v else if builtins.isAttrs v then v.text or null else null;
+  docs = lib.optionAttrSetToDocList machine.options;
+  # home-manager's NixOS module leaves its options out of these docs (visible =
+  # "shallow"), and the type's would lack what a user's own modules declare
+  # (olympus.supersonic.enable): each user's home options are listed from their
+  # evaluated home, by name, home-manager.users.pablo.…, less any the docs have.
+  known = builtins.listToAttrs (map (o: lib.nameValuePair o.name true) docs);
+  ownHomeOptions = lib.concatLists (
+    lib.mapAttrsToList (
+      user: meta:
+      let
+        prefix = "${lib.showOption [ "home-manager" "users" user ]}.";
+      in
+      builtins.filter (o: !(known ? "home-manager.users.<name>.${lib.removePrefix prefix o.name}")) (
+        try (lib.optionAttrSetToDocList meta.configuration.options) [ ]
+      )
+    ) (if isHome then { } else machine.options.home-manager.users.valueMeta.attrs or { })
+  );
 in
 map (o: {
   inherit (o) name;
@@ -20,4 +37,4 @@ map (o: {
   default = try (text (o.default or null)) null;
   example = try (text (o.example or null)) null;
   readOnly = o.readOnly or false;
-}) (builtins.filter (o: (o.visible or true) != false && !(o.internal or false)) (lib.optionAttrSetToDocList machine.options))
+}) (builtins.filter (o: (o.visible or true) != false && !(o.internal or false)) (docs ++ ownHomeOptions))

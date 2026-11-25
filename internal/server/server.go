@@ -107,6 +107,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/hosts/{host}/settings": auth.ScopeEdit, "POST /api/machines": auth.ScopeEdit, "POST /api/jobs": auth.ScopeEdit,
 	"POST /api/hosts/{host}/package-overrides": auth.ScopeEdit, "POST /api/hosts/{host}/home": auth.ScopeEdit,
 	"POST /api/hosts/{host}/home-secrets": auth.ScopeEdit, "POST /api/managed-module": auth.ScopeEdit, "POST /api/hosts/{host}/copy": auth.ScopeEdit,
+	"POST /api/hosts/{host}/home-configs": auth.ScopeEdit, "POST /api/hosts/{host}/home-config-keys": auth.ScopeEdit, "POST /api/hosts/{host}/keyring": auth.ScopeEdit,
 	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
 	"POST /api/updates/discard": auth.ScopeEdit,
 
@@ -247,6 +248,16 @@ func (s *Server) apiMux() *http.ServeMux {
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/home-secrets", post(func(r *http.Request, in core.HomeSecretEdit) (any, error) {
 		return s.Svc.LinkHomeSecret(r.PathValue("host"), in)
+	}))
+	// App configs and keyring entries in homes: managed.json names secrets, never holds their values.
+	api.HandleFunc("POST /api/hosts/{host}/home-configs", post(func(r *http.Request, in core.HomeConfigEdit) (any, error) {
+		return s.Svc.SetHomeConfig(r.PathValue("host"), in)
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/home-config-keys", post(func(r *http.Request, in core.HomeConfigKeyEdit) (any, error) {
+		return s.Svc.EditHomeConfigKey(r.PathValue("host"), in)
+	}))
+	api.HandleFunc("POST /api/hosts/{host}/keyring", post(func(r *http.Request, in core.KeyringEdit) (any, error) {
+		return s.Svc.EditKeyring(r.PathValue("host"), in)
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/copy", post(func(r *http.Request, in core.CopyRequest) (any, error) {
 		return s.Svc.Copy(r.PathValue("host"), in)

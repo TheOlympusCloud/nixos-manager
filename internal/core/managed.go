@@ -21,7 +21,9 @@ import (
 //	  "packages": ["git", "python3Packages.requests"],
 //	  "removedPackages": ["perl"],
 //	  "packageOverrides": { "htop": { "override": { "sensorsSupport": false }, "patches": [{ "file": "patches/htop.patch" }] } },
-//	  "home": { "pablo": { "packages": ["ripgrep"], "removedPackages": [], "secrets": { ".netrc": "netrc" } } },
+//	  "home": { "pablo": { "packages": ["ripgrep"], "removedPackages": [], "secrets": { ".netrc": "netrc" },
+//	    "configs": { ".config/app/settings.json": { "format": "json", "settings": { "theme": "dark" } } },
+//	    "keyring": [ { "label": "…", "attributes": { "service": "app" }, "secret": "app-password" } ] } },
 //	  "settings": { "services": { "openssh": { "enable": true } } }
 //	}
 //
@@ -35,8 +37,8 @@ import (
 //
 // A standalone home (homeConfigurations.<name>) has its own file,
 // homes/<name>/managed.json, which modules/managed-home.nix applies: packages,
-// removedPackages and settings, its home-manager options. Every edit below
-// takes HomePrefix+<name> for it instead of a machine.
+// removedPackages and settings, its home-manager options, and configs (see
+// configs.go). Every edit below takes HomePrefix+<name> for it instead of a machine.
 
 // ManagedView is a machine's managed file as the UI and MCP see it.
 type ManagedView struct {
@@ -53,6 +55,8 @@ type ManagedView struct {
 	// Home lists the home-manager users this file manages, with their packages.
 	Home     map[string]HomeManaged `json:"home"`
 	Settings map[string]any         `json:"settings"`
+	// Configs are a standalone home's app configs (managed-home.nix), without secrets.
+	Configs map[string]HomeConfig `json:"configs,omitempty"`
 }
 
 // PackageOverride is how managed.nix changes one package: taken from the
@@ -92,6 +96,10 @@ type HomeManaged struct {
 	// Secrets links a secret of the machine at a path in ~ (".netrc": "netrc"),
 	// which makes it the user's (managed.nix 5).
 	Secrets map[string]string `json:"secrets,omitempty"`
+	// Configs are app settings files the apps also write, by path in ~, and
+	// Keyring the items stored in the user's keyring (managed.nix 6; configs.go).
+	Configs map[string]HomeConfig `json:"configs,omitempty"`
+	Keyring []KeyringEntry        `json:"keyring,omitempty"`
 }
 
 var (
@@ -190,7 +198,7 @@ func (s *Service) readManaged(host string) (managedDoc, error) {
 		md.view.Settings = settings
 	}
 	// The newer keys are decoded strictly: an unknown field would be lost on the next write.
-	for key, into := range map[string]any{"removedPackages": &md.view.RemovedPackages, "packageOverrides": &md.view.PackageOverrides, "home": &md.view.Home} {
+	for key, into := range map[string]any{"removedPackages": &md.view.RemovedPackages, "packageOverrides": &md.view.PackageOverrides, "home": &md.view.Home, "configs": &md.view.Configs} {
 		if raw, ok := md.doc[key]; ok {
 			if err := strictDecode(raw, into); err != nil {
 				return md, errorf(ErrInvalid, "%s: %q: %v; fix it in the code view", p, key, err)
@@ -230,8 +238,17 @@ func strictDecode(raw, into any) error {
 // check validates what managed.nix will read, so a bad value is refused when
 // it is written (or read), not first at the next evaluation.
 func (v *ManagedView) check() error {
-	if strings.HasPrefix(v.Host, HomePrefix) && (len(v.Home) > 0 || len(v.PackageOverrides) > 0) {
-		return errorf(ErrInvalid, "a standalone home has packages, removedPackages and settings (its home-manager options); home-manager users and package overrides are for NixOS machines")
+	standalone := strings.HasPrefix(v.Host, HomePrefix)
+	if standalone && (len(v.Home) > 0 || len(v.PackageOverrides) > 0) {
+		return errorf(ErrInvalid, "a standalone home has packages, removedPackages, settings (its home-manager options) and configs; home-manager users and package overrides are for NixOS machines")
+	}
+	if !standalone && len(v.Configs) > 0 {
+		return errorf(ErrInvalid, "a machine's app configs are its users': home.<user>.configs")
+	}
+	for p, c := range v.Configs {
+		if err := checkConfig(p, c, false); err != nil {
+			return err
+		}
 	}
 	if err := checkPackageNames(v.RemovedPackages); err != nil {
 		return err
@@ -258,6 +275,17 @@ func (v *ManagedView) check() error {
 			if !secretName.MatchString(name) {
 				return errorf(ErrInvalid, "invalid secret name %q", name)
 			}
+		}
+		for p, c := range h.Configs {
+			if err := checkConfig(p, c, true); err != nil {
+				return err
+			}
+			if _, ok := h.Secrets[p]; ok {
+				return errorf(ErrInvalid, "~/%s of %s is a linked secret and a config: keep one of the two", p, u)
+			}
+		}
+		if err := checkKeyring(h.Keyring); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -393,7 +421,7 @@ func (s *Service) editManaged(host string, base *string, edit func(v *ManagedVie
 	}
 	md.doc["packages"], md.doc["settings"] = md.view.Packages, md.view.Settings
 	// The newer keys only when used, so a file that needs none still works with an older managed.nix.
-	for key, v := range map[string]any{"removedPackages": md.view.RemovedPackages, "packageOverrides": md.view.PackageOverrides, "home": md.view.Home} {
+	for key, v := range map[string]any{"removedPackages": md.view.RemovedPackages, "packageOverrides": md.view.PackageOverrides, "home": md.view.Home, "configs": md.view.Configs} {
 		if reflect.ValueOf(v).Len() == 0 {
 			delete(md.doc, key)
 		} else {
@@ -574,7 +602,8 @@ func (s *Service) LinkHomeSecret(host string, e HomeSecretEdit) (ManagedView, er
 
 // UpdateManagedModule writes this release's modules/managed.nix over the
 // repository's (or creates it), if it is still the version the caller saw.
-// With home, modules/managed-home.nix, for standalone homes.
+// With home, modules/managed-home.nix, for standalone homes. Either way it also
+// writes modules/managed-configs.py, which both run on the machines.
 func (s *Service) UpdateManagedModule(base string, home bool) (string, error) {
 	path := managedModule
 	if home {
@@ -584,12 +613,30 @@ func (s *Service) UpdateManagedModule(base string, home bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.Write(path, string(b), base)
+	hash, err := s.Write(path, string(b), base)
+	if err != nil {
+		return "", err
+	}
+	py, err := fs.ReadFile(templates.Fleet, managedConfigsWriter)
+	if err != nil {
+		return "", err
+	}
+	cur, curHash, err := s.Read(managedConfigsWriter)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	if cur != string(py) {
+		if _, err := s.Write(managedConfigsWriter, string(py), curHash); err != nil {
+			return "", err
+		}
+	}
+	return hash, nil
 }
 
 const (
-	managedModule     = "modules/managed.nix"
-	managedHomeModule = "modules/managed-home.nix"
+	managedModule        = "modules/managed.nix"
+	managedHomeModule    = "modules/managed-home.nix"
+	managedConfigsWriter = "modules/managed-configs.py"
 )
 
 func checkPath(path []string) error {

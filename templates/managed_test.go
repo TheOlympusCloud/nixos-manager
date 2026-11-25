@@ -112,13 +112,13 @@ func TestManagedSharedByEveryMachine(t *testing.T) {
 		"a": map[string]any{
 			"packages": []any{"hello", "perl"}, "home": []any{"cowsay"}, "sessionVariable": "shared",
 			"helloFrom": "shared", "helloPatch": true, "jqFrom": "a",
-			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(5),
+			"timeZone": "Europe/Madrid", "ports": []any{float64(22)}, "version": float64(6),
 			"helloFile": []any{"modules/managed.json"},
 		},
 		"b": map[string]any{
 			"packages": []any{"hello", "jq"}, "home": nil, "sessionVariable": nil,
 			"helloFrom": "shared", "helloPatch": true, "jqFrom": "shared",
-			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(5),
+			"timeZone": "Europe/Madrid", "ports": []any{float64(80)}, "version": float64(6),
 			"helloFile": []any{"modules/managed.json"},
 		},
 	}
@@ -218,7 +218,7 @@ func TestManagedHomeSecrets(t *testing.T) {
 
 // A standalone home applies its own managed.json through modules/managed-home.nix:
 // packages it adds, names it takes out of what hand-written Nix adds, its settings
-// over hand-written values, and custom.nix and files/ next to it.
+// over hand-written values, its app configs, and custom.nix and files/ next to it.
 func TestManagedStandaloneHome(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
@@ -242,6 +242,7 @@ func TestManagedStandaloneHome(t *testing.T) {
 		"file":            "linked from files/\n",
 		"managedFile":     true,
 		"packageNames":    map[string]any{"jq": "jq"},
+		"configs":         true,
 		"activation":      true,
 	}
 	if !reflect.DeepEqual(got, want) {

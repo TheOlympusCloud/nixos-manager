@@ -25,8 +25,13 @@ describe('controlFor', () => {
     expect(controlFor('list of one of "tcp", "udp"')).toEqual({ kind: 'list', item: { kind: 'select', choices: ['tcp', 'udp'] } })
   })
 
+  it('edits attribute sets, submodules and lists of them as nested forms', () => {
+    for (const t of ['attribute set of string', 'lazy attribute set of (submodule)', 'list of (submodule)', 'list of attribute set of string', 'submodule', 'open submodule of (JSON value)', 'JSON value', 'YAML 1.1 value'])
+      expect(controlFor(t)).toEqual({ kind: 'tree' })
+  })
+
   it('falls back to a JSON editor for everything else', () => {
-    for (const t of ['attribute set of string', 'list of (submodule)', 'package', 'string or signed integer', 'null or (list of string)', 'list of attribute set of string'])
+    for (const t of ['package', 'string or signed integer', 'null or (list of string)', 'null or (attribute set of string)', 'anything'])
       expect(controlFor(t)).toEqual({ kind: 'json' })
   })
 })

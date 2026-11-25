@@ -1,5 +1,6 @@
 // The evaluated fleet (stale while a new evaluation runs) and editing by clicking.
 import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
+import type { ConfigFormat, KeyringEntry } from './apps'
 import { fillPath, optionSegments, pathName } from './options'
 import { HOME, HOME_MODULE, SHARED, SHARED_FILE, copySummary } from './packages'
 import { codeLink, go } from './router.svelte'
@@ -208,6 +209,28 @@ export const linkHomeSecret = (host: string, user: string, path: string, secret:
 export const unlinkHomeSecret = (host: string, user: string, path: string, was: string) =>
   write(host, () => api.linkHomeSecret(host, { user, path }), `~/${path} of ${user} on ${targetName(host)} is no longer linked`, { label: 'Undo', run: () => linkHomeSecret(host, user, path, was) })
 
+/** Adds an app's config file to a user's home, or changes how it is written; its keys stay. */
+export const setHomeConfig = (host: string, user: string, path: string, c: { format: ConfigFormat; mode?: 'merge' | 'seed'; process?: string; lock?: string }) =>
+  write(host, () => api.setHomeConfig(host, { user, path, ...c }), `${user}'s ~/${path} on ${targetName(host)} is written as ${c.format}${c.mode === 'seed' ? ' when missing' : ''}`)
+/** Stops writing a config; the file stays on the machine as it is. */
+export const removeHomeConfig = (host: string, user: string, path: string) =>
+  write(host, () => api.setHomeConfig(host, { user, path, remove: true }), `${user}'s ~/${path} on ${targetName(host)} is no longer written; the file stays as it is`)
+/** Sets one key of a config to a value or a secret (by name), or unsets it. */
+export const setConfigKey = (host: string, user: string, path: string, key: string[], to: { value: unknown } | { secret: string } | { unset: true }) =>
+  write(
+    host,
+    () => api.editHomeConfigKey(host, { user, path, key, ...to }),
+    'unset' in to ? `${key.join('.')} is no longer set in ~/${path}` : 'secret' in to ? `${key.join('.')} in ~/${path} is the secret ${to.secret}` : `Set ${key.join('.')} in ~/${path}`,
+  )
+/** Adds a keyring entry to a user's home, or replaces the one with the same attributes (or was). */
+export const setKeyringEntry = (host: string, user: string, e: KeyringEntry, was?: Record<string, string>) =>
+  write(host, () => api.editKeyring(host, { user, ...e, was }), `${user}'s keyring on ${targetName(host)} gets “${e.label}” from the secret ${e.secret}`)
+export const removeKeyringEntry = (host: string, user: string, e: KeyringEntry) =>
+  write(host, () => api.editKeyring(host, { user, attributes: e.attributes, remove: true }), `“${e.label}” is no longer stored in ${user}'s keyring; the item already there stays`, {
+    label: 'Undo',
+    run: () => setKeyringEntry(host, user, e),
+  })
+
 /**
  * Copies a package's customisation (packageOverride) or a user's home from a machine to
  * others, in one toast for all of them. Resolves with the machines it copied to.
@@ -273,12 +296,12 @@ export async function updateManagedModule(home = false): Promise<boolean> {
       ? {
           title: `Update ${path}?`,
           message:
-            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users, the Nix files next to managed.json and modules/managed.json, set for every machine. Changes made to it by hand are replaced too: the diff shows in Changes before you commit.",
+            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users with their secrets, app settings and keyring entries, the Nix files next to managed.json and modules/managed.json, set for every machine. modules/managed-configs.py, which writes the app settings on the machines, is written next to it. Changes made to them by hand are replaced too: the diff shows in Changes before you commit.",
           ok: 'Update it',
         }
       : {
           title: `Create ${path}?`,
-          message: `It is this nixos-manager's module that applies each ${home ? 'standalone home' : 'machine'}'s managed.json. Review it in Changes before you commit.`,
+          message: `It is this nixos-manager's module that applies each ${home ? 'standalone home' : 'machine'}'s managed.json, with modules/managed-configs.py next to it. Review them in Changes before you commit.`,
           ok: 'Create it',
         },
   )

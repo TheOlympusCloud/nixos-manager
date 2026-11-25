@@ -1,0 +1,5 @@
+{
+  "packages": [],
+  "home": { "pablo": { "packages": [], "removedPackages": [], "configs": { ".config/a.json": { "format": "json", "settings": { "a": 1 } } } } },
+  "settings": { "home-manager": { "users": { "pablo": { "home": { "stateVersion": "26.05" } } } } }
+}

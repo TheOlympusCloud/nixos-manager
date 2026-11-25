@@ -61,6 +61,8 @@ var toolScope = map[string]auth.Scope{
 	"create_machine": auth.ScopeEdit, "add_packages": auth.ScopeEdit, "remove_packages": auth.ScopeEdit,
 	"set_option": auth.ScopeEdit, "unset_option": auth.ScopeEdit, "run_check": auth.ScopeEdit,
 	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit, "link_home_secret": auth.ScopeEdit,
+	"set_home_config": auth.ScopeEdit, "set_home_config_key": auth.ScopeEdit, "remove_home_config_key": auth.ScopeEdit,
+	"set_keyring_entry": auth.ScopeEdit, "remove_keyring_entry": auth.ScopeEdit,
 	"copy_to_machines":      auth.ScopeEdit,
 	"update_managed_module": auth.ScopeEdit,
 	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
@@ -439,6 +441,42 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	}) (core.ManagedView, error) {
 		return svc.LinkHomeSecret(in.Host, in.HomeSecretEdit)
 	})
+	tool(s, "set_home_config", "Add an app's settings file in a user's home to managed.json's home.<user>.configs, or change how it is written, keeping its keys: for an app that rewrites its own settings (Supersonic's .config/supersonic/config.toml, Vesktop's settings.json, Claude Code's .claude/settings.json), where a file linked by home-manager would break it. On the machine, at every home-manager activation and login, mode merge writes the declared keys and keeps every other key the app wrote, and mode seed writes the whole file only when there is none. The file is rewritten only when it changes, keeps its mode (0600 once it holds a secret), and is left as it is, with a line in the activation log, when it does not parse. Set process for an app that keeps its settings in memory and writes them whole on exit, and lock for one that takes a lock folder. Then add keys with set_home_config_key. With remove, the file is no longer written; it stays on the machine. Logins an app keeps in its own databases or rotating tokens stay in the app. Needs managed.nix 6 (update_managed_module; host_details' managedVersion). The result is the managed file, which names secrets and never holds a value.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), * for every machine whose managed.json has the user's home (modules/managed.json; the machine's own config at a path wins), or home:<name> for a standalone home, without user and without secrets"`
+		core.HomeConfigEdit
+	}) (core.ManagedView, error) {
+		return svc.SetHomeConfig(in.Host, in.HomeConfigEdit)
+	})
+	type configKeyIn struct {
+		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), * for every machine whose managed.json has the user's home (modules/managed.json; the machine's own config at a path wins), or home:<name> for a standalone home, without user and without secrets"`
+		User string   `json:"user,omitempty" jsonschema:"a home-manager user of the machine; none for a standalone home"`
+		Path string   `json:"path" jsonschema:"the config's file in ~, added with set_home_config"`
+		Key  []string `json:"key" jsonschema:"the key's path in the file, part by part: [\"Application\", \"EnableSystemTray\"]; [\"Servers[ID=8f2c…]\", \"Hostname\"] is the key Hostname of the item of the list Servers whose ID is 8f2c…, added when missing; an INI key is [section, key], a properties key is one part, dots included"`
+	}
+	tool(s, "set_home_config_key", "Set one key of an app config in a user's home (set_home_config) to a value, or to one of the machine's secrets (host_details' secrets, from set_secret). A value is copied to the Nix store, which every user of the machine can read: put passwords and tokens in secret. A secret's value is read on the machine, as the user, from /run/secrets, and written into the file there: managed.json, the Nix store and this tool's result hold its name, never its value. A list value replaces the app's list whole; to set one item of a list, name it Name[Field=Value] in key.", func(ctx context.Context, in struct {
+		configKeyIn
+		Value  any    `json:"value,omitempty" jsonschema:"the value: boolean, number, string, list or object"`
+		Secret string `json:"secret,omitempty" jsonschema:"instead of value, a secret of the machine"`
+	}) (core.ManagedView, error) {
+		return svc.EditHomeConfigKey(in.Host, core.HomeConfigKeyEdit{User: in.User, Path: in.Path, Key: in.Key, Value: in.Value, Secret: in.Secret})
+	})
+	tool(s, "remove_home_config_key", "Take a key (a value or a secret) out of an app config in a user's home, so it is no longer written. The file on the machine keeps what it has; the app's own value stays. The result names secrets and never holds a value.", func(ctx context.Context, in configKeyIn) (core.ManagedView, error) {
+		return svc.EditHomeConfigKey(in.Host, core.HomeConfigKeyEdit{User: in.User, Path: in.Path, Key: in.Key, Unset: true})
+	})
+	tool(s, "set_keyring_entry", "Store one of the machine's secrets in a user's keyring (Secret Service: GNOME Keyring) once their graphical session starts, for an app that reads its password there, such as Supersonic (go-keyring: attributes service=supersonic and username=<the server's ID>, in the login collection). It goes in managed.json's home.<user>.keyring; an entry with the same attributes (or those in was) is replaced. On the machine a user service stores it in the login collection, else the default one, only when it is missing or different, and never logs it. Never use it for a key an app made for itself (Brave Safe Storage, an app's store key): a new value breaks what that key encrypts. Needs managed.nix 6. The result names the secret and never holds its value.", func(ctx context.Context, in struct {
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine whose managed.json has the user's home"`
+		core.KeyringEdit
+	}) (core.ManagedView, error) {
+		in.Remove = false
+		return svc.EditKeyring(in.Host, in.KeyringEdit)
+	})
+	tool(s, "remove_keyring_entry", "Take the keyring entry with these attributes out of a user's home in managed.json. The item already stored in the machine's keyring stays there. The result never holds a secret's value.", func(ctx context.Context, in struct {
+		Host       string            `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for modules/managed.json"`
+		User       string            `json:"user" jsonschema:"a home-manager user of the machine"`
+		Attributes map[string]string `json:"attributes" jsonschema:"the entry's attributes"`
+	}) (core.ManagedView, error) {
+		return svc.EditKeyring(in.Host, core.KeyringEdit{User: in.User, KeyringEntry: core.KeyringEntry{Attributes: in.Attributes}, Remove: true})
+	})
 	tool(s, "copy_to_machines", "Copy, from one machine to others, how a package is changed (packageOverride) or a user's home (home), as that machine's managed.json and folder have it. A machine that already has another value for something copied is refused whole and listed with its conflicts; nothing is overwritten. Home package lists are joined; home.stateVersion is not copied, so a machine where the user has no home yet also needs set_home_manager with its stateVersion.", func(ctx context.Context, in struct {
 		Host string `json:"host" jsonschema:"the machine to copy from"`
 		core.CopyRequest
@@ -446,7 +484,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		r, err := svc.Copy(in.Host, in.CopyRequest)
 		return copyOut{r}, err
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, which host_details' managedVersion 5 needs for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. With home, write modules/managed-home.nix instead, which applies a standalone home's homes/<name>/managed.json (host home:<name>; packages, removed packages and settings, plus custom.nix and files/<path> linked at ~/<path> next to it) once the home's modules in flake.nix have (import ./modules/managed-home.nix ./homes/<name>/managed.json), or (./homes + \"/<name>/managed.json\") for a name a Nix path cannot hold such as pablo@laptop; fleet_overview's homes show managedFile once it does. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, and write modules/managed-configs.py next to it, which it runs on the machines. host_details' managedVersion 6 is needed for set_home_config and set_keyring_entry, 5 for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. With home, write modules/managed-home.nix instead, which applies a standalone home's homes/<name>/managed.json (host home:<name>; packages, removed packages and settings, plus custom.nix and files/<path> linked at ~/<path> next to it) once the home's modules in flake.nix have (import ./modules/managed-home.nix ./homes/<name>/managed.json), or (./homes + \"/<name>/managed.json\") for a name a Nix path cannot hold such as pablo@laptop; fleet_overview's homes show managedFile once it does. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
 		Home     bool   `json:"home,omitempty" jsonschema:"write modules/managed-home.nix, for standalone homes"`
 	}) (map[string]string, error) {

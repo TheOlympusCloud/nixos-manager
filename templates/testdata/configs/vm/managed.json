@@ -1,0 +1,25 @@
+{
+  "packages": [],
+  "home": {
+    "alice": {
+      "packages": [],
+      "removedPackages": [],
+      "configs": {
+        ".config/fake/settings.json": {
+          "format": "json",
+          "settings": { "theme": "light", "server": { "url": "https://music.example" } },
+          "secrets": { "server": { "token": "token" } }
+        },
+        ".config/fake/config.toml": {
+          "format": "toml",
+          "settings": { "Application": { "EnableSystemTray": true }, "Servers[ID=a1]": { "Hostname": "https://music.example" } }
+        },
+        ".config/fake/broken.json": { "format": "json", "settings": { "a": 1 } }
+      },
+      "keyring": [
+        { "label": "Password for 'a1' on 'supersonic'", "attributes": { "service": "supersonic", "username": "a1" }, "secret": "pw" }
+      ]
+    }
+  },
+  "settings": { "home-manager": { "users": { "alice": { "home": { "stateVersion": "26.05" } } } } }
+}

@@ -821,6 +821,33 @@ func TestPackageCustomisationOverHTTP(t *testing.T) {
 	}
 }
 
+// App configs and keyring entries in homes: the routes the Home tab's Apps section uses.
+func TestHomeConfigsOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	var v core.ManagedView
+	p := ".config/supersonic/config.toml"
+	if code := e.do(t, "POST", "/api/hosts/web/home-configs", map[string]any{"user": "pablo", "path": p, "format": "toml", "process": "supersonic"}, &v); code != 200 || v.Home["pablo"].Configs[p].Format != "toml" {
+		t.Fatalf("add config: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/home-config-keys", map[string]any{"user": "pablo", "path": p, "key": []string{"Servers[ID=a1]", "Hostname"}, "value": "https://music.example"}, &v); code != 200 {
+		t.Fatalf("set key: %d", code)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/home-config-keys", map[string]any{"user": "pablo", "path": p, "key": []string{"Servers[ID=a1]", "Hostname"}, "unset": true}, &v); code != 200 || v.Home["pablo"].Configs[p].Settings != nil {
+		t.Fatalf("unset key: %d %+v", code, v.Home["pablo"].Configs[p])
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/home-configs", map[string]any{"user": "pablo", "path": p, "format": "xml"}, nil); code != 400 {
+		t.Fatalf("bad format: %d", code)
+	}
+	entry := map[string]any{"user": "pablo", "label": "pw", "attributes": map[string]string{"service": "supersonic", "username": "a1"}, "secret": "music"}
+	if code := e.do(t, "POST", "/api/hosts/web/keyring", entry, &v); code != 200 || len(v.Home["pablo"].Keyring) != 1 || v.Home["pablo"].Keyring[0].Secret != "music" {
+		t.Fatalf("keyring: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/keyring", map[string]any{"user": "pablo", "attributes": entry["attributes"], "remove": true}, &v); code != 200 || len(v.Home["pablo"].Keyring) != 0 {
+		t.Fatalf("remove keyring entry: %d %+v", code, v)
+	}
+}
+
 func TestSearchOverHTTP(t *testing.T) {
 	e := fleetEnv(t)
 	e.login(t)

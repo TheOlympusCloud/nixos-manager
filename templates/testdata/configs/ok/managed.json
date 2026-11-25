@@ -1,0 +1,26 @@
+{
+  "packages": [],
+  "home": {
+    "pablo": {
+      "packages": [],
+      "removedPackages": [],
+      "configs": {
+        ".config/supersonic/config.toml": {
+          "format": "toml",
+          "settings": { "Application": { "EnableSystemTray": true }, "Servers[ID=a1]": { "Hostname": "https://music.example" } },
+          "process": "supersonic"
+        },
+        ".config/app/settings.json": {
+          "format": "json",
+          "mode": "seed",
+          "settings": { "a": 1 },
+          "secrets": { "auth": { "token": "token" } }
+        }
+      },
+      "keyring": [
+        { "label": "Password for 'a1' on 'supersonic'", "attributes": { "service": "supersonic", "username": "a1" }, "secret": "pw" }
+      ]
+    }
+  },
+  "settings": { "home-manager": { "users": { "pablo": { "home": { "stateVersion": "26.05" } } } } }
+}

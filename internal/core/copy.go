@@ -265,7 +265,8 @@ func (s *Service) homePlan(src managedDoc, user string) (copyPlan, error) {
 			}
 			return out
 		}
-		next := HomeManaged{Packages: join(cur.Packages, h.Packages), RemovedPackages: join(cur.RemovedPackages, h.RemovedPackages), Secrets: maps.Clone(cur.Secrets)}
+		next := HomeManaged{Packages: join(cur.Packages, h.Packages), RemovedPackages: join(cur.RemovedPackages, h.RemovedPackages), Secrets: maps.Clone(cur.Secrets),
+			Configs: maps.Clone(cur.Configs), Keyring: slices.Clone(cur.Keyring)}
 		for p, name := range h.Secrets {
 			if other, ok := next.Secrets[p]; ok && other != name {
 				conflicts = append(conflicts, "home."+user+".secrets: "+p)
@@ -277,6 +278,9 @@ func (s *Service) homePlan(src managedDoc, user string) (copyPlan, error) {
 			}
 		}
 		changed := !had || len(next.Packages) > len(cur.Packages) || len(next.RemovedPackages) > len(cur.RemovedPackages) || len(next.Secrets) > len(cur.Secrets)
+		if joinConfigs(user, &next, h, &conflicts) {
+			changed = true
+		}
 		v.Home[user] = next
 		if addMissing(v.Settings, settings, "settings", &conflicts) {
 			changed = true

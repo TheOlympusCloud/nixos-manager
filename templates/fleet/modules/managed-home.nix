@@ -16,9 +16,18 @@
 # - files/<path>: a file linked at ~/<path> (home.file). It is copied to the Nix
 #   store, which every user can read: never a secret.
 #
+# managed.json's configs.<path in ~> are app settings written into files the
+# apps also write, as managed.nix's home.<user>.configs, but without secrets: a
+# standalone home gets none of a machine's (modules/managed-configs.py says how).
+#
 # modules/managed.json, set for every NixOS machine, does not apply here.
 file:
-{ lib, pkgs, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
 let
   data = if builtins.pathExists file then lib.importJSON file else { };
   dir = dirOf file;
@@ -28,6 +37,25 @@ let
   pname = p: p.pname or (builtins.parseDrvName p.name).name;
   # Priority on each value, never on a whole attribute set, as in managed.nix.
   values = priority: v: if builtins.isAttrs v then lib.mapAttrs (_: values priority) v else lib.mkOverride priority v;
+  configs = lib.mapAttrs (
+    p: c:
+    if (c.secrets or { }) != { } then
+      throw "managed.json: configs.${p} has secrets, which a standalone home cannot get; put them in a NixOS machine's home"
+    else
+      c // { mode = c.mode or "merge"; }
+  ) (data.configs or { });
+  # As in managed.nix.
+  writer =
+    let
+      python = pkgs.python3.withPackages (ps: [
+        ps.tomlkit
+        ps.ruamel-yaml
+        ps.secretstorage
+      ]);
+    in
+    pkgs.writeShellScript "nixos-manager-configs" ''exec ${python}/bin/python3 ${./managed-configs.py} "$@"'';
+  spec = pkgs.writeText "nixos-manager-configs.json" (builtins.toJSON { inherit configs; });
+  linkedTargets = map (f: f.target) (builtins.filter (f: f.enable) (builtins.attrValues config.home.file));
   own = data.packages or [ ];
   removed = data.removedPackages or [ ];
   added = map package own;
@@ -72,5 +100,25 @@ in
         )
       );
     }
+    (lib.mkIf (configs != { }) {
+      assertions = [
+        {
+          assertion = lib.intersectLists (builtins.attrNames configs) linkedTargets == [ ];
+          message = "managed.json: configs write ${lib.concatStringsSep ", " (lib.intersectLists (builtins.attrNames configs) linkedTargets)}, which home-manager also links (home.file, xdg.configFile or a module): keep one of the two";
+        }
+      ];
+      home.activation.nixosManagerConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] "run ${writer} configs ${spec}";
+      systemd.user.services.nixos-manager-configs = {
+        Unit = {
+          Description = "App settings set in managed.json";
+          Before = [ "graphical-session-pre.target" ];
+        };
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${writer} configs ${spec}";
+        };
+        Install.WantedBy = [ "default.target" ];
+      };
+    })
   ];
 }
