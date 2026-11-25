@@ -1571,17 +1571,22 @@ thing an app keeps by what fits it:
     (Supersonic, Vesktop, unbraid, xodus-nexus) would undo a change made
     while they run: give **wait while running** a text of their command line,
     and the file waits for the next activation or login (where it is written
-    before the apps start), with a `deferred` line in the log. Claude Code
-    takes a lock folder (`~/.claude/settings.json.lock`) to write: give
-    **its lock**, and the file is written holding it.
+    before the apps start), with a `deferred` line in the log. The text is
+    matched anywhere in a command line, so make it the app's own (its package
+    name), not a word other programs show. Claude Code takes a lock folder
+    (`~/.claude/settings.json.lock`) to write: give **its lock**, and the file
+    is written holding it; a lock untouched for a minute is taken over.
   - On the machine, `modules/managed-configs.py` writes a file only when its
     content changes, through a new file renamed over it, parsed again first.
     It keeps the file's mode, less access for others once it holds a secret
     (a new file is 0600 with a secret, else 0644), and keeps comments in TOML,
-    YAML, INI and properties files. A file that does not parse is left as it
-    is, with a line in the activation log (`journalctl -u home-manager-<user>`)
-    saying so, and so is one whose result would not parse. A missing secret
-    fails the activation, which the deployment reports.
+    YAML, INI and properties files, and their line endings. A file that does
+    not parse, or is not UTF-8, is left as it is, with a line in the activation
+    log (`journalctl -u home-manager-<user>`) saying so, and so is one whose
+    result would not parse. A file that cannot be written (a missing secret, an
+    INI value with a line break) is logged as failed, the others are still
+    written and the switch goes on; the login unit `nixos-manager-configs`
+    then fails, so `systemctl --user --failed` shows it.
   - A path home-manager also links (a file in **Files in ~**, `xdg.configFile`)
     fails the check: keep one of the two.
 - **A keyring entry** is `{ label, attributes, secret }` in

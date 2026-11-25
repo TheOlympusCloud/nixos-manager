@@ -107,7 +107,8 @@ in
           message = "managed.json: configs write ${lib.concatStringsSep ", " (lib.intersectLists (builtins.attrNames configs) linkedTargets)}, which home-manager also links (home.file, xdg.configFile or a module): keep one of the two";
         }
       ];
-      home.activation.nixosManagerConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] "run ${writer} configs ${spec}";
+      # As in managed.nix: after the home's own files, never holding them back.
+      home.activation.nixosManagerConfigs = lib.hm.dag.entryAfter [ "linkGeneration" ] "run ${writer} configs ${spec} || warnEcho 'nixos-manager: some app settings were not written (see above)'";
       systemd.user.services.nixos-manager-configs = {
         Unit = {
           Description = "App settings set in managed.json";

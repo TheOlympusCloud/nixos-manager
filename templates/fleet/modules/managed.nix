@@ -357,7 +357,9 @@ let
               message = "managed.json: ${user}'s configs write ${lib.concatStringsSep ", " (lib.intersectLists (builtins.attrNames configs) linkedTargets)}, which home-manager also links (home.file, xdg.configFile or a module): keep one of the two";
             }
           ];
-          home.activation.nixosManagerConfigs = hm.lib.hm.dag.entryAfter [ "writeBoundary" ] "run ${writer} configs ${configsSpec}";
+          # After the home's own files, and never holding them back: a file that cannot be written
+          # is logged, and the login unit below fails, which systemctl --user --failed shows.
+          home.activation.nixosManagerConfigs = hm.lib.hm.dag.entryAfter [ "linkGeneration" ] "run ${writer} configs ${configsSpec} || warnEcho 'nixos-manager: some app settings were not written (see above)'";
           # Again at login, before the apps start: a merge an app's process or lock held back.
           systemd.user.services.nixos-manager-configs = {
             Unit = {

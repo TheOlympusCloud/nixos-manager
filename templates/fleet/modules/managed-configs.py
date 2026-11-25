@@ -21,12 +21,15 @@ configs: {"configs": {"<path in ~>": {"format": "json" | "toml" | "yaml" |
   line, the file is left alone (the app would overwrite it on exit) and the
   merge waits for the next activation or login.
 - lock: a lock folder the app takes while it writes (mkdir), held while
-  the file is written; still held after a few seconds, the merge waits.
+  the file is written; still held after a few seconds, the merge waits. One
+  untouched for a minute was left by an app that crashed, and is taken over.
 
 A file is written only when its content changes, through a new file renamed
 over it, and parsed again first. It keeps its mode, less any access for
-others when it holds a secret; a new one is 0600 with a secret, else 0644.
-A file that does not parse is left as it is. Nothing here prints a value.
+others when it holds a secret; a new one is 0600 with a secret, else 0644,
+and its line endings. A file that does not parse, or is not UTF-8, is left as
+it is. A file that cannot be written does not stop the others; the exit code
+says one failed. Nothing here prints a value.
 
 keyring: {"entries": [{"label": "...", "attributes": {...}, "secret":
 "<file>"}]} stores each entry with the Secret Service (GNOME Keyring) in
@@ -46,6 +49,10 @@ SELECTOR = re.compile(r"^(.+)\[([^=\[\]]+)=([^\[\]]*)\]$")
 
 class Unparseable(Exception):
     pass
+
+
+class Refused(Exception):
+    """A declared value the format cannot hold; nothing is written."""
 
 
 def say(msg):
@@ -270,6 +277,8 @@ class Ini:
                 start = len(lines) - 1
             end = next((i for i in range(start + 1, len(lines)) if self.SECTION.match(lines[i])), len(lines))
             for key, value in keys.items():
+                if "\n" in text_of(value) or "\r" in text_of(value):
+                    raise Refused("%s.%s has a line break, which an INI value cannot hold" % (section, key))
                 line = "%s=%s" % (key, text_of(value))
                 at = next((i for i in range(start + 1, end) if (m := self.KEY.match(lines[i])) and m.group(1) == key and lines[i].strip()[0] not in "#;"), None)
                 if at is None:
@@ -284,7 +293,12 @@ class Ini:
         return {"lines": [], "doc": {}}
 
     def dump(self, parsed, old):
-        return "\n".join(parsed["lines"]) + "\n"
+        return newline(old).join(parsed["lines"]) + newline(old)
+
+
+def newline(old):
+    """The file's own line ending."""
+    return "\r\n" if old and "\r\n" in old else "\n"
 
 
 def prop_unescape(s):
@@ -372,7 +386,7 @@ class Properties:
         return {"lines": [], "doc": {}}
 
     def dump(self, parsed, old):
-        return "\n".join(parsed["lines"]) + "\n"
+        return newline(old).join(parsed["lines"]) + newline(old)
 
 
 FORMATS = {"json": Json, "toml": Toml, "yaml": Yaml, "ini": Ini, "properties": Properties}
@@ -406,6 +420,8 @@ def running(pattern):
 
 
 LOCK_WAIT = 5.0
+# The app's lock library takes over a lock it has not touched for this long; so do we.
+LOCK_STALE = 60.0
 
 
 class Lock:
@@ -421,6 +437,12 @@ class Lock:
                 self.held = True
                 return self
             except FileExistsError:
+                try:
+                    if time.time() - os.stat(self.path).st_mtime > LOCK_STALE:
+                        os.rmdir(self.path)  # left by an app that crashed
+                        continue
+                except FileNotFoundError:
+                    continue
                 if time.monotonic() >= deadline:
                     return self
                 time.sleep(0.2)
@@ -456,6 +478,11 @@ def write_atomically(path, text, mode):
         os.close(dfd)
 
 
+def canonical(data):
+    """Data as JSON text, so 1 and true differ, as they do in the file."""
+    return json.dumps(data, sort_keys=True, default=str)
+
+
 def apply(home, rel, c):
     """Writes one config; returns what happened, for the log."""
     path = os.path.join(home, rel)
@@ -477,12 +504,16 @@ def apply(home, rel, c):
             return None
         old = None
         if st is not None:
-            with open(path, encoding="utf-8") as f:
-                old = f.read()
+            with open(path, "rb") as f:
+                raw = f.read()
+            try:
+                old = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                raise Unparseable("not UTF-8") from None
         doc = new_doc(fmt) if old is None else fmt.parse(old)
-        before = None if old is None else fmt.plain(doc)
+        before = None if old is None else canonical(fmt.plain(doc))
         fmt.merge(doc, combine(c.get("settings") or {}, resolve(secrets)))
-        if before is not None and fmt.plain(doc) == before:
+        if before is not None and canonical(fmt.plain(doc)) == before:
             return None
         text = fmt.dump(doc, old)
         try:
@@ -507,9 +538,12 @@ def configs(spec):
             what = apply(home, rel, c)
         except Unparseable as e:
             what = "left as it is: it is not valid %s (%s)" % (FORMATS[c["format"]].name, e)
+        except Refused as e:
+            what, failed = "not written: %s" % e, True
         except OSError as e:
             what, failed = "failed: %s (%s)" % (e.strerror or type(e).__name__, e.filename), True
-        except UnicodeError as e:
+        except Exception as e:  # noqa: BLE001 - one app's file must not stop the others
+            # Only the type: a library's message may quote the file, secrets and all.
             what, failed = "failed: %s" % type(e).__name__, True
         if what:
             say("~/%s: %s" % (rel, what))

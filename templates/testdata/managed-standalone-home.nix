@@ -41,10 +41,10 @@ in
   # The app config, written at activation and at login with the same spec.
   configs =
     let
-      run = c.home.activation.nixosManagerConfigs.data;
+      specOf = command: lib.head (builtins.match ".* configs (/nix/store/[^ ]+).*" command);
     in
-    lib.hasInfix " configs /nix/store/" run
-    && lib.toList c.systemd.user.services.nixos-manager-configs.Service.ExecStart == [ (lib.removePrefix "run " run) ];
+    specOf c.home.activation.nixosManagerConfigs.data
+    == specOf (lib.head (lib.toList c.systemd.user.services.nixos-manager-configs.Service.ExecStart));
   # The whole home evaluates.
   activation = lib.hasSuffix ".drv" home.activationPackage.drvPath;
 }
