@@ -1,7 +1,8 @@
 name: VM tests
 
-# A machine installed from its installer ISO and booted, in QEMU with KVM: a few GB
-# of downloads and about six minutes, so not on every push like ci.yml.
+# A machine installed from its installer ISO and booted, and a machine whose homes get
+# app configs and keyring entries, in QEMU with KVM: a few GB of downloads and about
+# ten minutes, so not on every push like ci.yml.
 on:
   schedule:
     - cron: "30 4 * * *" # nightly on main, after ci.yml's
@@ -12,6 +13,10 @@ on:
     paths:
       - .github/workflows/vm-tests.yml
       - internal/core/testdata/install-vm.nix
+      - templates/testdata/managed-configs-vm.nix
+      - templates/testdata/configs/vm/**
+      - templates/fleet/modules/managed.nix
+      - templates/fleet/modules/managed-configs.py
 
 permissions:
   contents: read
@@ -26,20 +31,23 @@ defaults:
 
 jobs:
   install:
-    name: Install from the ISO and boot
+    name: Install from the ISO and boot; app configs in homes
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
       - uses: cachix/install-nix-action@v31 # also opens /dev/kvm to Nix's builds
-      - name: Install a customised machine from its ISO, boot it and log in
+      - name: Install a customised machine from its ISO, boot it and log in; write app configs and keyring entries
         run: |
-          NIXMGR_VM_TESTS=1 go test -v -timeout 40m -run 'InVMWithRealNix$' ./internal/core 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
+          # One VM at a time (-p 1): the runner has four cores.
+          NIXMGR_VM_TESTS=1 go test -p 1 -v -timeout 40m -run 'InVMWithRealNix$' ./internal/core ./templates 2>&1 | tee "$RUNNER_TEMP/tests.log" ||
             { scripts/ci-annotate.sh "VM tests" "$RUNNER_TEMP/tests.log"; exit 1; }
-          # A skipped test passes too: say that it ran, and how long it took.
-          passed=$(grep -- '--- PASS: TestInstallInVMWithRealNix' "$RUNNER_TEMP/tests.log") ||
-            { echo "::error title=VM tests::TestInstallInVMWithRealNix did not run"; exit 1; }
-          echo "::notice title=VM tests::$passed"
+          # A skipped test passes too: say that each ran, and how long it took.
+          for test in TestInstallInVMWithRealNix TestManagedConfigsInVMWithRealNix; do
+            passed=$(grep -- "--- PASS: $test" "$RUNNER_TEMP/tests.log") ||
+              { echo "::error title=VM tests::$test did not run"; exit 1; }
+            echo "::notice title=VM tests::$passed"
+          done

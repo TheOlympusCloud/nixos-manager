@@ -21,6 +21,21 @@
 # ~/.netrc a link to it in /run/secrets. Neither way puts a secret in the store.
 # A secret comes from modules/secrets.nix (Settings → Secrets) or Nix by hand.
 #
+# For apps that rewrite their own settings, where a link would break them:
+# - home.<user>.configs.<path in ~> = { format, mode, settings, secrets, process,
+#   lock }: modules/managed-configs.py writes the declared keys into that file at
+#   each home-manager activation and login (mode "merge", the app's other keys
+#   stay), or the whole file when there is none (mode "seed"). format is json,
+#   toml, yaml, ini or properties. secrets has the shape of settings, with a
+#   secret's name where its value goes: it is read on the machine, as the user,
+#   from /run/secrets. process and lock keep it from writing while the app runs.
+#   managed-configs.py says how lists merge.
+# - home.<user>.keyring = [ { label, attributes, secret } ]: stored in the
+#   user's keyring (Secret Service: GNOME Keyring) after the graphical session
+#   starts, for apps that keep their password there.
+# Each secret either uses becomes the user's, as a linked one does. What else
+# the apps keep (logins in their own databases, rotating tokens) stays theirs.
+#
 # modules/managed.json, next to this module, has the same shape and is set for
 # every machine that loads it; where both set something, the machine's own wins:
 # - packages and removedPackages are joined. A name the machine removes takes a
@@ -29,7 +44,8 @@
 #   A shared patch file is relative to modules/.
 # - home.<user> applies where the machine's managed.json has home.<user> too (so
 #   no machine gets a home for a user it lacks), joined as the system's packages;
-#   in secrets, the machine's link at a path wins.
+#   in secrets and configs, the machine's entry at a path wins; in keyring, its
+#   entry with the same attributes.
 # - settings apply at priority 95, below the machine's (90) but still above
 #   hand-written values; settings.home-manager.users.<user> applies as home does.
 # The files next to it (custom.nix, packages/, home/) are not read.
@@ -223,6 +239,34 @@ let
   # files in home/<user>/templates/ (path in ~ -> file).
   links = lib.mapAttrs (user: u: (sharedHomes.${user}.secrets or { }) // (u.secrets or { })) homes;
   templates = lib.mapAttrs (user: _: filesUnder (dir + "/home/${user}/templates")) homes;
+  # A user's configs and keyring entries: the machine's own, then the shared ones it lacks.
+  configsOf = user: u: (sharedHomes.${user}.configs or { }) // (u.configs or { });
+  keyringOf =
+    user: u:
+    let
+      own = u.keyring or [ ];
+    in
+    builtins.filter (e: !lib.any (o: o.attributes == e.attributes) own) (sharedHomes.${user}.keyring or [ ]) ++ own;
+  leaves = t: lib.concatMap (v: if builtins.isAttrs v then leaves v else [ v ]) (builtins.attrValues t);
+  # Every secret a user's home uses: linked whole, in a config or in the keyring.
+  used = lib.mapAttrs (
+    user: u:
+    lib.unique (
+      builtins.attrValues links.${user}
+      ++ lib.concatMap (c: leaves (c.secrets or { })) (builtins.attrValues (configsOf user u))
+      ++ map (e: e.secret) (keyringOf user u)
+    )
+  ) homes;
+  # Writes configs and keyring entries on the machine (see managed-configs.py).
+  writer =
+    let
+      python = pkgs.python3.withPackages (ps: [
+        ps.tomlkit
+        ps.ruamel-yaml
+        ps.secretstorage
+      ]);
+    in
+    pkgs.writeShellScript "nixos-manager-configs" ''exec ${python}/bin/python3 ${./managed-configs.py} "$@"'';
   # Rendered at /run/secrets/rendered/<name>.
   # shortcut: names can collide, so the check fails with a conflict: two paths of one
   # user that differ only in characters a store name cannot hold (/ included), or
@@ -261,6 +305,35 @@ let
         p: name:
         config.sops.secrets.${name}.path
           or (throw "managed.json links ~/${p} of ${user} to the secret ${name}, which this machine does not have; add it in Settings → Secrets, or unlink it");
+      configs = configsOf user u;
+      keyring = keyringOf user u;
+      # Where the machine has the secret: the writer reads it there, so no value reaches the store.
+      secretFile =
+        what: name:
+        config.sops.secrets.${name}.path
+          or (throw "managed.json: ${what} of ${user} uses the secret ${name}, which this machine does not have; add it in Settings → Secrets");
+      mapLeaves = f: lib.mapAttrs (_: v: if builtins.isAttrs v then mapLeaves f v else f v);
+      configsSpec = pkgs.writeText "nixos-manager-configs.json" (
+        builtins.toJSON {
+          configs = lib.mapAttrs (
+            p: c:
+            builtins.removeAttrs c [ "secrets" ]
+            // {
+              mode = c.mode or "merge";
+              secrets = mapLeaves (secretFile "~/${p}") (c.secrets or { });
+            }
+          ) configs;
+        }
+      );
+      keyringSpec = pkgs.writeText "nixos-manager-keyring.json" (
+        builtins.toJSON {
+          entries = map (e: {
+            inherit (e) label attributes;
+            secret = secretFile "the keyring entry ${e.label}" e.secret;
+          }) keyring;
+        }
+      );
+      linkedTargets = map (f: f.target) (builtins.filter (f: f.enable) (builtins.attrValues hm.config.home.file));
     in
     {
       _file = file;
@@ -277,6 +350,43 @@ let
         { home.file = lib.mapAttrs (p: name: { source = link (secretPath p name); }) links.${user}; }
         { home.file = lib.mapAttrs (p: _: { source = link config.sops.templates.${templateName user p}.path; }) templates.${user}; }
         (values 95 (sharedHomeSettings.${user} or { }))
+        (lib.mkIf (configs != { }) {
+          assertions = [
+            {
+              assertion = lib.intersectLists (builtins.attrNames configs) linkedTargets == [ ];
+              message = "managed.json: ${user}'s configs write ${lib.concatStringsSep ", " (lib.intersectLists (builtins.attrNames configs) linkedTargets)}, which home-manager also links (home.file, xdg.configFile or a module): keep one of the two";
+            }
+          ];
+          home.activation.nixosManagerConfigs = hm.lib.hm.dag.entryAfter [ "writeBoundary" ] "run ${writer} configs ${configsSpec}";
+          # Again at login, before the apps start: a merge an app's process or lock held back.
+          systemd.user.services.nixos-manager-configs = {
+            Unit = {
+              Description = "App settings set in managed.json";
+              Before = [ "graphical-session-pre.target" ];
+            };
+            Service = {
+              Type = "oneshot";
+              ExecStart = "${writer} configs ${configsSpec}";
+            };
+            Install.WantedBy = [ "default.target" ];
+          };
+        })
+        (lib.mkIf (keyring != [ ]) {
+          # Once the session runs, the login keyring is unlocked.
+          systemd.user.services.nixos-manager-keyring = {
+            Unit = {
+              Description = "Keyring entries set in managed.json";
+              After = [ "graphical-session.target" ];
+              PartOf = [ "graphical-session.target" ];
+            };
+            Service = {
+              Type = "oneshot";
+              ExecStart = "${writer} keyring ${keyringSpec}";
+              TimeoutStartSec = "2min";
+            };
+            Install.WantedBy = [ "graphical-session.target" ];
+          };
+        })
       ];
     };
 in
@@ -303,9 +413,9 @@ in
     };
     nixosManager.version = lib.mkOption {
       type = lib.types.int;
-      default = 5;
+      default = 6;
       internal = true;
-      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from); 5 adds secrets in homes (home.<user>.secrets and home/<user>/templates/).";
+      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from); 5 adds secrets in homes (home.<user>.secrets and home/<user>/templates/); 6 adds app configs and keyring entries in homes (home.<user>.configs and keyring).";
     };
     nixosManager.packageNames = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
@@ -341,10 +451,10 @@ in
     # home-manager included when it shares the system's pkgs (useGlobalPkgs).
     { nixpkgs.overlays = lib.optional (changed != [ ]) overlay; }
     (lib.optionalAttrs (homes != { }) { home-manager.users = lib.mapAttrs homeModule homes; })
-    # A secret linked into a home is its user's; two users cannot both own one.
-    (lib.optionalAttrs (lib.any (l: l != { }) (builtins.attrValues links)) {
+    # A secret a home uses is its user's; two users cannot both own one.
+    (lib.optionalAttrs (lib.any (l: l != [ ]) (builtins.attrValues used)) {
       sops.secrets = lib.mkMerge (
-        lib.mapAttrsToList (user: l: lib.genAttrs (builtins.attrValues l) (name: lib.mkIf (declared name) { owner = user; })) links
+        lib.mapAttrsToList (user: names: lib.genAttrs names (name: lib.mkIf (declared name) { owner = user; })) used
       );
     })
     (lib.optionalAttrs (lib.any (t: t != { }) (builtins.attrValues templates)) {

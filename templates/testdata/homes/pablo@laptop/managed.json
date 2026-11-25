@@ -1,6 +1,9 @@
 {
   "packages": ["jq"],
   "removedPackages": ["cowsay"],
+  "configs": {
+    ".config/app/settings.json": { "format": "json", "settings": { "theme": "dark" } }
+  },
   "settings": {
     "home": { "sessionVariables": { "NIXMGR": "managed" } }
   }
