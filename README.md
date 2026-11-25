@@ -73,6 +73,12 @@ An MCP server gives automation the same features.
   whose `sudo fleet-install` installs the machine from the repository, already
   enrolled. The console never runs the install itself.
 - **Fleet matrices**: which package and which service runs on which machine.
+- **What each machine has installed**: every machine reports the closure of
+  the system it runs. Its **Dependencies** tab browses it as a tree, like
+  `nix-tree`: what each package uses, what uses it, and why it is there. The
+  **Dependencies** view lists every package and library against the machines,
+  with their versions, and where they differ. See [What each machine has
+  installed](#what-each-machine-has-installed).
 - **Flake inputs**: each input's revision and age; update one or all and see
   what moved (with compare links) and which package versions change on which
   machine.
@@ -961,6 +967,43 @@ risky changes (network, firewall, VPN, SSH) are best tried first.
   the previous generation in the boot menu, or run `nixos-rebuild switch
   --rollback`. Once it is online, comin pulls the fix and deploys it.
 
+### What each machine has installed
+
+With reporting on, each machine also tells nixos-manager what it has
+installed: the closure of the system it runs, every store path with its size
+and the paths it references. A machine's page shows it in its
+**Dependencies** tab as a tree from the system, like `nix-tree`: open an entry
+to see what it uses, search for a package, and select one for its version,
+size, what uses it, and **Why it is here**, a shortest chain of references from
+the system down to it. The **Dependencies** view lists every package and
+library with a version against the machines, with the versions each one has.
+**Versions differ** keeps the rows where the machines that have one disagree,
+and a cell opens that machine's tree at the entry. The MCP tools
+`machine_dependencies` and `fleet_dependencies` give the same. Packages
+installed outside the system, with `nix profile` or `nix-env`, are not in it;
+home-manager homes of the system are.
+
+nixos-manager builds and evaluates nothing for it, so it works with
+`checks.build = false` too. The reply to a report asks the machine for its
+closure when nixos-manager lacks the one of the system the machine runs. The
+report script then reads it through the machine's Nix daemon
+(`nix path-info --recursive --json`) and posts it to `/api/deployments/closure`
+with the machine's own token, typically well under a megabyte. It arrives
+right after each deployment that changes the system, or with the next
+heartbeat; never between comin's build and its deployment. When Nix fails on
+the machine, or takes more than 30 seconds, the script posts the error
+instead, which the tab shows; an upload that fails is asked for again by the
+next report. A machine that reports with the shared fleet token gets no tree:
+give it its own. nixos-manager refuses a closure with an invalid entry, or one
+larger than 16 MiB or 50 000 store paths, shows why, and asks again only once
+the machine runs another system. It keeps the latest closure of each machine in
+`$NIXMGR_DATA/closures/<host>.json`, and deletes it with the machine's reports.
+
+A repository made from an older starter fleet sends no closures: copy both
+`report-deployment*` files from `templates/fleet/modules/` into its
+`modules/`, then commit and push. Each machine sends its tree with its first
+report after it deploys them; until then its tab says what is missing.
+
 ## Secrets
 
 Passwords, tokens and keys the machines need live in the repository,
@@ -1238,7 +1281,8 @@ tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `list_branches`, `create_branch`, `switch_branch`, `revert_commit`,
 `merge_branch`, `push`, `pull`,
 `list_targets`, `run_check`, `flake_lock`, `flake_update`. Deployments:
-`deployments`, `try_on_machine`, `end_trial`. Secrets:
+`deployments`, `try_on_machine`, `end_trial`, and what the machines have
+installed: `machine_dependencies`, `fleet_dependencies`. Secrets:
 `list_secrets` (names and keys), `set_secret`, `delete_secret`; no tool reads a
 value back. They call the same
 code as the web UI, including the check rules for commit and push, which MCP
@@ -1290,7 +1334,9 @@ this release:
   (`read`, `edit` or `full`) and answers 400 without one. Add
   `"scope": "full"` to get what the old version made.
 - **Fleet modules.** A fleet keeps its own copies of the starter's modules:
-  copy the new `modules/secrets.nix` over yours ([Secrets](#secrets)).
+  copy the new `modules/secrets.nix` over yours ([Secrets](#secrets)), and
+  both `modules/report-deployment*` files for the machines' dependency trees
+  ([What each machine has installed](#what-each-machine-has-installed)).
 - **Pure evaluation.** The machine views and the editor's completion evaluate
   the flake as `nix build` does: run **Lock** if `flake.lock` misses an input
   ([Using it](#using-it)). Package completion now comes only from the flake's

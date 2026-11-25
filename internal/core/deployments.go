@@ -75,6 +75,9 @@ type ReportIn struct {
 	// SilentAfter is, in a heartbeat, how many hours the machine may go without
 	// reporting before it is flagged (fleet.deployReport.silentAfter); 0 never.
 	SilentAfter int `json:"silentAfter"`
+	// SendsClosure: its report script posts its closure when the reply asks
+	// (dependencies.go); older ones do not.
+	SendsClosure bool `json:"sendsClosure"`
 	// SharedToken is set by the server, never by the machine: it reported
 	// with the shared fleet token instead of its own.
 	SharedToken bool `json:"-"`
@@ -96,6 +99,8 @@ type liveState struct {
 	SilentAfter int          `json:"silentAfter"`   // hours, from its last heartbeat
 	SharedToken bool         `json:"sharedToken,omitempty"`
 	System      *SystemState `json:"system,omitempty"`
+	// SendsClosure: its last report came from a script that sends closures.
+	SendsClosure bool `json:"sendsClosure,omitempty"`
 }
 
 // DeployReport is one report as stored.
@@ -113,7 +118,8 @@ func (r DeployReport) failed() bool { return r.Status == "failed" }
 
 // Deployments keeps the last reports of each machine in deployments.json,
 // what its latest report of any kind (heartbeats too) said in heartbeats.json,
-// and the key each machine's report token is derived from.
+// the closure of the system it runs in closures/<host>.json, and the key each
+// machine's report token is derived from.
 type Deployments struct {
 	// Systems evaluates what each machine builds at the commit it deployed, to
 	// compare with what it runs; nil compares nothing.
@@ -131,6 +137,9 @@ type Deployments struct {
 	token   string                    // the shared token while it is accepted, else ""
 	reports map[string][]DeployReport // newest first
 	live    map[string]liveState
+
+	closuresDir string
+	closures    map[string]*closureRecord // by host
 }
 
 // OpenDeployments loads dataDir/deployments.json, heartbeats.json and the
@@ -139,7 +148,10 @@ type Deployments struct {
 func OpenDeployments(dataDir string, repo *Repo) (*Deployments, error) {
 	d := &Deployments{repo: repo, path: filepath.Join(dataDir, "deployments.json"), livePath: filepath.Join(dataDir, "heartbeats.json"),
 		keyPath: filepath.Join(dataDir, "report-key"), tokenPath: filepath.Join(dataDir, "deploy-token"), started: time.Now(),
-		reports: map[string][]DeployReport{}, live: map[string]liveState{}}
+		reports: map[string][]DeployReport{}, live: map[string]liveState{}, closuresDir: filepath.Join(dataDir, "closures")}
+	if err := d.loadClosures(); err != nil {
+		return nil, err
+	}
 	for path, into := range map[string]any{d.path: &d.reports, d.livePath: &d.live} {
 		b, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -298,7 +310,7 @@ func (d *Deployments) Record(in ReportIn, now time.Time) error {
 		return errorf(ErrInvalid, "already keeping reports of %d machines", maxReporters)
 	}
 	l := oldLive
-	l.Seen, l.SharedToken = at, in.SharedToken
+	l.Seen, l.SharedToken, l.SendsClosure = at, in.SharedToken, in.SendsClosure
 	if beat {
 		l.Beat, l.SilentAfter = at, in.SilentAfter
 	}
@@ -717,7 +729,7 @@ func (d *Deployments) Forget(hosts ...string) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	old, oldLive := map[string][]DeployReport{}, map[string]liveState{}
+	old, oldLive, oldClosures := map[string][]DeployReport{}, map[string]liveState{}, map[string]*closureRecord{}
 	for _, h := range hosts {
 		if rs, ok := d.reports[h]; ok {
 			old[h] = rs
@@ -727,8 +739,12 @@ func (d *Deployments) Forget(hosts ...string) error {
 			oldLive[h] = l
 			delete(d.live, h)
 		}
+		if c, ok := d.closures[h]; ok {
+			oldClosures[h] = c
+			delete(d.closures, h)
+		}
 	}
-	if len(old) == 0 && len(oldLive) == 0 {
+	if len(old) == 0 && len(oldLive) == 0 && len(oldClosures) == 0 {
 		return errorf(ErrNotFound, "no reports from %s", strings.Join(hosts, ", "))
 	}
 	err := d.save()
@@ -738,8 +754,14 @@ func (d *Deployments) Forget(hosts ...string) error {
 	if err != nil {
 		maps.Copy(d.reports, old)
 		maps.Copy(d.live, oldLive)
+		maps.Copy(d.closures, oldClosures)
 		d.save() // best effort: back to what the files said before
 		return err
+	}
+	for h := range oldClosures {
+		if err := os.Remove(filepath.Join(d.closuresDir, h+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("cannot delete a forgotten machine's closure", "host", h, "err", err)
+		}
 	}
 	return nil
 }

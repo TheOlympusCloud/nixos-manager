@@ -430,6 +430,10 @@ export const api = {
   testNotifications: () => post<{ status: ChannelStatus[] }>('/api/notifications/test').then((r) => r.status),
   /** Deletes a machine's deployment reports (a machine that left the fleet, say). */
   forgetMachine: (host: string) => request<void>('DELETE', `/api/deployments/machines/${encodeURIComponent(host)}`, {}),
+  /** What a machine has installed, as it reported it, or why it has not. */
+  machineDependencies: (host: string) => get<MachineDeps>(`/api/hosts/${encodeURIComponent(host)}/dependencies`),
+  /** Every versioned dependency of the machines that reported one, with each machine's versions. */
+  fleetDependencies: () => get<FleetDeps>('/api/dependencies'),
 
   secrets: () => get<SecretsStatus>('/api/secrets'),
   /** Approves a machine's SSH host key, new or replacing its last one (the .pub file, or an ssh-keyscan line); needs full access. */
@@ -524,6 +528,22 @@ export type ISO = {
   size?: number
   sha256?: string
 }
+
+// ---- dependencies (the closure each machine reports) ----
+
+/** One store path of a machine's closure. refs index the nodes; via is the entry before it on a shortest chain from the system (-1 for the system). */
+export type DepNode = { path: string; name: string; version?: string; output?: string; narSize: number; refs: number[]; via: number }
+/**
+ * ready: nodes holds the closure; none: the machine does not report; shared: it reports with the shared fleet token;
+ * old: its report module sends no closures; waiting: asked, it comes with its next report; refused, error: message says why.
+ */
+export type DepState = 'ready' | 'none' | 'shared' | 'old' | 'waiting' | 'refused' | 'error'
+/** system: what the closure is of; current: what the machine last said it runs (newer while an upload is due). size is in bytes. */
+export type MachineDeps = { host: string; state: DepState; message?: string; system?: string; current?: string; at?: string; size: number; root: number; nodes: DepNode[] }
+export type FleetDepsHost = { host: string; state: DepState; message?: string; at?: string }
+/** versions has one list per host, in FleetDeps.hosts order, empty where the machine lacks it. */
+export type DepRow = { name: string; versions: string[][]; differs: boolean }
+export type FleetDeps = { hosts: FleetDepsHost[]; rows: DepRow[] }
 
 // ---- deployments (what comin reports from each machine) ----
 
