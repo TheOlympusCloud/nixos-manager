@@ -13,9 +13,10 @@ let
   try = v: default: let r = builtins.tryEval v; in if r.success then r.value else default;
   text = v: if v == null then null else if builtins.isString v then v else if builtins.isAttrs v then v.text or null else null;
   docs = lib.optionAttrSetToDocList machine.options;
-  # The options under home-manager.users.<name> are those every home has (the
-  # type's). Each user's own home also has what their own modules declare
-  # (olympus.supersonic.enable): listed by name, home-manager.users.pablo.….
+  # home-manager's NixOS module leaves its options out of these docs (visible =
+  # "shallow"), and the type's would lack what a user's own modules declare
+  # (olympus.supersonic.enable): each user's home options are listed from their
+  # evaluated home, by name, home-manager.users.pablo.…, less any the docs have.
   known = builtins.listToAttrs (map (o: lib.nameValuePair o.name true) docs);
   ownHomeOptions = lib.concatLists (
     lib.mapAttrsToList (

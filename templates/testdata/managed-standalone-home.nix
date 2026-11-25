@@ -44,7 +44,7 @@ in
       run = c.home.activation.nixosManagerConfigs.data;
     in
     lib.hasInfix " configs /nix/store/" run
-    && c.systemd.user.services.nixos-manager-configs.Service.ExecStart == lib.removePrefix "run " run;
+    && lib.toList c.systemd.user.services.nixos-manager-configs.Service.ExecStart == [ (lib.removePrefix "run " run) ];
   # The whole home evaluates.
   activation = lib.hasSuffix ".drv" home.activationPackage.drvPath;
 }

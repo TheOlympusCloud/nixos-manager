@@ -36,6 +36,8 @@ let
     };
   m = machine ./configs/ok/managed.json { };
   hm = m.config.home-manager.users.pablo;
+  # home-manager keeps a unit's ExecStart as a list.
+  execStart = unit: lib.head (lib.toList unit.Service.ExecStart);
   # The spec is the last word of the command: the file the writer reads.
   spec = command: builtins.fromJSON (builtins.readFile (lib.last (lib.splitString " " command)));
   login = hm.systemd.user.services.nixos-manager-configs;
@@ -47,9 +49,9 @@ in
     pwOwner = m.config.sops.secrets.pw.owner;
     version = m.config.nixosManager.version;
     configs = spec hm.home.activation.nixosManagerConfigs.data;
-    loginSameSpec = login.Service.ExecStart == lib.removePrefix "run " hm.home.activation.nixosManagerConfigs.data;
+    loginSameSpec = execStart login == lib.removePrefix "run " hm.home.activation.nixosManagerConfigs.data;
     loginWantedBy = login.Install.WantedBy;
-    keyring = spec keyring.Service.ExecStart;
+    keyring = spec (execStart keyring);
     keyringWantedBy = keyring.Install.WantedBy;
     # Evaluates every assertion and sops-nix's manifest.
     system = builtins.isString m.config.system.build.toplevel.drvPath;

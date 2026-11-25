@@ -30,7 +30,8 @@
   /** Options the scope's own modules declare are indexed by their concrete path: home-manager.users.pablo.olympus.…. */
   const concrete = $derived(scope ? pathName(scopePath) + '.' : '')
   const short = (name: string) => (scope && name.startsWith(scope.prefix) ? name.slice(scope.prefix.length) : scope && name.startsWith(concrete) ? name.slice(concrete.length) : name)
-  const full = (name: string) => (scope ? scope.prefix + name : name)
+  // A home's options are indexed by the concrete path (home-manager hides the generic ones).
+  const full = (name: string) => (scope ? concrete + name : name)
 
   let results = $state<OptionInfo[] | null>(null)
   let indexJob = $state('')

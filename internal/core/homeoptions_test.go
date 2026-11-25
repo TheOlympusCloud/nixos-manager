@@ -11,7 +11,8 @@ import (
 
 // A user's own home-manager module (custom.nix next to managed.json) declares an
 // option: search, the option itself and its value on the machine all find it under
-// home-manager.users.<user>, though home-manager's own option list does not have it.
+// home-manager.users.<user>, as they find home-manager's own options there, which
+// its NixOS module leaves out of the machine's option docs.
 func TestOwnHomeOptionsWithRealNix(t *testing.T) {
 	if os.Getenv("NIXMGR_NIX_TESTS") == "" {
 		t.Skip("needs real Nix and network access: set NIXMGR_NIX_TESTS=1")
@@ -46,8 +47,9 @@ func TestOwnHomeOptionsWithRealNix(t *testing.T) {
 	if len(hits) != 1 || hits[0].Name != name || hits[0].Type != "boolean" {
 		t.Fatalf("search olympus: %+v", hits)
 	}
-	if hits, _, _ := s.Jobs.SearchOptions(ctx, "ct", "home-manager.users.<name>.programs.git.enable", 5); len(hits) == 0 {
-		t.Fatal("home-manager's own options are gone")
+	// home-manager's own options too: its NixOS module hides them from the docs (visible = "shallow").
+	if hits, _, _ := s.Jobs.SearchOptions(ctx, "ct", "home-manager.users.pablo.programs.git.enable", 5); len(hits) == 0 || hits[0].Name != "home-manager.users.pablo.programs.git.enable" {
+		t.Fatalf("pablo's programs.git.enable: %+v", hits)
 	}
 	res, vj, err := s.Jobs.OptionValues(ctx, []string{name, "users.users.pablo.isNormalUser"}, []string{"ct"})
 	ok(t, err)
