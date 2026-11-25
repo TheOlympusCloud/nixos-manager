@@ -2,6 +2,7 @@ package templates
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,8 @@ func closureManager(t *testing.T) (srv *httptest.Server, reports chan map[string
 }
 
 // fakeNix puts a nix on PATH that records how it was run in args and prints
-// the file named by $FAKE_NIX, or fails like a missing daemon when it is "fail".
+// the file named by $FAKE_NIX, fails like a missing daemon when it is "fail",
+// and hangs like a stuck daemon when it is "hang".
 func fakeNix(t *testing.T, dir string) (path, args string) {
 	t.Helper()
 	bin := filepath.Join(dir, "bin")
@@ -63,6 +65,7 @@ func fakeNix(t *testing.T, dir string) (path, args string) {
 	args = filepath.Join(dir, "nix-args")
 	script := "#!/usr/bin/env bash\nprintf '%s\\n' \"NIX_REMOTE=$NIX_REMOTE\" \"$@\" >'" + args + "'\n" +
 		"if [[ $FAKE_NIX == fail ]]; then echo \"error: cannot connect to socket at '/nix/var/nix/daemon-socket/socket'\" >&2; exit 1; fi\n" +
+		"if [[ $FAKE_NIX == hang ]]; then exec sleep 30; fi\n" +
 		"cat \"$FAKE_NIX\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "nix"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -89,11 +92,22 @@ func newClosureSetup(t *testing.T, url string) closureSetup {
 // run runs the script as the timer (heartbeat) or comin does, with $FAKE_NIX set to fake.
 func (c closureSetup) run(t *testing.T, fake string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(c.script, args...)
-	cmd.Env = append(os.Environ(), "PATH="+c.path, "FAKE_NIX="+fake)
 	if len(args) == 0 {
-		cmd.Env = append(cmd.Env, "COMIN_STATUS=done", "COMIN_GIT_SHA="+strings.Repeat("c", 40))
+		return c.comin(t, fake, "COMIN_STATUS=done")
 	}
+	return c.exec(t, fake, args, nil)
+}
+
+// comin runs the script as comin does, with these COMIN_* variables besides the commit.
+func (c closureSetup) comin(t *testing.T, fake string, env ...string) string {
+	t.Helper()
+	return c.exec(t, fake, nil, append(env, "COMIN_GIT_SHA="+strings.Repeat("c", 40)))
+}
+
+func (c closureSetup) exec(t *testing.T, fake string, args, env []string) string {
+	t.Helper()
+	cmd := exec.Command(c.script, args...)
+	cmd.Env = append(append(os.Environ(), "PATH="+c.path, "FAKE_NIX="+fake), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v exited with %v: %s", args, err, out)
@@ -228,4 +242,45 @@ func TestFlushedReportDoesNotSendClosure(t *testing.T) {
 	}
 	recv(t, "closure", closures)
 	noMore(t, "flushed reports", closures)
+}
+
+// A Nix daemon that does not answer must not hold up the run: the read gives
+// up after closure_timeout seconds and posts that as the machine's error.
+func TestReportClosureReadTimesOut(t *testing.T) {
+	srv, reports, closures, want, _ := closureManager(t)
+	c := newClosureSetup(t, srv.URL)
+	b, err := os.ReadFile(c.script)
+	if err != nil || !strings.Contains(string(b), "\nclosure_timeout=30 ") {
+		t.Fatalf("the script sets no closure_timeout=30: %v", err)
+	}
+	os.WriteFile(c.script, []byte(strings.Replace(string(b), "\nclosure_timeout=30 ", "\nclosure_timeout=1 ", 1)), 0o755)
+	want.Store(true)
+	start := time.Now()
+	c.run(t, "hang", "heartbeat")
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("the run took %v", d)
+	}
+	recv(t, "report", reports)
+	if p := recv(t, "closure", closures); !strings.Contains(fmt.Sprint(p.body["error"]), "did not finish within 1 seconds") {
+		t.Fatalf("posted %+v", p)
+	}
+}
+
+// Between comin's build and its deployment nothing is read or sent: the
+// deployment's report, or the next heartbeat, sends the closure.
+func TestBuildReportSendsNoClosure(t *testing.T) {
+	srv, reports, closures, want, _ := closureManager(t)
+	c := newClosureSetup(t, srv.URL)
+	f := filepath.Join(t.TempDir(), "closure.json")
+	os.WriteFile(f, []byte(`[{"path":"`+c.sys+`","narSize":1,"references":[]}]`), 0o600)
+	want.Store(true)
+	c.comin(t, f, "COMIN_PHASE=build", "COMIN_STATUS=built")
+	if r := recv(t, "build report", reports); r["phase"] != "build" {
+		t.Fatalf("report: %+v", r)
+	}
+	time.Sleep(200 * time.Millisecond)
+	noMore(t, "after a build report", closures)
+	c.comin(t, f, "COMIN_PHASE=deploy", "COMIN_STATUS=done")
+	recv(t, "deploy report", reports)
+	recv(t, "closure after the deployment", closures)
 }

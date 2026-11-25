@@ -20,6 +20,7 @@ mode=${1:-comin}
 pending=$state_dir/pending.jsonl
 reply=$state_dir/reply.json
 running= # the system this machine runs, once snapshot has looked
+closure_timeout=30 # seconds nix path-info may take before the run gives up on the closure
 
 # post sends a report and prints the HTTP status, 000 when nothing answered;
 # the reply goes to the file $2 when given. The token goes in a header read
@@ -101,6 +102,9 @@ asked() { [[ $1 == 200 ]] && jq -e '.closure == "wanted"' "$reply" >/dev/null 2>
 # references, itself left out. Nix before 2.19 (and Lix) prints an array of
 # objects with a path; later ones an object keyed by path, null for an invalid
 # path, and newer ones store paths without /nix/store/.
+# shortcut: Nix 2.33 warns that --json without --json-format will become an
+# error, and --json-format 2 prints {version, storeDir, info}, which this does
+# not read (the tab then shows jq's error); read that shape once Nix drops 1.
 closure_paths() {
   jq -c 'def full: if startswith("/") then . else "/nix/store/" + . end;
     (if type == "array" then map(select(. != null)) else to_entries | map(select(.value != null) | .value + {path: .key}) end)
@@ -112,20 +116,27 @@ closure_paths() {
 
 # send_closure posts the closure of the system this machine runs, or Nix's
 # error when it cannot be read. Nix goes through the daemon: the heartbeat's
-# file system is read-only. A failed upload is only logged, never spooled:
-# the reply to the next report asks again.
+# file system is read-only. Both steps have a time limit, as the run holds the
+# lock comin's next report waits for. A failed upload is only logged, never
+# spooled: the reply to the next report asks again.
 send_closure() {
-  local dir code
+  local dir code status=0
   [[ -n $running ]] || return 0
   dir=$(mktemp -d "$state_dir/.closure.XXXXXX") || return 0
-  if ! NIX_REMOTE=daemon XDG_CACHE_HOME=$state_dir/cache \
-    nix --extra-experimental-features nix-command path-info --recursive --json "$running" >"$dir/raw" 2>"$dir/err" ||
-    ! closure_paths "$dir/raw" >"$dir/body" 2>>"$dir/err"; then
+  NIX_REMOTE=daemon XDG_CACHE_HOME=$state_dir/cache timeout --kill-after=5 "$closure_timeout" \
+    nix --extra-experimental-features nix-command path-info --recursive --json "$running" >"$dir/raw" 2>"$dir/err" || status=$?
+  if ((status == 0)); then
+    closure_paths "$dir/raw" >"$dir/body" 2>>"$dir/err" || status=$?
+  elif ((status == 124 || status == 137)); then
+    echo "nix path-info did not finish within $closure_timeout seconds: is the Nix daemon running?" >>"$dir/err"
+  fi
+  if ((status != 0)); then
+    [[ -s $dir/err ]] || echo "reading the closure failed (exit status $status)" >"$dir/err"
     jq -Rsc '{error: (split("\n") | map(select(. != "")) | .[-20:] | join("\n") | .[:1000])}' "$dir/err" >"$dir/body" || true
   fi
   code=000
   if [[ -s $dir/body ]]; then
-    code=$(curl --silent --show-error --connect-timeout 5 --max-time 60 \
+    code=$(curl --silent --show-error --connect-timeout 5 --max-time 30 \
       --output /dev/null --write-out '%{http_code}' \
       --header @<(printf 'Authorization: Bearer %s\n' "$token") \
       --header 'Content-Type: application/json' \
@@ -184,8 +195,8 @@ report() {
   elif [[ $code != 2?? ]]; then
     spool "$body"
     echo "report-deployment: could not report to $url (HTTP $code); the next heartbeat sends it" >&2
-  elif asked "$code"; then
-    send_closure
+  elif [[ $phase == deploy ]] && asked "$code"; then
+    send_closure # never between a build and its deployment: that report, or the next heartbeat, sends it
   fi
   rm -f "$reply"
   return 0
