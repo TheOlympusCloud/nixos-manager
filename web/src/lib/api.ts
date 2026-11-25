@@ -1,5 +1,7 @@
 // Typed client for the nixos-manager HTTP API.
 
+import type { ConfigFormat, HomeConfig, KeyringEntry } from './apps'
+
 /** web: the repository's page on Forgejo, or '' when the remote has none. */
 export type Info = { root: string; branch: string; author: string; remote: string; web: string }
 export type TreeEntry = { path: string; dir: boolean }
@@ -241,10 +243,21 @@ export type Managed = {
   removedPackages?: string[]
   /** How packages are changed, by attribute, for everything on the machine. */
   packageOverrides?: Record<string, PackageOverride>
-  /** The home-manager users this file manages; secrets links a secret of the machine at a path in ~ (managed.nix 5). */
-  home?: Record<string, { packages: string[]; removedPackages: string[]; secrets?: Record<string, string> }>
+  /**
+   * The home-manager users this file manages; secrets links a secret of the machine at a path in ~ (managed.nix 5);
+   * configs and keyring are app settings and keyring entries (managed.nix 6), with secrets by name only.
+   */
+  home?: Record<string, { packages: string[]; removedPackages: string[]; secrets?: Record<string, string>; configs?: Record<string, HomeConfig>; keyring?: KeyringEntry[] }>
   settings: Record<string, unknown>
+  /** A standalone home's app configs, without secrets. */
+  configs?: Record<string, HomeConfig>
 }
+/** user: a machine's home-manager user (none for a standalone home); remove: no longer written. */
+export type HomeConfigEdit = { user?: string; path: string; format: ConfigFormat; mode?: 'merge' | 'seed'; process?: string; lock?: string } | { user?: string; path: string; remove: true }
+/** One key of a config: a value, a secret's name, or unset. */
+export type HomeConfigKeyEdit = { user?: string; path: string; key: string[] } & ({ value: unknown } | { secret: string } | { unset: true })
+/** was: the attributes of the entry it replaces; remove: the entry with these attributes goes. */
+export type KeyringEdit = { user: string; label?: string; attributes: Record<string, string>; secret?: string; was?: Record<string, string>; remove?: boolean }
 /** A source to build instead: a URL, or a GitHub repository (owner/repo) at a revision. An empty hash: the check prints the right one. */
 export type PackageSource = { url?: string; github?: string; rev?: string; hash?: string }
 /** A patch from a URL, or a file in the machine's folder (patches/fix.patch). */
@@ -395,6 +408,9 @@ export const api = {
   editHome: (host: string, edit: { user: string; enable: boolean; stateVersion?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home`, edit),
   /** Links a secret as the file at path in the user's home; without secret, the link goes. */
   linkHomeSecret: (host: string, edit: { user: string; path: string; secret?: string }) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home-secrets`, edit),
+  setHomeConfig: (host: string, edit: HomeConfigEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home-configs`, edit),
+  editHomeConfigKey: (host: string, edit: HomeConfigKeyEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/home-config-keys`, edit),
+  editKeyring: (host: string, edit: KeyringEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/keyring`, edit),
   /** Copies how a package is changed (packageOverride) or a user's home from the machine to others, never overwriting. */
   copy: (host: string, req: { packageOverride?: string; home?: string; to: string[] }) => post<CopyResult[]>(`/api/hosts/${encodeURIComponent(host)}/copy`, req),
   /** Writes this server's modules/managed.nix (home: modules/managed-home.nix) over the repository's (base_hash '' when it has none). */

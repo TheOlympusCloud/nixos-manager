@@ -24,6 +24,8 @@ export const appliesShared = (host: Host) => !!host.managedFile && (host.managed
 export const takesFromInputs = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 4
 /** Whether the machine's modules/managed.nix puts secrets in homes (version 5). */
 export const linksSecrets = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 5
+/** managed.nix 6 writes app configs and keyring entries in homes. */
+export const managesApps = (host: Host) => !!host.managedFile && (host.managedVersion ?? 1) >= 6
 
 /** One row of a packages table. */
 export type PackageRow = {

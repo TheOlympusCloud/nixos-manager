@@ -14,6 +14,7 @@
   import Icon from '../Icon.svelte'
   import OptionBrowser from '../OptionBrowser.svelte'
   import PackagePicker from '../PackagePicker.svelte'
+  import AppsSection from './AppsSection.svelte'
   import ManagedModuleNotice from './ManagedModuleNotice.svelte'
 
   /** Each user's home-manager configuration on the machine, as home-manager's NixOS module builds it. */
@@ -368,6 +369,8 @@
         <p class="muted small">This needs a newer <span class="mono">modules/managed.nix</span>: <b>Update managed.nix</b> above.</p>
       {/if}
     </section>
+
+    <AppsSection {host} {user} {managed} packages={[...host.packages.map((p) => p.name), ...(u?.home?.packages ?? [])]} {taken} editable={full} />
   {/if}
 {/if}
 

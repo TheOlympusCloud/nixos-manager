@@ -27,7 +27,9 @@
   const names = $derived(scope?.names ?? [])
   /** The concrete path the scope stands for: home-manager.users.pablo. */
   const scopePath = $derived(scope ? fillPath(optionSegments(scope.prefix + 'x'), scope.names).slice(0, -1) : [])
-  const short = (name: string) => (scope && name.startsWith(scope.prefix) ? name.slice(scope.prefix.length) : name)
+  /** Options the scope's own modules declare are indexed by their concrete path: home-manager.users.pablo.olympus.…. */
+  const concrete = $derived(scope ? pathName(scopePath) + '.' : '')
+  const short = (name: string) => (scope && name.startsWith(scope.prefix) ? name.slice(scope.prefix.length) : scope && name.startsWith(concrete) ? name.slice(concrete.length) : name)
   const full = (name: string) => (scope ? scope.prefix + name : name)
 
   let results = $state<OptionInfo[] | null>(null)
@@ -58,10 +60,14 @@
     }
     loading = true
     try {
-      const sent = scope && !q.startsWith(scope.prefix) ? scope.prefix + q : q
+      const sent = scope && !q.startsWith(scope.prefix) && !q.startsWith(concrete) ? scope.prefix + q : q
       const r = await searchIndexed(() => api.searchOptions(host, sent, { limit: 200 }), (job) => mine === seq && (indexJob = job), () => alive && mine === seq)
       if (mine !== seq || r === null) return
-      const inScope = scope ? r.filter((o) => o.name.startsWith(scope.prefix)) : r
+      // And what the user's own modules declare, which only their concrete path has.
+      const own = scope && sent.startsWith(scope.prefix) ? await api.searchOptions(host, concrete + sent.slice(scope.prefix.length), { limit: 200 }) : null
+      if (mine !== seq) return
+      const ownHits = own?.state === 'ready' ? (own.results ?? []).filter((o) => o.name.startsWith(concrete)) : []
+      const inScope = scope ? [...r.filter((o) => o.name.startsWith(scope.prefix) || o.name.startsWith(concrete)), ...ownHits.filter((o) => !r.some((x) => x.name === o.name))] : r
       results = enable ? inScope.filter((o) => o.name.endsWith('.enable') && !o.readOnly && optionSegments(o.name).every((s) => s.kind === 'attr')) : inScope
       indexJob = ''
     } catch (e) {

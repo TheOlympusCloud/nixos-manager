@@ -5,15 +5,16 @@
   import { codeLink } from '../../lib/router.svelte'
   import Icon from '../Icon.svelte'
 
-  /** A machine whose modules/managed.nix predates secrets in homes (4), packages from another nixpkgs (3), modules/managed.json (2), or also removed packages, overrides and home-manager (1). */
+  /** A machine whose modules/managed.nix predates app configs in homes (5), secrets in homes (4), packages from another nixpkgs (3), modules/managed.json (2), or also removed packages, overrides and home-manager (1). */
   let { host }: { host: Host } = $props()
   const version = $derived(host.managedVersion ?? 1)
-  const old = $derived(!!host.managedFile && !host.error && version < 5)
+  const old = $derived(!!host.managedFile && !host.error && version < 6)
   const lacks = $derived([
     ...(version < 2 ? ['remove or change packages', 'manage home-manager users'] : []),
     ...(version < 3 ? ['apply what is set for every machine'] : []),
     ...(version < 4 ? ['take a package from another nixpkgs'] : []),
-    'put secrets in homes',
+    ...(version < 5 ? ['put secrets in homes'] : []),
+    "manage apps' settings and keyring entries in homes",
   ])
   let busy = $state(false)
 

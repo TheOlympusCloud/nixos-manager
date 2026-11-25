@@ -12,6 +12,7 @@
   import Icon from './Icon.svelte'
   import SourceTag from './SourceTag.svelte'
   import Switch from './Switch.svelte'
+  import ValueTree from './ValueTree.svelte'
 
   /** The form for one NixOS option on one machine, generated from the option's type. */
   let { host, option, initialNames = [] }: { host: string; option: OptionInfo; initialNames?: string[] } = $props()
@@ -24,6 +25,9 @@
   const path = $derived(fillPath(segs, names))
   const pathReady = $derived(placeholders.every((_, i) => names[i]?.trim()))
   const control = $derived(controlFor(option.type))
+  /** A nested form's value as JSON text instead, by choice. */
+  let asJson = $state(false)
+  const json = $derived(control.kind === 'json' || (control.kind === 'tree' && asJson))
   // host may be a standalone home (home:<name>): its own options, not the machines'.
   const home = $derived(homeByTarget(host))
   const targetLabel = $derived(targetName(host))
@@ -99,7 +103,7 @@
   const problem = $derived.by(() => {
     if (!pathReady) return `Name the ${placeholders.map((p) => p.text).join(' and ')} first.`
     const c = control
-    if (c.kind === 'json') {
+    if (json) {
       if (!jsonText.trim()) return 'Enter a JSON value.'
       try {
         const v = JSON.parse(jsonText)
@@ -125,9 +129,26 @@
    * wait for it rather than overwrite hand-written entries with an edited default.
    */
   const waiting = $derived(
-    !!asked && current === undefined && (control.kind === 'list' || control.kind === 'json') && !vals.error && (!eff || (eff.state === 'value' && eff.pending)),
+    !!asked && current === undefined && (control.kind === 'list' || control.kind === 'json' || control.kind === 'tree') && !vals.error && (!eff || (eff.state === 'value' && eff.pending)),
   )
-  const value = $derived(control.kind === 'json' ? (problem ? undefined : JSON.parse(jsonText)) : draft)
+  const value = $derived(json ? (problem ? undefined : JSON.parse(jsonText)) : draft)
+  /** Switches a nested form to JSON text and back, carrying the value over. */
+  function toggleJson() {
+    if (!asJson) {
+      jsonText = JSON.stringify(draft ?? (option.type.startsWith('list of') ? [] : {}), null, 2)
+      asJson = true
+      return
+    }
+    try {
+      const v = JSON.parse(jsonText)
+      if (v !== null && typeof v === 'object') {
+        draft = v
+        asJson = false
+      }
+    } catch {
+      // stays in JSON, where the problem shows
+    }
+  }
   const changed = $derived(touched && JSON.stringify(value) !== JSON.stringify(current))
 
   // An option that takes a file path is offered the machine's sops-nix secrets, at the path the machine finds them.
@@ -343,6 +364,11 @@
             {/if}
             <button type="submit" disabled={!listText}>Add</button>
           </form>
+        {:else if c.kind === 'tree' && !asJson}
+          <div class="tree-edit">
+            <ValueTree value={draft ?? (option.type.startsWith('list of') ? [] : {})} label={option.name} onchange={edit} />
+            <button class="link small" onclick={toggleJson}>Edit as JSON</button>
+          </div>
         {:else}
           <textarea
             class="mono json"
@@ -351,7 +377,11 @@
             aria-label="Value as JSON"
             bind:value={jsonText}
             oninput={() => (touched = true)}></textarea>
-          <span class="muted small">This type has no dedicated control; write the value as JSON (it becomes the same Nix value).</span>
+          {#if c.kind === 'tree'}
+            <button class="link small" onclick={toggleJson}>Edit as a form</button>
+          {:else}
+            <span class="muted small">This type has no dedicated control; write the value as JSON (it becomes the same Nix value).</span>
+          {/if}
         {/if}
       </div>
 
@@ -634,5 +664,10 @@
   }
   .target.on {
     color: var(--fg-strong);
+  }
+  .tree-edit {
+    display: grid;
+    gap: var(--lh);
+    justify-items: start;
   }
 </style>

@@ -67,7 +67,11 @@ export type Control =
   | { kind: 'switch' }
   | { kind: 'tristate' }
   | ((Scalar & { nullable: boolean }) | { kind: 'list'; item: Scalar })
+  | { kind: 'tree' }
   | { kind: 'json' }
+
+/** Attribute sets, submodules, lists of them and settings formats' values: edited as a nested form. */
+const nested = /^((lazy )?attribute set( of .*)?|(open )?submodule.*|list of .*|(JSON|TOML|YAML.*) value)$/
 
 function scalar(type: string): Scalar | null {
   let m: RegExpMatchArray | null
@@ -98,6 +102,7 @@ export function controlFor(type: string): Control {
     const item = scalar(t.slice(8))
     if (item) return { kind: 'list', item }
   }
+  if (nested.test(t)) return { kind: 'tree' }
   return { kind: 'json' }
 }
 
