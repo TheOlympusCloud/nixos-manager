@@ -21,13 +21,14 @@ import (
 // closures/<host>.json and shows it as a tree per machine and as a table
 // across the fleet. It runs no Nix for this.
 
-const (
-	MaxClosureBody  = 64 << 20 // bytes; a desktop's closure is about half a MiB
-	maxClosureError = 4096
-)
+const maxClosureError = 4096
 
-// maxClosurePaths is the most store paths a closure may have; a variable for tests.
-var maxClosurePaths = 100_000
+// The largest closure taken, in bytes (a desktop's is about half a MiB) and in
+// store paths; variables for tests.
+var (
+	MaxClosureBody  int64 = 64 << 20
+	maxClosurePaths       = 100_000
+)
 
 // closurePath is a store path as Nix allows its name (reportPath caps it lower).
 var closurePath = regexp.MustCompile(`^/nix/store/[0-9a-df-np-sv-z]{32}-[A-Za-z0-9+._?=-]{1,211}$`)

@@ -66,8 +66,10 @@ func (s *Server) Handler() http.Handler {
 	s.lspSlots = make(chan struct{}, maxNixd)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", s.login)
-	// Machines report what comin deployed with the fleet report token, without a session.
+	// Machines report what comin deployed with the fleet report token, without a
+	// session, and post their closure when the reply asks for it.
 	mux.HandleFunc("POST /api/deployments/report", s.deployReport)
+	mux.HandleFunc("POST /api/deployments/closure", s.deployClosure)
 	mux.HandleFunc("POST /api/hooks/forgejo", s.forgejoHook) // signed by Forgejo, no session
 	mux.Handle("/api/", s.requireAuth(s.apiMux()))
 	if s.MCP != nil {
@@ -95,7 +97,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"GET /api/model/diff": auth.ScopeRead, "GET /api/targets": auth.ScopeRead, "GET /api/jobs": auth.ScopeRead,
 	"GET /api/jobs/{id}": auth.ScopeRead, "GET /api/jobs/{id}/events": auth.ScopeRead, "GET /api/deployments": auth.ScopeRead,
 	"GET /api/secrets": auth.ScopeRead, // names and keys, never a value
-	"GET /api/updates": auth.ScopeRead,
+	"GET /api/updates": auth.ScopeRead, "GET /api/hosts/{host}/dependencies": auth.ScopeRead, "GET /api/dependencies": auth.ScopeRead,
 
 	"PUT /api/file": auth.ScopeEdit, "POST /api/mkdir": auth.ScopeEdit, "POST /api/move": auth.ScopeEdit,
 	"POST /api/delete": auth.ScopeEdit, "POST /api/stage": auth.ScopeEdit, "POST /api/unstage": auth.ScopeEdit,
