@@ -65,7 +65,8 @@ func TestManagedConfigs(t *testing.T) {
 	}
 	want := map[string]any{
 		"tokenOwner": "pablo", "pwOwner": "pablo", "version": float64(6), "system": true, "loginSameSpec": true,
-		"loginWantedBy": []any{"default.target"}, "keyringWantedBy": []any{"graphical-session.target"},
+		"activationAfter": []any{"linkGeneration"},
+		"loginWantedBy":   []any{"default.target"}, "keyringWantedBy": []any{"graphical-session.target"},
 		"configs": map[string]any{"configs": map[string]any{
 			".config/supersonic/config.toml": map[string]any{
 				"format": "toml", "mode": "merge", "process": "supersonic", "secrets": map[string]any{},

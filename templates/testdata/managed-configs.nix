@@ -38,8 +38,15 @@ let
   hm = m.config.home-manager.users.pablo;
   # home-manager keeps a unit's ExecStart as a list.
   execStart = unit: lib.head (lib.toList unit.Service.ExecStart);
-  # The spec is the last word of the command: the file the writer reads.
-  spec = command: builtins.fromJSON (builtins.readFile (lib.last (lib.splitString " " command)));
+  # The spec is the word after the writer's command: the file it reads.
+  specOf =
+    command:
+    let
+      w = lib.splitString " " command;
+    in
+    builtins.elemAt w (1 + lib.lists.findFirstIndex (x: x == "configs" || x == "keyring") null w);
+  spec = command: builtins.fromJSON (builtins.readFile (specOf command));
+  activation = hm.home.activation.nixosManagerConfigs;
   login = hm.systemd.user.services.nixos-manager-configs;
   keyring = hm.systemd.user.services.nixos-manager-keyring;
 in
@@ -48,8 +55,9 @@ in
     tokenOwner = m.config.sops.secrets.token.owner;
     pwOwner = m.config.sops.secrets.pw.owner;
     version = m.config.nixosManager.version;
-    configs = spec hm.home.activation.nixosManagerConfigs.data;
-    loginSameSpec = execStart login == lib.removePrefix "run " hm.home.activation.nixosManagerConfigs.data;
+    configs = spec activation.data;
+    activationAfter = activation.after;
+    loginSameSpec = specOf (execStart login) == specOf activation.data;
     loginWantedBy = login.Install.WantedBy;
     keyring = spec (execStart keyring);
     keyringWantedBy = keyring.Install.WantedBy;
