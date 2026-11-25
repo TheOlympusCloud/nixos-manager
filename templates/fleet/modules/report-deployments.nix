@@ -2,7 +2,9 @@
 # shows which commit every machine runs and why a deployment failed. A timer
 # also reports every 15 minutes that the machine is up and which system it
 # runs, so nixos-manager notices a machine that stops, or that runs something
-# else than its commit builds.
+# else than its commit builds. When nixos-manager asks in its reply, a report
+# also sends the closure of the system the machine runs (every store path, its
+# size and what it references), for its Dependencies views.
 #
 # On when fleet.deployReport.url is set (common.nix). Each machine also needs
 # its own report token from the Deployments view in a file, never in this
@@ -23,6 +25,7 @@ let
       pkgs.curl
       pkgs.jq
       pkgs.util-linux # flock
+      config.nix.package # reads the closure through this machine's own Nix daemon
     ];
     text = ''
       url=${lib.escapeShellArg cfg.url}

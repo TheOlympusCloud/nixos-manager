@@ -4,8 +4,10 @@
 # variables describing it; a timer runs it with "heartbeat" every 15 minutes.
 # Every report says which system the machine runs, boots and boots next.
 # Reports that cannot be delivered wait, in order, in $state_dir/pending.jsonl;
-# every later run sends them first. It always exits 0: a lost report must never
-# look like a failed deployment.
+# every later run sends them first. When the reply to the run's own report
+# asks for it, the run also posts the closure of the system the machine runs
+# (send_closure). It always exits 0: a lost report must never look like a
+# failed deployment.
 
 if [[ ! -r $token_file ]]; then
   exit 0 # no token on this machine: reporting is off here
@@ -16,12 +18,15 @@ if [[ -z $token ]]; then
 fi
 mode=${1:-comin}
 pending=$state_dir/pending.jsonl
+reply=$state_dir/reply.json
+running= # the system this machine runs, once snapshot has looked
 
-# post sends a report and prints the HTTP status, 000 when nothing answered.
-# The token goes in a header read from a file descriptor, so it never shows in the process list.
+# post sends a report and prints the HTTP status, 000 when nothing answered;
+# the reply goes to the file $2 when given. The token goes in a header read
+# from a file descriptor, so it never shows in the process list.
 post() {
   curl --silent --show-error --connect-timeout 5 --max-time 10 --retry 1 \
-    --output /dev/null --write-out '%{http_code}' \
+    --output "${2:-/dev/null}" --write-out '%{http_code}' \
     --header @<(printf 'Authorization: Bearer %s\n' "$token") \
     --header 'Content-Type: application/json' \
     --data-binary "$1" "${url%/}/api/deployments/report" || true
@@ -83,7 +88,55 @@ snapshot() {
       fi
     done
   fi
-  system=(--arg current "${current#"$root"}" --arg booted "${booted#"$root"}" --arg profile "${profile#"$root"}" --argjson reboot "$reboot")
+  running=${current#"$root"}
+  system=(--arg current "$running" --arg booted "${booted#"$root"}" --arg profile "${profile#"$root"}" --argjson reboot "$reboot")
+}
+
+# asked says whether the reply to the run's own report (status $1) asks for
+# this machine's closure; older consoles answer 204 and never ask.
+asked() { [[ $1 == 200 ]] && jq -e '.closure == "wanted"' "$reply" >/dev/null 2>&1; }
+
+# closure_paths turns nix path-info --recursive --json into what the console
+# takes: every store path with its size and the indices of the paths it
+# references, itself left out. Nix before 2.19 (and Lix) prints an array of
+# objects with a path; later ones an object keyed by path, null for an invalid
+# path, and newer ones store paths without /nix/store/.
+closure_paths() {
+  jq -c 'def full: if startswith("/") then . else "/nix/store/" + . end;
+    (if type == "array" then map(select(. != null)) else to_entries | map(select(.value != null) | .value + {path: .key}) end)
+    | map(.path |= full) as $ps
+    | (reduce range(0; $ps | length) as $i ({}; .[$ps[$i].path] = $i)) as $ix
+    | {paths: [$ps[] | . as $p | {path, narSize: (.narSize // 0),
+        refs: [(.references // [])[] | full | select(. != $p.path) | $ix[.] | select(. != null)]}]}' "$1"
+}
+
+# send_closure posts the closure of the system this machine runs, or Nix's
+# error when it cannot be read. Nix goes through the daemon: the heartbeat's
+# file system is read-only. A failed upload is only logged, never spooled:
+# the reply to the next report asks again.
+send_closure() {
+  local dir code
+  [[ -n $running ]] || return 0
+  dir=$(mktemp -d "$state_dir/.closure.XXXXXX") || return 0
+  if ! NIX_REMOTE=daemon XDG_CACHE_HOME=$state_dir/cache \
+    nix --extra-experimental-features nix-command path-info --recursive --json "$running" >"$dir/raw" 2>"$dir/err" ||
+    ! closure_paths "$dir/raw" >"$dir/body" 2>>"$dir/err"; then
+    jq -Rsc '{error: (split("\n") | map(select(. != "")) | .[-20:] | join("\n") | .[:1000])}' "$dir/err" >"$dir/body" || true
+  fi
+  code=000
+  if [[ -s $dir/body ]]; then
+    code=$(curl --silent --show-error --connect-timeout 5 --max-time 60 \
+      --output /dev/null --write-out '%{http_code}' \
+      --header @<(printf 'Authorization: Bearer %s\n' "$token") \
+      --header 'Content-Type: application/json' \
+      --data-binary @"$dir/body" \
+      "${url%/}/api/deployments/closure?host=$(jq -rn --arg v "$host" '$v | @uri')&system=$(jq -rn --arg v "$running" '$v | @uri')" || true)
+  fi
+  rm -rf "$dir"
+  if [[ $code != 2?? ]]; then
+    echo "report-deployment: $url did not take this machine's closure (HTTP $code); the next report's reply asks again" >&2
+  fi
+  return 0
 }
 
 report() {
@@ -96,11 +149,14 @@ report() {
       snapshot
     fi
     body=$(jq -nc --arg host "$host" "${system[@]}" --argjson silentAfter "$silent_after" \
-      '{$host, phase: "heartbeat", $current, $booted, $profile, $reboot, $silentAfter}') || return 0
-    code=$(post "$body")
+      '{$host, phase: "heartbeat", $current, $booted, $profile, $reboot, $silentAfter, sendsClosure: true}') || return 0
+    code=$(post "$body" "$reply")
     if [[ $code != 2?? ]]; then
       echo "report-deployment: could not report to $url (HTTP $code)" >&2
+    elif asked "$code"; then
+      send_closure
     fi
+    rm -f "$reply"
     return 0
   fi
 
@@ -118,17 +174,20 @@ report() {
   body=$(jq -nc \
     --arg host "$host" --arg commit "$commit" --arg phase "$phase" --arg status "$status" \
     --arg ref "${COMIN_GIT_REF:-}" --arg generation "${COMIN_GENERATION:-}" --arg error "${COMIN_ERROR_MSG:-}" "${system[@]}" \
-    '{$host, $commit, $phase, $status, ref: $ref[:200], generation: $generation[:64], error: $error[:2000], $current, $booted, $profile, $reboot}') || return 0
+    '{$host, $commit, $phase, $status, ref: $ref[:200], generation: $generation[:64], error: $error[:2000], $current, $booted, $profile, $reboot, sendsClosure: true}') || return 0
   code=000
   if flush; then # in order: this report is newer than the waiting ones
-    code=$(post "$body")
+    code=$(post "$body" "$reply")
   fi
   if refused "$code"; then
     echo "report-deployment: $url refused the report (HTTP $code)" >&2
   elif [[ $code != 2?? ]]; then
     spool "$body"
     echo "report-deployment: could not report to $url (HTTP $code); the next heartbeat sends it" >&2
+  elif asked "$code"; then
+    send_closure
   fi
+  rm -f "$reply"
   return 0
 }
 

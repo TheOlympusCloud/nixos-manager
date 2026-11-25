@@ -126,7 +126,7 @@ func TestReportDeploymentScript(t *testing.T) {
 	s := <-got
 	want := map[string]any{"host": "pi", "commit": sha, "phase": "deploy", "status": "failed", "ref": "origin/main",
 		"generation": "5f1c", "error": "error: \"quoted\"\nsecond line",
-		"current": "/nix/store/" + sys, "booted": "/nix/store/" + sys, "profile": "/nix/store/" + sys, "reboot": false}
+		"current": "/nix/store/" + sys, "booted": "/nix/store/" + sys, "profile": "/nix/store/" + sys, "reboot": false, "sendsClosure": true}
 	if s.auth != "Bearer nxh_secret" || s.contentType != "application/json" || len(s.body) != len(want) {
 		t.Fatalf("request: %+v", s)
 	}
@@ -146,7 +146,7 @@ func TestReportDeploymentScript(t *testing.T) {
 	fakeSystem(t, root, next, sys)
 	run("heartbeat")
 	if s := <-got; s.body["phase"] != "heartbeat" || s.body["current"] != "/nix/store/"+next || s.body["booted"] != "/nix/store/"+sys ||
-		s.body["reboot"] != true || s.body["silentAfter"] != float64(2) || s.body["commit"] != nil || len(s.body) != 7 {
+		s.body["reboot"] != true || s.body["silentAfter"] != float64(2) || s.body["commit"] != nil || s.body["sendsClosure"] != true || len(s.body) != 8 {
 		t.Errorf("heartbeat: %+v", s.body)
 	}
 
