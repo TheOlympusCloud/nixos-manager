@@ -380,7 +380,8 @@ type FleetDeps struct {
 
 // FleetDependencies tabulates the closures of the machines of the evaluated
 // fleet (nil while it is evaluated) and of every machine that reports. Store
-// paths without a version (unit files, /etc entries...) are left out.
+// paths without a version (unit files, /etc entries...) and each machine's
+// own system are left out.
 func (d *Deployments) FleetDependencies(model *Model) FleetDeps {
 	f := FleetDeps{Hosts: []FleetDepsHost{}, Rows: []DepRow{}}
 	if d == nil {
@@ -413,7 +414,7 @@ func (d *Deployments) FleetDependencies(model *Model) FleetDeps {
 		}
 		for _, p := range v.rec.Paths {
 			name, version, _ := splitStoreName(p.Path)
-			if version == "" {
+			if version == "" || p.Path == v.rec.System { // the system is the machine's own
 				continue
 			}
 			r := rows[name]

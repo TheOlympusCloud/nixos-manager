@@ -222,7 +222,7 @@ func TestMachineDependenciesStates(t *testing.T) {
 
 func TestFleetDependencies(t *testing.T) {
 	d := must[*Deployments](t)(OpenDeployments(t.TempDir(), newRepo(t)))
-	pi, nas := storePath('a', "pi"), storePath('b', "nas")
+	pi, nas := storePath('a', "pi"), storePath('b', "nas-26.05.20251120.ab12cd3")
 	reported(t, d, "pi", pi)
 	reported(t, d, "nas", nas)
 	ok(t, d.RecordClosure("pi", pi, smallClosure(pi), time.Now()))
@@ -248,6 +248,9 @@ func TestFleetDependencies(t *testing.T) {
 	}
 	if _, ok := rows["unit-sshd.service"]; ok {
 		t.Fatal("unversioned entries are left out")
+	}
+	if _, ok := rows["nixos-system-nas"]; ok {
+		t.Fatal("each machine's own system is left out")
 	}
 	if r := rows["bash"]; !r.Differs || !slices.Equal(r.Versions[1], []string{"5.2p37", "5.3p3"}) || !slices.Equal(r.Versions[2], []string{"5.2p37"}) || len(r.Versions[0]) != 0 {
 		t.Fatalf("bash: %+v", r)
