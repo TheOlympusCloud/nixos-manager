@@ -144,7 +144,9 @@ pkgs.testers.runNixOSTest {
           assert login.startswith("ao 1 ") and '"/org/freedesktop/secrets/collection/login/' in login, login
           # Unchanged, it is not stored again.
           alice("systemctl --user restart nixos-manager-keyring.service")
-          assert machine.succeed("journalctl --user-unit nixos-manager-keyring.service | grep -c ': stored'").strip() == "1"
+          # As root, --user-unit would match root's own units only.
+          assert machine.succeed("journalctl _SYSTEMD_USER_UNIT=nixos-manager-keyring.service | grep -c ': stored (it was missing)'").strip() == "1"
+          machine.fail("journalctl _SYSTEMD_USER_UNIT=nixos-manager-keyring.service | grep -e 'label changed' -e 'value changed'")
           machine.fail("journalctl -b | grep -F -e '${token}' -e '${pw}'")
     '';
 }
