@@ -137,9 +137,11 @@ pkgs.testers.runNixOSTest {
           alice("systemctl --user start nixos-manager-keyring.service")
           assert alice("secret-tool lookup service supersonic username a1").strip() == "${pw}"
           found = alice("secret-tool search --all service supersonic 2>&1")
-          assert "/org/freedesktop/secrets/collection/login/" in found, found
           assert "label = Password for 'a1' on 'supersonic'" in found, found
           assert "attribute.username = a1" in found and "attribute.service = supersonic" in found, found
+          # In the login collection, where go-keyring looks first (secret-tool shortens the item's path).
+          login = alice("busctl --user call org.freedesktop.secrets /org/freedesktop/secrets/collection/login org.freedesktop.Secret.Collection SearchItems a{ss} 2 service supersonic username a1")
+          assert login.startswith("ao 1 ") and '"/org/freedesktop/secrets/collection/login/' in login, login
           # Unchanged, it is not stored again.
           alice("systemctl --user restart nixos-manager-keyring.service")
           assert machine.succeed("journalctl --user-unit nixos-manager-keyring.service | grep -c ': stored'").strip() == "1"
