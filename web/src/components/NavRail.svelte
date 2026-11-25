@@ -18,6 +18,7 @@
     { view: 'options', label: 'Options', icon: 'sliders', key: 'o' },
     { view: 'health', label: 'Health', icon: 'activity', key: 'a' },
     { view: 'deployments', label: 'Deployments', icon: 'deploy', key: 'd' },
+    { view: 'dependencies', label: 'Dependencies', icon: 'grid', key: 'n' },
     { view: 'inputs', label: 'Inputs', icon: 'input', key: 'i' },
     { view: 'changes', label: 'Changes', icon: 'diff', key: 'c' },
     { view: 'history', label: 'History', icon: 'history', key: 'h' },

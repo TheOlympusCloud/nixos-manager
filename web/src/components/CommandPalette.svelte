@@ -36,6 +36,7 @@
     ['options', 'Options', 'sliders', 'settings nixos configure'],
     ['health', 'Health', 'activity', 'insights findings fix security problems'],
     ['deployments', 'Deployments', 'deploy', 'comin rollout deployed commit machines behind failed report token'],
+    ['dependencies', 'Dependencies', 'grid', 'installed closure store paths libraries versions nix-tree why depends'],
     ['inputs', 'Inputs', 'input', 'flake lock nixpkgs update'],
     ['changes', 'Changes', 'diff', 'commit stage diff working copy'],
     ['history', 'History', 'history', 'log commits revert'],
