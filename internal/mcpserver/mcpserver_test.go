@@ -211,6 +211,32 @@ func TestCustomisationTools(t *testing.T) {
 	}
 }
 
+// App configs and keyring entries over MCP: a secret's name goes into managed.json
+// and the results, never its value.
+func TestHomeConfigTools(t *testing.T) {
+	cs, svc := session(t)
+	var v core.ManagedView
+	p := ".config/supersonic/config.toml"
+	call(t, cs, "set_home_config", map[string]any{"host": "web", "user": "pablo", "path": p, "format": "toml", "process": "supersonic"}, &v)
+	call(t, cs, "set_home_config_key", map[string]any{"host": "web", "user": "pablo", "path": p, "key": []string{"Servers[ID=a1]", "Hostname"}, "value": "https://music.example"}, &v)
+	call(t, cs, "set_home_config_key", map[string]any{"host": "web", "user": "pablo", "path": p, "key": []string{"Servers[ID=a1]", "Token"}, "secret": "music-token"}, &v)
+	call(t, cs, "set_keyring_entry", map[string]any{"host": "web", "user": "pablo", "label": "pw", "attributes": map[string]string{"service": "supersonic", "username": "a1"}, "secret": "music"}, &v)
+	got, err := svc.ManagedView("web")
+	c := got.Home["pablo"].Configs[p]
+	if err != nil || c.Process != "supersonic" || c.Settings["Servers[ID=a1]"] == nil || c.Secrets["Servers[ID=a1]"].(map[string]any)["Token"] != "music-token" ||
+		len(got.Home["pablo"].Keyring) != 1 {
+		t.Fatalf("managed file after MCP edits %+v %v", got.Home["pablo"], err)
+	}
+	call(t, cs, "remove_home_config_key", map[string]any{"host": "web", "user": "pablo", "path": p, "key": []string{"Servers[ID=a1]", "Token"}}, &v)
+	call(t, cs, "remove_keyring_entry", map[string]any{"host": "web", "user": "pablo", "attributes": map[string]string{"service": "supersonic", "username": "a1"}}, &v)
+	if c := v.Home["pablo"].Configs[p]; c.Secrets != nil || len(v.Home["pablo"].Keyring) != 0 {
+		t.Fatalf("after removing %+v", v.Home["pablo"])
+	}
+	if res := call(t, cs, "set_home_config_key", map[string]any{"host": "web", "user": "pablo", "path": p, "key": []string{"a"}, "secret": "not a name"}, nil); !res.IsError {
+		t.Fatal("a bad secret name accepted over MCP")
+	}
+}
+
 func TestEditCheckCommitFlow(t *testing.T) {
 	cs, svc := session(t)
 	var w struct{ Hash string }
