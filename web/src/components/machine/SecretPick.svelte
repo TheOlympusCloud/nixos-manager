@@ -23,8 +23,8 @@
       e.currentTarget.value = value
     } else if (v) onpick(v)
   }
-  async function create(e: SubmitEvent) {
-    e.preventDefault()
+  // Not a form: the picker sits inside other forms, which a nested one would submit.
+  async function create() {
     const n = name.trim()
     if (!n || problem || !secret) return
     busy = true
@@ -51,13 +51,21 @@
     <option value="+">New secret…</option>
   </select>
   {#if adding}
-    <form class="new" onsubmit={create}>
-      <input class="mono short" placeholder="music-password" aria-label="Name of the new secret" bind:value={name} spellcheck="false" autocomplete="off" aria-invalid={!!problem} />
-      <input type="password" class="short" placeholder="Value" aria-label="Its value" bind:value={secret} autocomplete="new-password" />
-      <button type="submit" class="small primary" disabled={busy || !name.trim() || !!problem || !secret}>{busy ? 'Saving…' : 'Save for ' + host.name}</button>
+    <span class="new" role="group" aria-label="New secret for {host.name}">
+      <input
+        class="mono short"
+        placeholder="music-password"
+        aria-label="Name of the new secret"
+        bind:value={name}
+        spellcheck="false"
+        autocomplete="off"
+        aria-invalid={!!problem}
+        onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), create())} />
+      <input type="password" class="short" placeholder="Value" aria-label="Its value" bind:value={secret} autocomplete="new-password" onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), create())} />
+      <button type="button" class="small primary" disabled={busy || !name.trim() || !!problem || !secret} onclick={create}>{busy ? 'Saving…' : 'Save for ' + host.name}</button>
       <button type="button" class="small ghost" onclick={() => (adding = false)}>Cancel</button>
       {#if problem}<span class="error-text small">{problem}</span>{/if}
-    </form>
+    </span>
   {/if}
 </span>
 

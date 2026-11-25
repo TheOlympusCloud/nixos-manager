@@ -395,8 +395,12 @@
   .short-field {
     min-width: 12ch;
   }
-  .add.file .field:first-child {
+  .add.file .field:first-child,
+  .entry .field:first-child {
     width: 40ch;
+  }
+  .entry textarea {
+    width: 36ch;
   }
   .suggest {
     margin-top: var(--lh);
