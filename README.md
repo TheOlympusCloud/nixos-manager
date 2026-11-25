@@ -1272,7 +1272,8 @@ Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `compare_option`, `search_packages`, `search_options`, `add_packages`,
 `remove_packages`, `edit_packages` (any package removed by name, and a
 home-manager user's packages), `set_package_override`, `set_home_manager`,
-`link_home_secret`, `copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
+`link_home_secret`, `set_home_config`, `set_home_config_key`, `remove_home_config_key`, `set_keyring_entry`,
+`remove_keyring_entry`, `copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
 package and option tools take host `*` for every machine
 (`modules/managed.json`). File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
@@ -1512,12 +1513,98 @@ NixOS module (the starter fleet loads it on every machine, with
   rewrites it (`gh auth refresh`) cannot. A link for every machine,
   in `modules/managed.json` (MCP's `link_home_secret` with host `*`), reaches
   the machines with the user's home, as shared home packages do.
+- **Apps**: settings of apps that rewrite their own files, keyring entries,
+  and what known apps keep to themselves; see below.
 - **Nix for \<user\>**: `hosts/<name>/home/<user>/custom.nix`, a home-manager
-  module of the user's own.
+  module of the user's own. The options it declares (an `olympus.supersonic.*`
+  of your own) show in **Options**, search and `compare_option` as
+  `home-manager.users.<user>.…`, and are set by clicking like the others.
 
 Changes, checks and pushes show each home's packages, programs and files that
 move, next to the system's. **Stop managing here** removes what is set here for
 the user; the files stay until you delete them.
+
+#### Apps: their settings, keyring entries and what stays theirs
+
+Many desktop apps rewrite their own settings file (Supersonic's
+`config.toml`, Vesktop's `settings.json`, Claude Code's `.claude/settings.json`),
+often whole, through a new file renamed over the old one. A file home-manager
+links is read-only and would break them, and a link is replaced at their next
+save. The **Apps** section of the Home tab (`managed.nix` 6) manages each
+thing an app keeps by what fits it:
+
+| Kind | Example | Managed as |
+|---|---|---|
+| A. A file the app never writes | kitty, Waybar, Hyprland | **Files in ~**, or home-manager's own options: linked, read-only |
+| B. A file the app also writes | Supersonic's `config.toml`, Vencord's `settings.json`, unbraid's `.properties` | **An app settings file**: only the keys set here are written, at every switch and login; the app's other keys stay |
+| C. A password in the keyring | Supersonic's server password | **A keyring entry**, stored after you log in |
+| D. Opaque or rotating storage | Discord's login, OAuth tokens, sealed stores, Brave's protected preferences | **Kept in the app only**: listed, never managed |
+
+- **An app settings file** is a path in `~` with its format (JSON, TOML,
+  YAML, INI or Java `.properties`) and a tree of keys. `managed.json` keeps it
+  in `home.<user>.configs.<path>`:
+
+  ```json
+  "configs": { ".config/supersonic/config.toml": {
+    "format": "toml", "mode": "merge", "process": "supersonic",
+    "settings": { "Application": { "EnableSystemTray": true },
+                  "Servers[ID=8f2c…]": { "Hostname": "https://music.example" } },
+    "secrets": { "Servers[ID=8f2c…]": { "Token": "music-token" } } } }
+  ```
+
+  - `merge` (the default) writes the keys set here at every home-manager
+    activation (each switch and boot) and again at login, and keeps every
+    other key in the file. An object merges key by key; any other value, a
+    list included, replaces the app's whole. A key `Name[Field=Value]` is the
+    item of the list `Name` whose `Field` is `Value` (Supersonic's servers by
+    `ID`), added when missing. An INI file is `{ section: { key: value } }`,
+    a properties file `{ key: value }`, dots in keys and all.
+  - `seed` writes the whole file only when there is none.
+  - A **secret** goes where a value would, by name: one of the machine's
+    secrets, picked or created in place (Settings → Secrets). It becomes the
+    user's, as a linked one does, and is read on the machine from
+    `/run/secrets` when the file is written: no value reaches the Nix store,
+    the repository unencrypted, a log, or the API and MCP tools. A value set
+    here, by contrast, is copied to the Nix store, which every user of the
+    machine can read.
+  - Apps that keep their settings in memory and write them whole on exit
+    (Supersonic, Vesktop, unbraid, xodus-nexus) would undo a change made
+    while they run: give **wait while running** a text of their command line,
+    and the file waits for the next activation or login (where it is written
+    before the apps start), with a `deferred` line in the log. Claude Code
+    takes a lock folder (`~/.claude/settings.json.lock`) to write: give
+    **its lock**, and the file is written holding it.
+  - On the machine, `modules/managed-configs.py` writes a file only when its
+    content changes, through a new file renamed over it, parsed again first.
+    It keeps the file's mode, less access for others once it holds a secret
+    (a new file is 0600 with a secret, else 0644), and keeps comments in TOML,
+    YAML, INI and properties files. A file that does not parse is left as it
+    is, with a line in the activation log (`journalctl -u home-manager-<user>`)
+    saying so, and so is one whose result would not parse. A missing secret
+    fails the activation, which the deployment reports.
+  - A path home-manager also links (a file in **Files in ~**, `xdg.configFile`)
+    fails the check: keep one of the two.
+- **A keyring entry** is `{ label, attributes, secret }` in
+  `home.<user>.keyring`. Once the user's graphical session starts (the login
+  keyring is unlocked then), a user service stores it in the Secret Service
+  (GNOME Keyring), in the `login` collection, else the default one, as
+  go-keyring does, and only when no item with exactly those attributes has
+  that value and label. It never logs a value. Supersonic's password is
+  `service=supersonic`, `username=<the server's ID in config.toml>`. Never
+  write a key an app made for itself (Brave Safe Storage, unbraid's store key,
+  Hydra's safeStorage key): a new one breaks what it encrypts.
+- **Kept in the app only** lists, for the known apps the home has, what they
+  keep to themselves: logins in their own LevelDB, IndexedDB or SQLite
+  stores, OAuth tokens that rotate, sealed files. Writing those from outside
+  breaks the login or is refused, so nixos-manager never reads or writes them.
+  Brave is managed through its policies (`/etc/brave/policies/managed`), a
+  setting of the machine, not of the home.
+- A standalone home has `configs` at the top of its `managed.json`, without
+  secrets or keyring entries, which need a machine's secrets.
+
+MCP: `set_home_config`, `set_home_config_key`, `remove_home_config_key`,
+`set_keyring_entry`, `remove_keyring_entry`. Their results, as every view of
+`managed.json`, name secrets and never hold a value.
 
 ### Standalone homes
 
@@ -1529,7 +1616,8 @@ options at the top: `programs.git.enable`), **Files in ~** and **Nix**, kept
 in `homes/<name>/`:
 
 - `managed.json`: `packages`, `removedPackages` and `settings`, as a machine's
-  has them for its system;
+  has them for its system, and `configs`, app settings as in a machine's
+  home but without secrets;
 - `files/<path>`: linked at `~/<path>`, copied to the Nix store as on a
   machine: never a token or password;
 - `custom.nix`: a home-manager module of the home's own.
@@ -1589,11 +1677,12 @@ copied. To change something on every machine for good, use
 
 Removing and customising packages, and homes, need a `modules/managed.nix` with
 `nixosManager.version = 2`, Every machine needs 3, a package from another
-nixpkgs 4, and secrets in homes this release's (5). A fleet
+nixpkgs 4, secrets in homes 5, and app settings and keyring entries in homes
+this release's (6). A fleet
 made by an earlier nixos-manager still has an older one: **Health** and the
 machine's Packages and Home tabs say so and offer **Update managed.nix**, which writes this
-release's file for you to review in Changes. Changes you made to that file by hand are replaced,
-so check the diff. MCP: `update_managed_module`.
+release's file, and `modules/managed-configs.py` next to it, for you to review in Changes. Changes you made to them by hand are replaced,
+so check the diff. A `managed.json` written for an older module stays valid. MCP: `update_managed_module`.
 
 ## Visual editing on an existing repository
 
