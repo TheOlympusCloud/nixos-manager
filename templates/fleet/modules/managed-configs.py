@@ -541,10 +541,13 @@ def keyring(spec):
             say("keyring: %s: failed: %s" % (label, err.strerror))
             failed = True
             continue
-        if any(i.get_attributes() == attrs and i.get_label() == label and i.get_secret() == value for i in coll.search_items(attrs)):
+        # SearchItems matches every given attribute; the item create_item replaces has exactly these.
+        items = [(i.get_label() == label, i.get_secret() == value) for i in coll.search_items(attrs)]
+        if (True, True) in items:
             continue
+        why = "it was missing" if not items else "its value changed" if (True, False) in items else "its label changed"
         coll.create_item(label, attrs, value, replace=True)
-        say("keyring: %s: stored" % label)
+        say("keyring: %s: stored (%s)" % (label, why))
     return 1 if failed else 0
 
 

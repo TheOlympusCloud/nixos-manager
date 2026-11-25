@@ -241,6 +241,75 @@ class PropertiesTest(Home):
         self.assertEqual(doc, {"a": "b", "c": "d", "e": "fg", "k ey": "v"})
 
 
+class KeyringTest(Home):
+    """keyring() against a stand-in for secretstorage and its login collection."""
+
+    def setUp(self):
+        super().setUp()
+        import types
+
+        items = self.items = []
+
+        class Item:
+            def __init__(self, label, attrs, secret):
+                self.label, self.attrs, self.secret = label, dict(attrs), secret
+
+            def get_label(self):
+                return self.label
+
+            def get_attributes(self):
+                return dict(self.attrs)
+
+            def get_secret(self):
+                return self.secret
+
+        class Collection:
+            def __init__(self, conn, path):
+                self.path = path
+
+            def is_locked(self):
+                return False
+
+            def search_items(self, attrs):
+                return [i for i in items if all(i.attrs.get(k) == v for k, v in attrs.items())]
+
+            def create_item(self, label, attrs, secret, replace=False):
+                items[:] = [i for i in items if not (replace and i.attrs == attrs)] + [Item(label, attrs, secret)]
+
+        fake = types.ModuleType("secretstorage")
+        fake.dbus_init = lambda: None
+        fake.Collection = Collection
+        fake.exceptions = types.SimpleNamespace(ItemNotFoundException=KeyError)
+        sys.modules["secretstorage"] = fake
+        sys.modules["secretstorage.exceptions"] = fake.exceptions
+        self.addCleanup(sys.modules.pop, "secretstorage")
+        self.addCleanup(sys.modules.pop, "secretstorage.exceptions")
+
+    def run_keyring(self, label="pw"):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = mc.keyring({"entries": [{"label": label, "attributes": {"service": "supersonic", "username": "a1"}, "secret": self.secret}]})
+        self.assertNotIn(SECRET, out.getvalue())
+        return code, out.getvalue()
+
+    def test_stores_only_what_is_missing_or_different(self):
+        self.assertEqual(self.run_keyring(), (0, "nixos-manager: keyring: pw: stored (it was missing)\n"))
+        self.assertEqual([(i.label, i.attrs, i.secret) for i in self.items], [("pw", {"service": "supersonic", "username": "a1"}, SECRET.encode())])
+        self.assertEqual(self.run_keyring(), (0, ""))
+        self.assertEqual(self.run_keyring("new label"), (0, "nixos-manager: keyring: new label: stored (its label changed)\n"))
+        with open(self.secret, "w") as f:
+            f.write("another")
+        self.assertEqual(self.run_keyring("new label"), (0, "nixos-manager: keyring: new label: stored (its value changed)\n"))
+        self.assertEqual(len(self.items), 1)
+
+    def test_missing_secret_fails_without_storing(self):
+        os.unlink(self.secret)
+        code, out = self.run_keyring()
+        self.assertEqual(code, 1)
+        self.assertIn("keyring: pw: failed", out)
+        self.assertEqual(self.items, [])
+
+
 class Cli(Home):
     def test_spec_from_a_file(self):
         p = self.path("spec.json")
