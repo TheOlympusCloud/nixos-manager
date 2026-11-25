@@ -85,13 +85,31 @@ func checkConfig(p string, c HomeConfig, secrets bool) error {
 	}
 	// INI has sections of keys, properties keys only; the others nest freely.
 	depth := map[string]int{"ini": 2, "properties": 1}[c.Format]
-	if err := checkTree(what, c.Format, c.Settings, nil, depth, func(v any) bool { return scalar(v) || depth == 0 && v != nil }); err != nil {
+	if err := checkTree(what, c.Format, c.Settings, nil, depth, func(v any) bool { return scalar(v) || depth == 0 && noNull(v) }); err != nil {
 		return err
 	}
 	if err := checkTree(what, c.Format, c.Secrets, nil, depth, func(v any) bool { s, ok := v.(string); return ok && secretName.MatchString(s) }); err != nil {
 		return err
 	}
 	return bothSet(what, c.Settings, c.Secrets, nil)
+}
+
+// noNull reports whether v holds no null, however deep: TOML has none, and a
+// list or object of the others would write one where the app may not expect it.
+func noNull(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case []any:
+		return !slices.ContainsFunc(x, func(e any) bool { return !noNull(e) })
+	case map[string]any:
+		for _, e := range x {
+			if !noNull(e) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // checkTree checks the keys of a settings or secrets tree and its values, with

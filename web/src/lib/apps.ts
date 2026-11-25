@@ -197,7 +197,8 @@ export const KNOWN_APPS: KnownApp[] = [
   {
     name: 'Multica',
     packages: ['multica-desktop'],
-    files: [{ path: '.multica/desktop_prefs.json', format: 'json', process: 'multica', note: 'autoStart, autoStop' }],
+    // multica-desktop, its package: plain "multica" also matches the CLI's daemon, which runs all the time.
+    files: [{ path: '.multica/desktop_prefs.json', format: 'json', process: 'multica-desktop', note: 'autoStart, autoStop' }],
     inApp: ['The login token (~/.multica/profiles/…/config.json and Local Storage)', 'Window state'],
   },
   {

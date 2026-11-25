@@ -77,13 +77,15 @@ func TestHomeConfigValidation(t *testing.T) {
 		isErr(t, err, ErrInvalid)
 	}
 	for _, bad := range []HomeConfigKeyEdit{
-		{Path: "a.ini", Key: []string{"size"}, Value: 3},                         // a key outside any section
-		{Path: "a.ini", Key: []string{"General", "x", "y"}, Value: 3},            // deeper than a section's keys
-		{Path: "a.ini", Key: []string{"General", "list"}, Value: []any{1}},       // INI has no lists
-		{Path: "a.properties", Key: []string{"a", "b"}, Value: "1"},              // properties are flat
-		{Path: "a.json", Key: []string{"servers[id=1]"}, Value: 1},               // a list item is an object
-		{Path: "a.json", Key: []string{"servers[id]", "a"}, Value: 1},            // not Name[Field=Value]
-		{Path: "a.json", Key: []string{"list", "x"}, Value: 1},                   // list already has a value
+		{Path: "a.ini", Key: []string{"size"}, Value: 3},                   // a key outside any section
+		{Path: "a.ini", Key: []string{"General", "x", "y"}, Value: 3},      // deeper than a section's keys
+		{Path: "a.ini", Key: []string{"General", "list"}, Value: []any{1}}, // INI has no lists
+		{Path: "a.properties", Key: []string{"a", "b"}, Value: "1"},        // properties are flat
+		{Path: "a.json", Key: []string{"servers[id=1]"}, Value: 1},         // a list item is an object
+		{Path: "a.json", Key: []string{"servers[id]", "a"}, Value: 1},      // not Name[Field=Value]
+		{Path: "a.json", Key: []string{"list", "x"}, Value: 1},             // list already has a value
+		{Path: "a.json", Key: []string{"nulls"}, Value: []any{1, nil}},     // a null in a list
+		{Path: "a.json", Key: []string{"nulls"}, Value: []any{map[string]any{"a": nil}}},
 		{Path: "a.json", Key: []string{"token"}, Secret: "not a name"},           // a secret's name
 		{Path: "a.json", Key: []string{"token"}, Value: "v", Secret: "token"},    // both
 		{Path: "a.json", Key: []string{"token"}},                                 // neither

@@ -158,6 +158,60 @@ class JsonTest(Home):
         self.assertFalse(os.path.exists(self.path("a.json.lock")), "released")
 
 
+class ReviewTest(Home):
+    """What the first review found: each file stands alone, whatever the others do."""
+
+    def test_a_file_that_raises_does_not_stop_the_next(self):
+        self.write("b.json", "{}")
+        code, out = self.run_configs({
+            "a.toml": {"format": "toml", "settings": {"x": [1, None]}},
+            "b.json": {"format": "json", "settings": {"a": 1}},
+        })
+        self.assertEqual(code, 1)
+        self.assertIn("~/a.toml: failed: ", out)
+        self.assertEqual(json.loads(self.read("b.json")), {"a": 1})
+
+    def test_a_file_that_is_not_utf8_is_left_alone(self):
+        p = self.path("b.json")
+        with open(p, "wb") as f:
+            f.write(b'{"a": "\xff"}')
+        code, out = self.run_configs({"b.json": {"format": "json", "settings": {"a": 1}}})
+        self.assertEqual(code, 0)
+        self.assertIn("~/b.json: left as it is: it is not valid JSON (not UTF-8)", out)
+        with open(p, "rb") as f:
+            self.assertEqual(f.read(), b'{"a": "\xff"}')
+
+    def test_true_is_not_one(self):
+        self.write("b.json", '{"k": 1, "z": 0}')
+        self.run_configs({"b.json": {"format": "json", "settings": {"k": True, "z": False}}})
+        self.assertEqual(json.loads(self.read("b.json")), {"k": True, "z": False})
+
+    def test_an_ini_value_with_a_line_break_is_refused(self):
+        with open(self.secret, "w") as f:
+            f.write("line1\nadmin=true")
+        self.write("c.ini", "[General]\nname=me\n")
+        code, out = self.run_configs({"c.ini": {"format": "ini", "secrets": {"General": {"pw": self.secret}}}})
+        self.assertEqual(code, 1)
+        self.assertIn("~/c.ini: not written: General.pw has a line break", out)
+        self.assertEqual(self.read("c.ini"), "[General]\nname=me\n")
+
+    def test_a_stale_lock_is_taken_over(self):
+        self.write("a.json", '{"a": 0}')
+        os.mkdir(self.path("a.json.lock"))
+        os.utime(self.path("a.json.lock"), (time.time() - 120, time.time() - 120))
+        code, out = self.run_configs({"a.json": {"format": "json", "settings": {"a": 1}, "lock": "a.json.lock"}})
+        self.assertEqual((code, json.loads(self.read("a.json"))), (0, {"a": 1}))
+        self.assertFalse(os.path.exists(self.path("a.json.lock")))
+
+    def test_crlf_files_keep_their_line_endings(self):
+        p = self.path("u.properties")
+        with open(p, "wb") as f:
+            f.write(b"#c\r\ntheme=dark\r\n")
+        self.run_configs({"u.properties": {"format": "properties", "settings": {"theme": "light", "x": "1"}}})
+        with open(p, "rb") as f:
+            self.assertEqual(f.read(), b"#c\r\ntheme=light\r\nx=1\r\n")
+
+
 class TomlTest(Home):
     SUPERSONIC = """# Supersonic's settings
 [Application]
