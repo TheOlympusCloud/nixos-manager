@@ -15,6 +15,8 @@
   nixos-manager sets for every machine, under each machine's own `managed.json`; `common.nix` enables comin everywhere,
   and connects the machines to nixos-manager: deployment reports (with what each machine
   has installed, for its dependency tree), its binary cache and secrets (`secrets.nix`).
+  `fleet/<name>/managed.json` is a fleet module: packages and settings, with options of
+  its own, that a machine turns on with `fleet.modules.<name>.enable`.
 - `home/`: home-manager configurations for users.
 - `homes/<name>/`: what nixos-manager sets for a standalone home-manager configuration
   (`homeConfigurations.<name>`, for a machine that is not NixOS), applied by
