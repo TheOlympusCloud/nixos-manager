@@ -33,6 +33,7 @@
     ['machines', 'Machines', 'server', 'hosts computers'],
     ['packages', 'Packages', 'package', 'software matrix'],
     ['services', 'Services', 'services', 'programs features matrix'],
+    ['modules', 'Modules', 'box', 'fleet modules bundles roles enable per machine options'],
     ['options', 'Options', 'sliders', 'settings nixos configure'],
     ['health', 'Health', 'activity', 'insights findings fix security problems'],
     ['deployments', 'Deployments', 'deploy', 'comin rollout deployed commit machines behind failed report token'],

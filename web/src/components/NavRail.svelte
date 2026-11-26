@@ -15,6 +15,7 @@
     { view: 'machines', label: 'Machines', icon: 'server', key: 'm' },
     { view: 'packages', label: 'Packages', icon: 'package', key: 'p' },
     { view: 'services', label: 'Services', icon: 'services', key: 's' },
+    { view: 'modules', label: 'Modules', icon: 'box', key: 'u' },
     { view: 'options', label: 'Options', icon: 'sliders', key: 'o' },
     { view: 'health', label: 'Health', icon: 'activity', key: 'a' },
     { view: 'deployments', label: 'Deployments', icon: 'deploy', key: 'd' },

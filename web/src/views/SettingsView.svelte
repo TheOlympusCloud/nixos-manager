@@ -16,6 +16,7 @@
     [['g', 'm'], 'Machines'],
     [['g', 'p'], 'Packages'],
     [['g', 's'], 'Services'],
+    [['g', 'u'], 'Modules'],
     [['g', 'o'], 'Options'],
     [['g', 'a'], 'Health'],
     [['g', 'i'], 'Inputs'],
