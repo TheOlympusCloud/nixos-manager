@@ -298,11 +298,11 @@ func TestUncheckedCommitInsight(t *testing.T) {
 	}
 }
 
-// managed.nix 5 ignores app configs in homes, so it is older too; 6 is this console's.
+// managed.nix 6 ignores fleet modules, so it is older too; 7 is this console's.
 func TestInsightsManagedVersions(t *testing.T) {
 	m := &Model{Hosts: []Host{
-		{Name: "a", ManagedFile: managed("a"), ManagedVersion: 5, Ports: Ports{Firewall: true}},
-		{Name: "b", ManagedFile: managed("b"), ManagedVersion: 6, Ports: Ports{Firewall: true}},
+		{Name: "a", ManagedFile: managed("a"), ManagedVersion: 6, Ports: Ports{Firewall: true}},
+		{Name: "b", ManagedFile: managed("b"), ManagedVersion: 7, Ports: Ports{Firewall: true}},
 	}}
 	old := ""
 	for _, in := range Insights(m, nil, "", nil, time.Now()) {

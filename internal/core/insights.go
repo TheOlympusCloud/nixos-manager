@@ -139,11 +139,11 @@ func Insights(m *Model, deploys []MachineDeployment, origin string, tip *CommitC
 		Title:  "Visual editing off",
 		Detail: "These machines do not load their managed.json, so packages and options cannot be changed by clicking."})
 	// 1 is the first managed.nix, 2 lacks modules/managed.json, 3 packages from another
-	// flake input, 4 secrets in homes, 5 app configs in homes; 0 (not reported) is left alone.
-	if old := where(func(h Host) bool { return h.ManagedFile != nil && h.ManagedVersion > 0 && h.ManagedVersion < 6 }); len(old) > 0 {
+	// flake input, 4 secrets in homes, 5 app configs in homes, 6 fleet modules; 0 (not reported) is left alone.
+	if old := where(func(h Host) bool { return h.ManagedFile != nil && h.ManagedVersion > 0 && h.ManagedVersion < 7 }); len(old) > 0 {
 		out = append(out, Insight{ID: "managed-old", Severity: "warning", Hosts: old, Link: "#/machines/" + old[0] + "/packages",
 			Title:  "modules/managed.nix is older than this console",
-			Detail: "These machines load an older managed.nix: packages and options set on each machine still apply, but app configs and keyring entries in homes do not, nor, before version 5, secrets in homes, nor, before version 4, a package taken from another nixpkgs, nor, before version 3, what is set for every machine (modules/managed.json), nor, with the first managed.nix, removed or customised packages and home-manager users. Update it (here, or on a machine's Packages tab), then check, commit and push it."})
+			Detail: "These machines load an older managed.nix: packages and options set on each machine still apply, but fleet modules (modules/fleet/) do not, nor, before version 6, app configs and keyring entries in homes, nor, before version 5, secrets in homes, nor, before version 4, a package taken from another nixpkgs, nor, before version 3, what is set for every machine (modules/managed.json), nor, with the first managed.nix, removed or customised packages and home-manager users. Update it (here, or on a machine's Packages tab), then check, commit and push it."})
 	}
 	out = append(out, missingPackages(healthy)...)
 	out = append(out, releaseInsights(healthy, now)...)

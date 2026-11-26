@@ -39,6 +39,11 @@ import (
 // homes/<name>/managed.json, which modules/managed-home.nix applies: packages,
 // removedPackages and settings, its home-manager options, and configs (see
 // configs.go). Every edit below takes HomePrefix+<name> for it instead of a machine.
+//
+// A fleet module, modules/fleet/<name>/managed.json, has packages and settings,
+// a description and the options it declares (modules.go), and applies where a
+// machine turns it on (fleet.modules.<name>.enable, managed.nix 7). Every edit
+// below takes ModulePrefix+<name> for it instead of a machine.
 
 // ManagedView is a machine's managed file as the UI and MCP see it.
 type ManagedView struct {
@@ -57,6 +62,10 @@ type ManagedView struct {
 	Settings map[string]any         `json:"settings"`
 	// Configs are a standalone home's app configs (managed-home.nix), without secrets.
 	Configs map[string]HomeConfig `json:"configs,omitempty"`
+	// Description and Options are a fleet module's (modules.go): what it is,
+	// and the options it declares, fleet.modules.<name>.<option>.
+	Description string                  `json:"description,omitempty"`
+	Options     map[string]ModuleOption `json:"options,omitempty"`
 }
 
 // PackageOverride is how managed.nix changes one package: taken from the
@@ -141,6 +150,12 @@ func managedPath(host string) (string, error) {
 		}
 		return "homes/" + name + "/managed.json", nil
 	}
+	if name, ok := strings.CutPrefix(host, ModulePrefix); ok {
+		if !moduleName.MatchString(name) {
+			return "", errorf(ErrInvalid, "invalid module name %q: letters, digits, _ and -, starting with a letter or _", name)
+		}
+		return moduleFolder + "/" + name + "/managed.json", nil
+	}
 	if !hostName.MatchString(host) {
 		return "", errorf(ErrInvalid, "invalid machine name %q", host)
 	}
@@ -197,8 +212,12 @@ func (s *Service) readManaged(host string) (managedDoc, error) {
 		}
 		md.view.Settings = settings
 	}
+	keys := map[string]any{"removedPackages": &md.view.RemovedPackages, "packageOverrides": &md.view.PackageOverrides, "home": &md.view.Home, "configs": &md.view.Configs}
+	if strings.HasPrefix(host, ModulePrefix) { // elsewhere these keys mean nothing, and stay as they are
+		keys["description"], keys["options"] = &md.view.Description, &md.view.Options
+	}
 	// The newer keys are decoded strictly: an unknown field would be lost on the next write.
-	for key, into := range map[string]any{"removedPackages": &md.view.RemovedPackages, "packageOverrides": &md.view.PackageOverrides, "home": &md.view.Home, "configs": &md.view.Configs} {
+	for key, into := range keys {
 		if raw, ok := md.doc[key]; ok {
 			if err := strictDecode(raw, into); err != nil {
 				return md, errorf(ErrInvalid, "%s: %q: %v; fix it in the code view", p, key, err)
@@ -238,6 +257,11 @@ func strictDecode(raw, into any) error {
 // check validates what managed.nix will read, so a bad value is refused when
 // it is written (or read), not first at the next evaluation.
 func (v *ManagedView) check() error {
+	if strings.HasPrefix(v.Host, ModulePrefix) {
+		if err := v.checkModule(); err != nil {
+			return err
+		}
+	}
 	standalone := strings.HasPrefix(v.Host, HomePrefix)
 	if standalone && (len(v.Home) > 0 || len(v.PackageOverrides) > 0) {
 		return errorf(ErrInvalid, "a standalone home has packages, removedPackages, settings (its home-manager options) and configs; home-manager users and package overrides are for NixOS machines")
@@ -420,8 +444,12 @@ func (s *Service) editManaged(host string, base *string, edit func(v *ManagedVie
 		md.view.Home[u] = h
 	}
 	md.doc["packages"], md.doc["settings"] = md.view.Packages, md.view.Settings
+	newer := map[string]any{"removedPackages": md.view.RemovedPackages, "packageOverrides": md.view.PackageOverrides, "home": md.view.Home, "configs": md.view.Configs}
+	if strings.HasPrefix(host, ModulePrefix) {
+		newer["description"], newer["options"] = md.view.Description, md.view.Options
+	}
 	// The newer keys only when used, so a file that needs none still works with an older managed.nix.
-	for key, v := range map[string]any{"removedPackages": md.view.RemovedPackages, "packageOverrides": md.view.PackageOverrides, "home": md.view.Home, "configs": md.view.Configs} {
+	for key, v := range newer {
 		if reflect.ValueOf(v).Len() == 0 {
 			delete(md.doc, key)
 		} else {

@@ -30,7 +30,50 @@ case "$*" in
   *"nixmgr:host"*)
     sleep "${NIXMGR_FAKE_DELAY:-0}"
     if [ -f "$dir/host-$host.json" ]; then
-      cat "$dir/host-$host.json"
+      # As managed.nix would: the version the working copy's managed.nix applies, and
+      # its fleet modules (modules/fleet/<name>/managed.json) on or off for this machine.
+      python3 -I - "$dir/host-$host.json" "$flake" "$host" <<'PY'
+import json, os, re, sys
+host = json.load(open(sys.argv[1]))
+flake, name = sys.argv[2], sys.argv[3]
+def read(p):
+    try:
+        return json.load(open(os.path.join(flake, p)))
+    except (OSError, ValueError):
+        return {}
+try:
+    version = re.search(r"nixosManager\.version = lib\.mkOption \{[^}]*default = (\d+);", open(os.path.join(flake, "modules/managed.nix")).read())
+except OSError:
+    version = None
+if host.get("managedFile") and version:
+    host["managedVersion"] = int(version.group(1))
+modules = []
+folder = os.path.join(flake, "modules/fleet")
+if host.get("managedFile") and host.get("managedVersion", 1) >= 7 and os.path.isdir(folder):
+    own = host["managedFile"]
+    layers = [(own, read(own)), ("modules/managed.json", read("modules/managed.json"))]
+    for m in sorted(os.listdir(folder)):
+        path = "modules/fleet/%s/managed.json" % m
+        if not os.path.isfile(os.path.join(flake, path)):
+            continue
+        decl = read(path)
+        def at(key, default):
+            for file, data in layers:
+                node = data.get("settings") or {}
+                for seg in ("fleet", "modules", m):
+                    node = node.get(seg) if isinstance(node, dict) else None
+                if isinstance(node, dict) and key in node:
+                    return node[key], [file]
+            return default, [path]
+        enable, files = at("enable", False)
+        options = {}
+        for o, d in (decl.get("options") or {}).items():
+            value, ofiles = at(o, d.get("default"))
+            options[o] = {"value": value, "files": ofiles}
+        modules.append({"name": m, "enable": enable, "files": files, "options": options})
+host["modules"] = modules
+print(json.dumps(host))
+PY
     else
       printf 'error: infinite recursion encountered\n       at /nix/store/x-source/hosts/%s/default.nix:12:3\n' "$host" >&2
       exit 1

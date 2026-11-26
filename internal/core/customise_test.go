@@ -166,7 +166,7 @@ func TestCustomisedFleetWithRealNix(t *testing.T) {
 		return HomeInfo{}
 	}
 	e, c := hosts["example"], hosts["ct"]
-	expect(e.ManagedVersion == 6 && e.HomeManager && c.ManagedVersion == 6, "the model sees managed.nix 6 and home-manager")
+	expect(e.ManagedVersion == 7 && e.HomeManager && c.ManagedVersion == 7, "the model sees managed.nix 7 and home-manager")
 	expect(slices.ContainsFunc(m.Inputs, func(i Input) bool { return i.Name == "nixpkgs-other" }) && slices.Contains(pkgNames(e.Packages), "tree"), "the model lists the locked nixpkgs-other and example's tree")
 	for _, p := range e.Packages {
 		if p.Name == "jq" {
