@@ -79,6 +79,8 @@
   <p class="muted">
     Modules bundle packages and settings; turn one on here and set its options for {host.name}. They are kept in
     <span class="mono">{host.managedFile ?? 'managed.json'}</span> as <span class="mono">fleet.modules.&lt;module&gt;</span>.
+    A module's settings merge with {host.name}'s hand-written ones, but a value set here by clicking wins whole: a list such as
+    <span class="mono">networking.firewall.allowedTCPPorts</span> set here replaces the module's, so its ports are not added.
   </p>
   <span class="spacer"></span>
   <a class="btn" href={link('modules')}><Icon name="box" /> All modules</a>

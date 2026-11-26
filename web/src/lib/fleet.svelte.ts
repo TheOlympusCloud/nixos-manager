@@ -364,14 +364,16 @@ export async function createModule(name: string, description: string): Promise<b
   return true
 }
 
-/** Changes a module's description, or adds, replaces or (null) removes options; machines lose the values of a removed one. */
+/** Changes a module's description, or adds, replaces or (null) removes options; machines and other modules lose the values of a removed one. */
 export function editModule(name: string, edit: { description?: string; options?: Record<string, ModuleOption | null> }, done: string): Promise<boolean> {
   const target = MODULE + name
   return write(target, async () => api.editModule(name, { ...edit, base_hash: await seenHash(target) }), done).then(async (ok) => {
-    if (ok) await loadModules()
+    if (ok) await Promise.all([loadModules(), Object.values(edit.options ?? {}).includes(null) ? reloadManaged(target) : null])
     return ok
   })
 }
+/** Reads again every managed file this tab holds (but skip), after an edit that changed some of them on the server. */
+const reloadManaged = (skip = '') => Promise.all(Object.keys(fleet.managed).filter((k) => k !== skip).map((k) => loadManaged(k)))
 
 /** Deletes a module once confirmed, and its settings in every managed.json. */
 export async function deleteModule(name: string): Promise<boolean> {
@@ -392,11 +394,9 @@ export async function deleteModule(name: string): Promise<boolean> {
   delete fleet.managed[MODULE + name]
   for (const h of on) if (!fleet.pending.includes(h)) fleet.pending.push(h)
   toast(r.machines.length ? `Deleted the module ${name}, and its settings in ${list(r.machines)}` : `Deleted the module ${name}`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
-  await Promise.all([loadModules(), refreshStatus()])
-  for (const f of r.machines) if (fleet.managed[hostOfFile(f)]) await loadManaged(hostOfFile(f))
+  await Promise.all([loadModules(), refreshStatus(), r.machines.length ? reloadManaged() : null])
   return true
 }
-const hostOfFile = (f: string) => (f === SHARED_FILE ? SHARED : f.replace(/^hosts\/([^/]+)\/managed\.json$/, '$1'))
 
 /** `services` + `desktopManager.plasma6` → services.desktopManager.plasma6.enable */
 export const enablePath = (group: FeatureGroup | string, name: string) => [group, ...fillPath(optionSegments(name), []), 'enable']

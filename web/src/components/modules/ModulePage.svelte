@@ -313,7 +313,7 @@
 
         <section class="section" aria-labelledby="mod-settings">
           <h2 id="mod-settings">Settings</h2>
-          <p class="muted small">NixOS options the module sets where it is on. They apply as hand-written Nix does: lists and sets merge with the machine's own, and a value set on the machine wins.</p>
+          <p class="muted small">NixOS options the module sets where it is on. They apply as hand-written Nix does: lists and sets merge with the machine's hand-written ones. A value a machine sets by clicking wins whole, a list included: it replaces the module's.</p>
           {#if settings.length}
             <div class="table-wrap">
               <table class="data">

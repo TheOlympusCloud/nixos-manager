@@ -58,9 +58,9 @@ export function offValue(hm: HostModule | undefined, name: string, managedFile: 
   return k === 'shared' || k === 'code' ? false : undefined
 }
 
-/** A value as a form shows it for its type. */
+/** A value as a form shows it for its type; null only as anything's. */
 export function valueText(type: ModuleOptionType, v: unknown): string {
-  if (v === undefined || v === null) return ''
+  if (v === undefined || (v === null && type !== 'anything')) return ''
   if (type === 'str' && typeof v === 'string') return v
   if (type === 'listOf str' && Array.isArray(v)) return v.join('\n')
   return JSON.stringify(v)

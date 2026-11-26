@@ -68,6 +68,9 @@ describe('values in forms', () => {
       expect(parseValue(type, valueText(type, v))).toEqual({ value: v })
     }
     expect(valueText('str', undefined)).toBe('')
+    expect(valueText('str', null)).toBe('')
+    // A null default (type anything) stays null when its option is edited.
+    expect(parseValue('anything', valueText('anything', null))).toEqual({ value: null })
   })
   it('takes a setting as JSON, or else as text', () => {
     expect(settingValue('[ "@option:port@" ]')).toEqual({ value: ['@option:port@'] })
