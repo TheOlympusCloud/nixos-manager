@@ -237,6 +237,34 @@ func TestHomeConfigTools(t *testing.T) {
 	}
 }
 
+func TestFleetModuleTools(t *testing.T) {
+	cs, svc := session(t)
+	var m core.FleetModule
+	call(t, cs, "create_module", map[string]any{"name": "media", "description": "Jellyfin"}, &m)
+	call(t, cs, "edit_module", map[string]any{"name": "media", "options": map[string]any{"port": map[string]any{"type": "port", "default": 8096}, "users": map[string]any{"type": "listOf str"}}}, &m)
+	var v core.ManagedView
+	call(t, cs, "add_packages", map[string]any{"host": "module:media", "packages": []string{"ffmpeg"}}, &v)
+	call(t, cs, "set_option", map[string]any{"host": "module:media", "path": []string{"networking", "firewall", "allowedTCPPorts"}, "value": []string{"@option:port@"}}, &v)
+	call(t, cs, "set_option", map[string]any{"host": "web", "path": []string{"fleet", "modules", "media", "users"}, "value": []string{"pablo"}}, &v)
+	var list struct{ Modules []core.FleetModule }
+	call(t, cs, "list_modules", map[string]any{}, &list)
+	if len(list.Modules) != 1 || list.Modules[0].Packages[0] != "ffmpeg" || list.Modules[0].Options["port"].Type != "port" || len(list.Modules[0].Options) != 2 {
+		t.Fatalf("listed %+v", list)
+	}
+	call(t, cs, "edit_module", map[string]any{"name": "media", "options": map[string]any{"users": nil}}, &m)
+	if web, err := svc.ManagedView("web"); err != nil || len(web.Settings) != 0 {
+		t.Fatalf("web still sets the removed option %+v %v", web.Settings, err)
+	}
+	if res := call(t, cs, "edit_module", map[string]any{"name": "media", "options": map[string]any{"port": nil}}, nil); !res.IsError || !strings.Contains(text(res), "@option:port@") {
+		t.Fatalf("an option still in use removed: %s", text(res))
+	}
+	var d core.ModuleDeleted
+	call(t, cs, "delete_module", map[string]any{"name": "media"}, &d)
+	if d.Path != "modules/fleet/media/managed.json" {
+		t.Fatalf("deleted %+v", d)
+	}
+}
+
 func TestEditCheckCommitFlow(t *testing.T) {
 	cs, svc := session(t)
 	var w struct{ Hash string }
