@@ -64,7 +64,7 @@ func TestManagedConfigs(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	want := map[string]any{
-		"tokenOwner": "pablo", "pwOwner": "pablo", "version": float64(6), "system": true, "loginSameSpec": true,
+		"tokenOwner": "pablo", "pwOwner": "pablo", "version": float64(7), "system": true, "loginSameSpec": true,
 		"activationAfter": []any{"linkGeneration"},
 		"loginWantedBy":   []any{"default.target"}, "keyringWantedBy": []any{"graphical-session.target"},
 		"configs": map[string]any{"configs": map[string]any{

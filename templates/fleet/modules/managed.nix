@@ -50,6 +50,25 @@
 #   hand-written values; settings.home-manager.users.<user> applies as home does.
 # The files next to it (custom.nix, packages/, home/) are not read.
 #
+# Fleet modules bundle packages and settings that machines turn on one by one:
+# modules/fleet/<name>/managed.json, next to this module, is a NixOS module of
+# its own, with an option fleet.modules.<name>.enable and the options it declares:
+#   { "description": "Jellyfin with its firewall",
+#     "options": { "port": { "type": "port", "default": 8096, "description": "…" } },
+#     "packages": [ "ffmpeg" ],
+#     "settings": { "services": { "jellyfin": { "enable": true } },
+#                   "networking": { "firewall": { "allowedTCPPorts": [ "@option:port@" ] } } } }
+# A type is bool, int, port, str, "listOf str" or anything; an option without a
+# default must be set on each machine that turns the module on. "@option:<name>@"
+# as a whole value is that option's value on the machine, inside a longer text
+# its text. Where the module is on, its packages are installed and its settings
+# apply as hand-written Nix does (lists and sets merge with the machine's), so a
+# value set on the machine wins. A machine turns it on, and sets its options, as
+# any option: fleet.modules.<name>.enable in its managed.json's settings, in
+# modules/managed.json for every machine, or in Nix. custom.nix next to the
+# module's managed.json is a NixOS module loaded with it, on every machine: put
+# its config under lib.mkIf config.fleet.modules.<name>.enable.
+#
 # A packageOverrides entry with "from": "<input>" takes the package from that
 # flake input, another nixpkgs (nixpkgs-unstable, say), instead of the machine's;
 # its other changes apply on top. The input comes from nixosSystem's
@@ -104,6 +123,80 @@ let
   removed = lib.unique ((shared.removedPackages or [ ]) ++ (data.removedPackages or [ ]));
   # What no removed name takes out.
   added = map package (ownPackages ++ sharedFor (data.removedPackages or [ ]) (shared.packages or [ ]));
+
+  # Fleet modules: each folder in modules/fleet with a managed.json.
+  fleetDir = ./fleet;
+  fleet = lib.optionalAttrs (builtins.pathExists fleetDir) (
+    lib.mapAttrs (n: _: lib.importJSON (fleetDir + "/${n}/managed.json")) (
+      lib.filterAttrs (n: t: t == "directory" && builtins.pathExists (fleetDir + "/${n}/managed.json")) (builtins.readDir fleetDir)
+    )
+  );
+  optionTypes = with lib.types; {
+    inherit
+      bool
+      int
+      port
+      str
+      anything
+      ;
+    "listOf str" = listOf str;
+  };
+  # The packages of the modules the machine turns on, which no removed name takes out either.
+  fleetPackages = lib.concatLists (
+    lib.mapAttrsToList (n: m: lib.optionals config.fleet.modules.${n}.enable (map package (m.packages or [ ]))) fleet
+  );
+  fleetModule =
+    name: m:
+    let
+      mdir = fleetDir + "/${name}";
+      what = "modules/fleet/${name}/managed.json";
+      cfg = config.fleet.modules.${name};
+      optionValue =
+        o: if (m.options or { }) ? ${o} then cfg.${o} else throw "${what}: @option:${o}@ is not one of its options";
+      asText = v: if builtins.isString v then v else builtins.toJSON v;
+      # "@option:<o>@" as a whole value is that option's value; inside a longer text, its text.
+      fill =
+        v:
+        if builtins.isAttrs v then
+          lib.mapAttrs (_: fill) v
+        else if builtins.isList v then
+          map fill v
+        else if builtins.isString v then
+          let
+            parts = builtins.split "@option:([A-Za-z_][A-Za-z0-9_-]*)@" v;
+          in
+          if builtins.length parts == 3 && builtins.head parts == "" && lib.last parts == "" then
+            optionValue (builtins.head (builtins.elemAt parts 1))
+          else
+            lib.concatMapStrings (x: if builtins.isList x then asText (optionValue (builtins.head x)) else x) parts
+        else
+          v;
+    in
+    {
+      # Its definitions are reported as coming from its managed.json.
+      _file = mdir + "/managed.json";
+      imports = ifExists (mdir + "/custom.nix");
+      options.fleet.modules.${name} =
+        lib.mapAttrs (
+          o: d:
+          lib.mkOption (
+            {
+              type = optionTypes.${d.type or "anything"} or (throw "${what}: the option ${o} has the unknown type ${d.type}");
+              description = d.description or "";
+            }
+            // lib.optionalAttrs (d ? default) { inherit (d) default; }
+          )
+        ) (m.options or { })
+        // {
+          enable = lib.mkEnableOption (m.description or "the fleet module ${name}");
+        };
+      config = lib.mkIf cfg.enable (
+        lib.mkMerge [
+          (fill (m.settings or { }))
+          { environment.systemPackages = map package (m.packages or [ ]); }
+        ]
+      );
+    };
   # attribute -> { o = override; base = the folder its patch files are in }
   overrides =
     lib.mapAttrs (_: o: {
@@ -395,7 +488,7 @@ in
 {
   # Definitions below are reported as coming from the JSON file.
   _file = file;
-  imports = ifExists (dir + "/custom.nix") ++ [
+  imports = ifExists (dir + "/custom.nix") ++ lib.mapAttrsToList fleetModule fleet ++ [
     {
       # Reported as coming from modules/managed.json.
       _file = sharedFile;
@@ -415,9 +508,9 @@ in
     };
     nixosManager.version = lib.mkOption {
       type = lib.types.int;
-      default = 6;
+      default = 7;
       internal = true;
-      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from); 5 adds secrets in homes (home.<user>.secrets and home/<user>/templates/); 6 adds app configs and keyring entries in homes (home.<user>.configs and keyring).";
+      description = "What this module can apply: 2 adds removed packages, package overrides, home-manager and the files next to managed.json; 3 adds modules/managed.json; 4 adds packages from another flake input (from); 5 adds secrets in homes (home.<user>.secrets and home/<user>/templates/); 6 adds app configs and keyring entries in homes (home.<user>.configs and keyring); 7 adds fleet modules (modules/fleet/<name>/managed.json).";
     };
     nixosManager.packageNames = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
@@ -440,7 +533,7 @@ in
   }
   # A second declaration may add the apply function NixOS's own lacks.
   // lib.optionalAttrs (removed != [ ]) {
-    environment.systemPackages = lib.mkOption { apply = without removed added; };
+    environment.systemPackages = lib.mkOption { apply = without removed (added ++ fleetPackages); };
   };
 
   config = lib.mkMerge [
