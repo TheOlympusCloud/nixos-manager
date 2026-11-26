@@ -111,9 +111,19 @@ func TestFleetModuleValidation(t *testing.T) {
 	isErr(t, err, ErrInvalid)
 	_, err = s.SetPackageOverride("module:desk_top-2", "htop", &PackageOverride{Version: "1"}, nil)
 	isErr(t, err, ErrInvalid)
-	// Editing one that does not exist does not make it.
+	// Editing one that does not exist does not make it: a misspelt name is an error.
 	_, err = s.EditModule("ghost", ModuleEdit{Description: new(string)})
 	isErr(t, err, ErrNotFound)
+	_, err = s.SetOption("module:ghost", []string{"services", "x", "enable"}, true, nil)
+	isErr(t, err, ErrNotFound)
+	_, err = s.AddPackages("module:ghost", []string{"git"})
+	isErr(t, err, ErrNotFound)
+	empty := ""
+	_, err = s.SetOption("module:ghost", []string{"services", "x", "enable"}, true, &empty)
+	isErr(t, err, ErrNotFound)
+	if _, _, err := s.Read("modules/fleet/ghost/managed.json"); err == nil {
+		t.Fatal("an edit of a missing module created it")
+	}
 	_, err = s.DeleteModule("ghost")
 	isErr(t, err, ErrNotFound)
 	// A conflicting edit is refused.
@@ -150,6 +160,11 @@ func TestFleetModuleRemovalForgetsMachineSettings(t *testing.T) {
 	must[ManagedView](t)(s.SetOption("web", []string{"fleet", "modules", "media", "name"}, "web", nil))
 	must[ManagedView](t)(s.SetOption(SharedHost, []string{"fleet", "modules", "media", "enable"}, true, nil))
 	must[ManagedView](t)(s.SetOption(SharedHost, []string{"fleet", "modules", "other", "enable"}, true, nil))
+	// Another module that turns media on and sets its options: every machine imports it.
+	must[FleetModule](t)(s.CreateModule("stack", ""))
+	must[ManagedView](t)(s.SetOption(ModulePrefix+"stack", []string{"fleet", "modules", "media", "enable"}, true, nil))
+	must[ManagedView](t)(s.SetOption(ModulePrefix+"stack", []string{"fleet", "modules", "media", "port"}, 80, nil))
+	must[ManagedView](t)(s.SetOption(ModulePrefix+"stack", []string{"services", "nginx", "enable"}, true, nil))
 	write(t, s.Repo, "hosts/untouched/managed.json", `{"packages": ["git"], "settings": {}}`)
 	_, untouchedHash, _ := s.Read("hosts/untouched/managed.json")
 
@@ -161,10 +176,19 @@ func TestFleetModuleRemovalForgetsMachineSettings(t *testing.T) {
 	if !reflect.DeepEqual(pi.Settings["fleet"], map[string]any{"modules": map[string]any{"media": map[string]any{"enable": true}}}) {
 		t.Fatalf("pi still sets the removed option: %+v", pi.Settings)
 	}
+	stack := must[ManagedView](t)(s.ManagedView(ModulePrefix + "stack"))
+	if !reflect.DeepEqual(stack.Settings["fleet"], map[string]any{"modules": map[string]any{"media": map[string]any{"enable": true}}}) {
+		t.Fatalf("the module stack still sets the removed option: %+v", stack.Settings)
+	}
 
 	d := must[ModuleDeleted](t)(s.DeleteModule("media"))
-	if d.Path != "modules/fleet/media/managed.json" || !reflect.DeepEqual(d.Machines, []string{"modules/managed.json", "hosts/pi/managed.json", "hosts/web/managed.json"}) {
+	if d.Path != "modules/fleet/media/managed.json" ||
+		!reflect.DeepEqual(d.Machines, []string{"modules/managed.json", "hosts/pi/managed.json", "hosts/web/managed.json", "modules/fleet/stack/managed.json"}) {
 		t.Fatalf("deleted %+v", d)
+	}
+	stack = must[ManagedView](t)(s.ManagedView(ModulePrefix + "stack"))
+	if !reflect.DeepEqual(stack.Settings, map[string]any{"services": map[string]any{"nginx": map[string]any{"enable": true}}}) {
+		t.Fatalf("the module stack after deleting media %+v", stack.Settings)
 	}
 	if _, _, err := s.Read("modules/fleet/media/managed.json"); err == nil {
 		t.Fatal("the module's file is still there")
@@ -273,5 +297,43 @@ func TestFleetModuleModelWithRealNix(t *testing.T) {
 		return o.Name == "fleet.modules.media.port" && o.Description != nil && *o.Description == "Where it listens"
 	}) || !slices.ContainsFunc(hits, func(o OptionDoc) bool { return o.Name == "fleet.modules.media.enable" }) {
 		t.Fatalf("search fleet.modules.media: %+v", hits)
+	}
+}
+
+// A null default (type anything) stays one through the console's writes; with no
+// default key, each machine must set the option.
+func TestFleetModuleNullDefault(t *testing.T) {
+	s := newService(t)
+	must[FleetModule](t)(s.CreateModule("m", ""))
+	write(t, s.Repo, "modules/fleet/m/managed.json", `{"options": {"extra": {"type": "anything", "default": null}, "need": {"type": "str"}}, "packages": [], "settings": {}}`)
+	must[ManagedView](t)(s.AddPackages("module:m", []string{"git"}))
+	content, _, _ := s.Read("modules/fleet/m/managed.json")
+	var doc struct{ Options map[string]map[string]any }
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := doc.Options["extra"]["default"]; !ok || v != nil {
+		t.Fatalf("the null default went:\n%s", content)
+	}
+	if _, ok := doc.Options["need"]["default"]; ok {
+		t.Fatalf("an option without a default got one:\n%s", content)
+	}
+	// Over the API too, and only for anything.
+	var e ModuleEdit
+	if err := json.Unmarshal([]byte(`{"options": {"x": {"type": "anything", "default": null}, "y": null}}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if !e.Options["x"].nullDefault || e.Options["y"] != nil {
+		t.Fatalf("decoded %+v", e.Options)
+	}
+	must[FleetModule](t)(s.EditModule("m", e))
+	e = ModuleEdit{}
+	if err := json.Unmarshal([]byte(`{"options": {"s": {"type": "str", "default": null}}}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.EditModule("m", e)
+	isErr(t, err, ErrInvalid)
+	if err := json.Unmarshal([]byte(`{"type": "str", "dflt": 1}`), &ModuleOption{}); err == nil {
+		t.Fatal("an unknown field accepted")
 	}
 }

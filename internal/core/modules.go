@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -52,6 +53,46 @@ type ModuleOption struct {
 	Type        string `json:"type" jsonschema:"bool, int, port, str, listOf str or anything"`
 	Default     any    `json:"default,omitempty" jsonschema:"its value where a machine sets none; leave out to make each machine set it"`
 	Description string `json:"description,omitempty"`
+	// nullDefault: "default": null (type anything), which omitempty would turn into none.
+	nullDefault bool
+}
+
+// moduleOption is ModuleOption without its JSON methods.
+type moduleOption ModuleOption
+
+// UnmarshalJSON keeps "default": null apart from no default, refuses unknown
+// fields and keeps numbers exact, as strictDecode does.
+func (o *ModuleOption) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	dec.DisallowUnknownFields()
+	var p moduleOption
+	if err := dec.Decode(&p); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(b, &keys); err != nil {
+		return err
+	}
+	_, has := keys["default"]
+	p.nullDefault = has && p.Default == nil
+	*o = ModuleOption(p)
+	return nil
+}
+
+// MarshalJSON writes "default": null for a null default.
+func (o ModuleOption) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false) // as editManaged writes the rest of the file
+	if err := enc.Encode(moduleOption(o)); err != nil {
+		return nil, err
+	}
+	out := bytes.TrimSpace(b.Bytes())
+	if o.nullDefault {
+		out = append(append(out[:len(out)-1:len(out)-1], `,"default":null`...), '}')
+	}
+	return out, nil
 }
 
 // FleetModule is a fleet module as the UI and MCP list it.
@@ -72,10 +113,11 @@ type ModuleEdit struct {
 }
 
 // ModuleDeleted is what deleting a module changed: the managed files whose
-// settings for it were removed, so no machine still turns it on there.
+// settings for it were removed, so neither a machine nor another module still
+// turns it on there.
 type ModuleDeleted struct {
 	Path     string   `json:"path"`
-	Machines []string `json:"machines"` // managed.json paths whose fleet.modules.<name> went
+	Machines []string `json:"machines"` // managed.json paths whose fleet.modules.<name> went, other modules' included
 }
 
 // checkModule validates what managed.nix reads from a module's managed.json.
@@ -116,7 +158,7 @@ func checkModuleOption(name string, o ModuleOption) error {
 	if !slices.Contains(ModuleOptionTypes, o.Type) {
 		return errorf(ErrInvalid, "the option %s has the type %q; use one of %s", name, o.Type, strings.Join(ModuleOptionTypes, ", "))
 	}
-	if o.Default != nil && !fitsType(o.Type, o.Default) {
+	if o.Default != nil && !fitsType(o.Type, o.Default) || o.nullDefault && o.Type != "anything" {
 		return errorf(ErrInvalid, "the default of %s is not a %s", name, o.Type)
 	}
 	return nil
@@ -171,6 +213,16 @@ func walkStrings(v any, fn func(string)) {
 	}
 }
 
+// newModule, as editManaged's base, creates a module's file; any other edit of
+// module:<name> needs it to exist, so a misspelt name is an error, not a new module.
+var newModule = ""
+
+// inRepo reports whether a file of the working copy exists.
+func (s *Service) inRepo(p string) bool {
+	_, err := fs.Stat(s.root.FS(), p)
+	return err == nil
+}
+
 // ListModules reads every fleet module, by name. One that cannot be read is
 // listed with its error, so the others still show.
 func (s *Service) ListModules() ([]FleetModule, error) {
@@ -186,7 +238,7 @@ func (s *Service) ListModules() ([]FleetModule, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := fs.Stat(s.root.FS(), moduleFolder+"/"+e.Name()+"/managed.json"); err != nil {
+		if !s.inRepo(moduleFolder + "/" + e.Name() + "/managed.json") {
 			continue // a folder of something else
 		}
 		m, err := s.Module(e.Name())
@@ -214,8 +266,7 @@ func (s *Service) Module(name string) (FleetModule, error) {
 	if !view.Exists {
 		return m, errorf(ErrNotFound, "there is no module %s", name)
 	}
-	_, err = fs.Stat(s.root.FS(), moduleFolder+"/"+name+"/custom.nix")
-	m.Custom = err == nil
+	m.Custom = s.inRepo(moduleFolder + "/" + name + "/custom.nix")
 	return m, nil
 }
 
@@ -224,8 +275,7 @@ func (s *Service) CreateModule(name, description string) (FleetModule, error) {
 	if !moduleName.MatchString(name) {
 		return FleetModule{}, errorf(ErrInvalid, "invalid module name %q: letters, digits, _ and -, starting with a letter or _", name)
 	}
-	empty := "" // refused when the file exists
-	if _, err := s.editManaged(ModulePrefix+name, &empty, func(v *ManagedView) error {
+	if _, err := s.editManaged(ModulePrefix+name, &newModule, func(v *ManagedView) error {
 		v.Description = strings.TrimSpace(description)
 		return nil
 	}); err != nil {
@@ -273,7 +323,7 @@ func (s *Service) EditModule(name string, e ModuleEdit) (FleetModule, error) {
 	}
 	slices.Sort(removed)
 	for _, o := range removed {
-		if _, err := s.forgetSetting([]string{"fleet", "modules", name, o}); err != nil {
+		if _, err := s.forgetSetting([]string{"fleet", "modules", name, o}, ""); err != nil {
 			return FleetModule{}, err
 		}
 	}
@@ -288,10 +338,10 @@ func (s *Service) DeleteModule(name string) (ModuleDeleted, error) {
 	if err != nil {
 		return ModuleDeleted{}, err
 	}
-	if _, err := fs.Stat(s.root.FS(), p); err != nil { // one that does not parse can still go
+	if !s.inRepo(p) { // one that does not parse can still go
 		return ModuleDeleted{}, errorf(ErrNotFound, "there is no module %s", name)
 	}
-	changed, err := s.forgetSetting([]string{"fleet", "modules", name})
+	changed, err := s.forgetSetting([]string{"fleet", "modules", name}, ModulePrefix+name)
 	if err != nil {
 		return ModuleDeleted{}, err
 	}
@@ -302,17 +352,26 @@ func (s *Service) DeleteModule(name string) (ModuleDeleted, error) {
 }
 
 // forgetSetting unsets path in every managed file that sets it: each machine's
-// hosts/<name>/managed.json and modules/managed.json. Every file is read first,
-// so one that cannot be read stops it before anything is written.
-func (s *Service) forgetSetting(path []string) ([]string, error) {
+// hosts/<name>/managed.json, modules/managed.json and the fleet modules' own,
+// which may turn on another module or set its options; skip is a target left
+// out (a module being deleted). Every file is read first, so one that cannot
+// be read stops it before anything is written.
+func (s *Service) forgetSetting(path []string, skip string) ([]string, error) {
 	targets := []string{SharedHost}
-	hosts, err := fs.ReadDir(s.root.FS(), "hosts")
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-	for _, h := range hosts {
-		if h.IsDir() && hostName.MatchString(h.Name()) {
-			targets = append(targets, h.Name())
+	for _, folder := range []struct {
+		dir, prefix string
+		name        *regexp.Regexp
+	}{{"hosts", "", hostName}, {moduleFolder, ModulePrefix, moduleName}} {
+		entries, err := fs.ReadDir(s.root.FS(), folder.dir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		for _, e := range entries {
+			// A module folder without managed.json is something else.
+			if e.IsDir() && folder.name.MatchString(e.Name()) && folder.prefix+e.Name() != skip &&
+				(folder.prefix == "" || s.inRepo(folder.dir+"/"+e.Name()+"/managed.json")) {
+				targets = append(targets, folder.prefix+e.Name())
+			}
 		}
 	}
 	type hit struct{ target, hash, path string }

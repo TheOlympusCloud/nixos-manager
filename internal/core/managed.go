@@ -428,6 +428,9 @@ func (s *Service) editManaged(host string, base *string, edit func(v *ManagedVie
 	if base != nil && *base != md.view.Hash {
 		return md.view, errorf(ErrConflict, "%s changed since it was loaded", md.view.Path)
 	}
+	if name, ok := strings.CutPrefix(host, ModulePrefix); ok && !md.view.Exists && base != &newModule {
+		return md.view, errorf(ErrNotFound, "there is no module %s: create it first (create_module)", name)
+	}
 	if err := edit(&md.view); err != nil {
 		return md.view, err
 	}

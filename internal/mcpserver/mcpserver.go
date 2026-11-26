@@ -511,19 +511,19 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		ms, err := svc.ListModules()
 		return modulesOut{ms}, err
 	})
-	tool(s, "create_module", "Create an empty fleet module, modules/fleet/<name>/managed.json, on no machine yet. Then add packages (add_packages) and settings (set_option) with host module:<name>, declare options with edit_module, and turn it on per machine with set_option [\"fleet\",\"modules\",\"<name>\",\"enable\"] true (host * for every machine).", func(ctx context.Context, in struct {
+	tool(s, "create_module", "Create an empty fleet module, modules/fleet/<name>/managed.json, on no machine yet. Then add packages (add_packages) and settings (set_option) with host module:<name>, which edits only a module that exists, declare options with edit_module, and turn it on per machine with set_option [\"fleet\",\"modules\",\"<name>\",\"enable\"] true (host * for every machine).", func(ctx context.Context, in struct {
 		Name        string `json:"name" jsonschema:"letters, digits, _ and -, starting with a letter or _: the folder and fleet.modules.<name>"`
 		Description string `json:"description,omitempty"`
 	}) (core.FleetModule, error) {
 		return svc.CreateModule(in.Name, in.Description)
 	})
-	tool(s, "edit_module", "Change a fleet module's description, and add, replace or remove (null) the options it declares: fleet.modules.<name>.<option>, which machines set like any option and the module's settings use as \"@option:<option>@\". An option without a default must be set on each machine that turns the module on. Removing an option also removes the values machines set for it in managed.json files; one the settings still use is refused.", func(ctx context.Context, in struct {
+	tool(s, "edit_module", "Change a fleet module's description, and add, replace or remove (null) the options it declares: fleet.modules.<name>.<option>, which machines set like any option and the module's settings use as \"@option:<option>@\". An option without a default must be set on each machine that turns the module on. Removing an option also removes the values machines and other modules set for it in managed.json files; one the settings still use is refused.", func(ctx context.Context, in struct {
 		Name string `json:"name"`
 		core.ModuleEdit
 	}) (core.FleetModule, error) {
 		return svc.EditModule(in.Name, in.ModuleEdit)
 	})
-	tool(s, "delete_module", "Delete a fleet module's folder, and its fleet.modules.<name> settings from every managed.json (each machine's and modules/managed.json), so no machine turns it on there any more. Hand-written Nix that still sets them fails the next check, which names the file.", func(ctx context.Context, in struct {
+	tool(s, "delete_module", "Delete a fleet module's folder, and its fleet.modules.<name> settings from every managed.json (each machine's, modules/managed.json and the other modules'), so nothing turns it on there any more. Hand-written Nix that still sets them fails the next check, which names the file.", func(ctx context.Context, in struct {
 		Name string `json:"name"`
 	}) (core.ModuleDeleted, error) {
 		return svc.DeleteModule(in.Name)
