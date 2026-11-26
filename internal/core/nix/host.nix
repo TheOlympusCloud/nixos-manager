@@ -208,6 +208,23 @@ let
     ) (homeFiles n)
   ) hm;
 
+  # Fleet modules (modules/fleet/<name>/managed.json, managed.nix 7): whether each
+  # is on, where that is set, and each of its options' values and where they are set.
+  fleetModules = lib.mapAttrsToList (n: opts: {
+    name = n;
+    enable = try (config.fleet.modules.${n}.enable == true) false;
+    files = defFiles opts.enable;
+    options = lib.mapAttrs (o: opt: {
+      # null when it has no value: an option without a default that nothing sets.
+      value =
+        let
+          v = config.fleet.modules.${n}.${o};
+        in
+        try (if lib.isDerivation v then null else builtins.deepSeq v v) null;
+      files = defFiles opt;
+    }) (lib.filterAttrs (o: opt: o != "enable" && lib.isOption opt) opts);
+  }) (lib.filterAttrs (_: opts: builtins.isAttrs opts && lib.isOption (opts.enable or null)) (try (options.fleet.modules or { }) { }));
+
   files = lib.filter (f: f != "nixos") (
     lib.unique (
       map (d: d.file) packageDefs
@@ -269,6 +286,7 @@ in
   etc = try (builtins.deepSeq etc etc) null;
   homeFiles = try (builtins.deepSeq homeFileHashes homeFileHashes) null;
   managedFile = if managed == null then null else rel managed;
+  modules = fleetModules;
   # What its modules/managed.nix can apply: 1 before removed packages, overrides and home-manager.
   managedVersion = try (config.nixosManager.version or 1) 1;
   inherit managedPackages;

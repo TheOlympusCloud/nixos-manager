@@ -98,6 +98,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"GET /api/jobs/{id}": auth.ScopeRead, "GET /api/jobs/{id}/events": auth.ScopeRead, "GET /api/deployments": auth.ScopeRead,
 	"GET /api/secrets": auth.ScopeRead, // names and keys, never a value
 	"GET /api/updates": auth.ScopeRead, "GET /api/hosts/{host}/dependencies": auth.ScopeRead, "GET /api/dependencies": auth.ScopeRead,
+	"GET /api/modules": auth.ScopeRead,
 
 	"PUT /api/file": auth.ScopeEdit, "POST /api/mkdir": auth.ScopeEdit, "POST /api/move": auth.ScopeEdit,
 	"POST /api/delete": auth.ScopeEdit, "POST /api/stage": auth.ScopeEdit, "POST /api/unstage": auth.ScopeEdit,
@@ -110,6 +111,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/hosts/{host}/home-configs": auth.ScopeEdit, "POST /api/hosts/{host}/home-config-keys": auth.ScopeEdit, "POST /api/hosts/{host}/keyring": auth.ScopeEdit,
 	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
 	"POST /api/updates/discard": auth.ScopeEdit,
+	"POST /api/modules":         auth.ScopeEdit, "POST /api/modules/{name}": auth.ScopeEdit, "POST /api/modules/{name}/delete": auth.ScopeEdit,
 
 	"POST /api/push": auth.ScopeFull, // a push is a deploy
 	"POST /api/try":  auth.ScopeFull, "POST /api/try/end": auth.ScopeFull,
@@ -268,6 +270,17 @@ func (s *Server) apiMux() *http.ServeMux {
 	}) (any, error) {
 		hash, err := s.Svc.UpdateManagedModule(in.BaseHash, in.Home)
 		return map[string]string{"hash": hash}, err
+	}))
+	// Fleet modules: their packages and settings are edited as any managed file, at hosts/module:<name>.
+	api.HandleFunc("GET /api/modules", get(func(r *http.Request) (any, error) { return s.Svc.ListModules() }))
+	api.HandleFunc("POST /api/modules", post(func(r *http.Request, in struct{ Name, Description string }) (any, error) {
+		return s.Svc.CreateModule(in.Name, in.Description)
+	}))
+	api.HandleFunc("POST /api/modules/{name}", post(func(r *http.Request, in core.ModuleEdit) (any, error) {
+		return s.Svc.EditModule(r.PathValue("name"), in)
+	}))
+	api.HandleFunc("POST /api/modules/{name}/delete", post(func(r *http.Request, _ struct{}) (any, error) {
+		return s.Svc.DeleteModule(r.PathValue("name"))
 	}))
 	api.HandleFunc("POST /api/hosts/{host}/settings", post(func(r *http.Request, in struct {
 		Path     []string

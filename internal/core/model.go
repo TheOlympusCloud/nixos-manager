@@ -43,9 +43,12 @@ type Host struct {
 	// home-manager users and the Nix files next to managed.json; 3 adds
 	// modules/managed.json, set for every machine; 4 packages taken from
 	// another flake input (packageOverrides' from); 5 secrets in homes; 6 app
-	// configs and keyring entries in homes.
-	ManagedVersion int       `json:"managedVersion"`
-	Packages       []Package `json:"packages"`
+	// configs and keyring entries in homes; 7 fleet modules.
+	ManagedVersion int `json:"managedVersion"`
+	// Modules are the fleet modules its managed.nix declares (7): whether each
+	// is on here, and its options' values, with the files that set them.
+	Modules  []HostModule `json:"modules"`
+	Packages []Package    `json:"packages"`
 	// RemovedPackages are defined by some module but taken out of the system by
 	// name (managed.json's removedPackages).
 	RemovedPackages []Package `json:"removedPackages"`
@@ -108,6 +111,23 @@ type CominBranches struct {
 	URL     string `json:"url"`
 	Main    string `json:"main"`
 	Testing string `json:"testing"` // deployed with switch-to-configuration test when on top of Main
+}
+
+// HostModule is a fleet module (modules/fleet/<name>/managed.json) on one machine:
+// fleet.modules.<name>.enable and the files that set it.
+type HostModule struct {
+	Name    string                      `json:"name"`
+	Enable  bool                        `json:"enable"`
+	Files   []string                    `json:"files"`
+	Options map[string]HostModuleOption `json:"options"`
+}
+
+// HostModuleOption is one option of a fleet module on a machine: its value
+// (null without one) and the files that set it; at its default, that is the
+// module's own managed.json, which declares it. Enable is reported the same way.
+type HostModuleOption struct {
+	Value any      `json:"value"`
+	Files []string `json:"files"`
 }
 
 // HostSecret is one of sops.secrets: where the machine finds it and the sops

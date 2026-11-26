@@ -38,6 +38,11 @@ type copyOut struct {
 	Results []core.CopyResult `json:"results"`
 }
 
+// modulesOut wraps the module list: a tool's result is an object.
+type modulesOut struct {
+	Modules []core.FleetModule `json:"modules"`
+}
+
 type jobOut struct {
 	ID      string             `json:"id"`
 	State   string             `json:"state" jsonschema:"queued, running, passed or failed"`
@@ -52,7 +57,7 @@ var toolScope = map[string]auth.Scope{
 	"list_branches": auth.ScopeRead, "fleet_overview": auth.ScopeRead, "fleet_insights": auth.ScopeRead,
 	"deployments": auth.ScopeRead, "compare_option": auth.ScopeRead, "host_details": auth.ScopeRead,
 	"model_diff": auth.ScopeRead, "search_packages": auth.ScopeRead, "search_options": auth.ScopeRead,
-	"list_targets": auth.ScopeRead, "list_secrets": auth.ScopeRead, "machine_dependencies": auth.ScopeRead, "fleet_dependencies": auth.ScopeRead,
+	"list_targets": auth.ScopeRead, "list_secrets": auth.ScopeRead, "list_modules": auth.ScopeRead, "machine_dependencies": auth.ScopeRead, "fleet_dependencies": auth.ScopeRead,
 
 	"write_file": auth.ScopeEdit, "create_folder": auth.ScopeEdit, "move_path": auth.ScopeEdit, "delete_path": auth.ScopeEdit,
 	"stage": auth.ScopeEdit, "unstage": auth.ScopeEdit, "discard": auth.ScopeEdit, "commit": auth.ScopeEdit,
@@ -63,7 +68,8 @@ var toolScope = map[string]auth.Scope{
 	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit, "link_home_secret": auth.ScopeEdit,
 	"set_home_config": auth.ScopeEdit, "set_home_config_key": auth.ScopeEdit, "remove_home_config_key": auth.ScopeEdit,
 	"set_keyring_entry": auth.ScopeEdit, "remove_keyring_entry": auth.ScopeEdit,
-	"copy_to_machines":      auth.ScopeEdit,
+	"copy_to_machines": auth.ScopeEdit,
+	"create_module":    auth.ScopeEdit, "edit_module": auth.ScopeEdit, "delete_module": auth.ScopeEdit,
 	"update_managed_module": auth.ScopeEdit,
 	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
 
@@ -403,11 +409,11 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	})
 
 	type hostPackages struct {
-		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
+		Host     string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json; or module:<name> for a fleet module (list_modules), whose packages and settings apply where a machine turns it on"`
 		Packages []string `json:"packages" jsonschema:"nixpkgs attribute names, e.g. htop or python3Packages.requests"`
 	}
 	type hostPath struct {
-		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
+		Host string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json; or module:<name> for a fleet module (list_modules), whose packages and settings apply where a machine turns it on"`
 		Path []string `json:"path" jsonschema:"option path as separate parts, e.g. [\"services\", \"openssh\", \"enable\"]"`
 	}
 	tool(s, "add_packages", "Install nixpkgs packages on a machine, through its managed.json (hosts/<host>/managed.json).", func(ctx context.Context, in hostPackages) (core.ManagedView, error) {
@@ -417,7 +423,7 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		return svc.RemovePackages(in.Host, in.Packages)
 	})
 	tool(s, "edit_packages", "Change a machine's packages through its managed.json, or with user a home-manager user's home.packages: add and remove attributes of managed.json's own list, and exclude package names (as host_details lists them) wherever they are added, NixOS defaults and hand-written Nix included; restore gives an excluded name back. With host *, for every machine: a name a machine excludes takes a shared package out of it, a shared exclusion never takes out what either file adds, and a user's shared home packages apply where that machine's managed.json has the user's home. host_details lists excluded ones as removedPackages, and corePackages that a working system needs.", func(ctx context.Context, in struct {
-		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
+		Host string `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json; or module:<name> for a fleet module (list_modules), whose packages and settings apply where a machine turns it on"`
 		core.PackageEdit
 	}) (core.ManagedView, error) {
 		return svc.EditPackages(in.Host, in.PackageEdit)
@@ -484,15 +490,15 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 		r, err := svc.Copy(in.Host, in.CopyRequest)
 		return copyOut{r}, err
 	})
-	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, and write modules/managed-configs.py next to it, which it runs on the machines. host_details' managedVersion 6 is needed for set_home_config and set_keyring_entry, 5 for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. With home, write modules/managed-home.nix instead, which applies a standalone home's homes/<name>/managed.json (host home:<name>; packages, removed packages and settings, plus custom.nix and files/<path> linked at ~/<path> next to it) once the home's modules in flake.nix have (import ./modules/managed-home.nix ./homes/<name>/managed.json), or (./homes + \"/<name>/managed.json\") for a name a Nix path cannot hold such as pablo@laptop; fleet_overview's homes show managedFile once it does. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
+	tool(s, "update_managed_module", "Replace modules/managed.nix with this server's version, and write modules/managed-configs.py next to it, which it runs on the machines. host_details' managedVersion 7 is needed for fleet modules (list_modules), 6 for set_home_config and set_keyring_entry, 5 for link_home_secret and home templates, 4 for an override's from, 3 for host * (modules/managed.json), and 2 for removed packages, overrides, home-manager and the files next to managed.json. With home, write modules/managed-home.nix instead, which applies a standalone home's homes/<name>/managed.json (host home:<name>; packages, removed packages and settings, plus custom.nix and files/<path> linked at ~/<path> next to it) once the home's modules in flake.nix have (import ./modules/managed-home.nix ./homes/<name>/managed.json), or (./homes + \"/<name>/managed.json\") for a name a Nix path cannot hold such as pablo@laptop; fleet_overview's homes show managedFile once it does. Pass base_hash from read_file, empty when the file does not exist.", func(ctx context.Context, in struct {
 		BaseHash string `json:"base_hash,omitempty"`
 		Home     bool   `json:"home,omitempty" jsonschema:"write modules/managed-home.nix, for standalone homes"`
 	}) (map[string]string, error) {
 		h, err := svc.UpdateManagedModule(in.BaseHash, in.Home)
 		return map[string]string{"hash": h}, err
 	})
-	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types.", func(ctx context.Context, in struct {
-		Host  string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json"`
+	tool(s, "set_option", "Set a NixOS option on a machine through its managed.json, e.g. path [\"services\",\"openssh\",\"enable\"] with value true. Use search_options to find options and their types. A fleet module is turned on with path [\"fleet\",\"modules\",\"<name>\",\"enable\"] and value true, and its options set per machine at [\"fleet\",\"modules\",\"<name>\",\"<option>\"]; with host module:<name>, the path is a setting of the module itself, where a string \"@option:<option>@\" stands for that option's value on each machine.", func(ctx context.Context, in struct {
+		Host  string   `json:"host" jsonschema:"machine name (nixosConfigurations attribute), or * for every machine: modules/managed.json, which applies below each machine's own managed.json where its managed.nix is version 3; or home:<name> for a standalone home (homeConfigurations.<name>) that loads modules/managed-home.nix, whose file is homes/<name>/managed.json; or module:<name> for a fleet module (list_modules), whose packages and settings apply where a machine turns it on"`
 		Path  []string `json:"path"`
 		Value any      `json:"value" jsonschema:"the JSON value: boolean, number, string, list or object"`
 	}) (core.ManagedView, error) {
@@ -500,6 +506,27 @@ func New(svc *core.Service, version string, scope auth.Scope) *mcp.Server {
 	})
 	tool(s, "unset_option", "Remove an option setting from a machine's managed.json.", func(ctx context.Context, in hostPath) (core.ManagedView, error) {
 		return svc.UnsetOption(in.Host, in.Path, nil)
+	})
+	tool(s, "list_modules", "The fleet modules: modules/fleet/<name>/managed.json, each a NixOS module that bundles packages and settings, which a machine turns on with the option fleet.modules.<name>.enable (managed.nix 7). Each has its description, the options it declares (fleet.modules.<name>.<option>, with type, default and description), its packages and settings, and custom.nix when it has a NixOS module of its own next to it. host_details' modules say where each is on, and each option's value there.", func(ctx context.Context, _ struct{}) (modulesOut, error) {
+		ms, err := svc.ListModules()
+		return modulesOut{ms}, err
+	})
+	tool(s, "create_module", "Create an empty fleet module, modules/fleet/<name>/managed.json, on no machine yet. Then add packages (add_packages) and settings (set_option) with host module:<name>, which edits only a module that exists, declare options with edit_module, and turn it on per machine with set_option [\"fleet\",\"modules\",\"<name>\",\"enable\"] true (host * for every machine).", func(ctx context.Context, in struct {
+		Name        string `json:"name" jsonschema:"letters, digits, _ and -, starting with a letter or _: the folder and fleet.modules.<name>"`
+		Description string `json:"description,omitempty"`
+	}) (core.FleetModule, error) {
+		return svc.CreateModule(in.Name, in.Description)
+	})
+	tool(s, "edit_module", "Change a fleet module's description, and add, replace or remove (null) the options it declares: fleet.modules.<name>.<option>, which machines set like any option and the module's settings use as \"@option:<option>@\". An option without a default must be set on each machine that turns the module on. Removing an option also removes the values machines and other modules set for it in managed.json files; one the settings still use is refused.", func(ctx context.Context, in struct {
+		Name string `json:"name"`
+		core.ModuleEdit
+	}) (core.FleetModule, error) {
+		return svc.EditModule(in.Name, in.ModuleEdit)
+	})
+	tool(s, "delete_module", "Delete a fleet module's folder, and its fleet.modules.<name> settings from every managed.json (each machine's, modules/managed.json and the other modules'), so nothing turns it on there any more. Hand-written Nix that still sets them fails the next check, which names the file.", func(ctx context.Context, in struct {
+		Name string `json:"name"`
+	}) (core.ModuleDeleted, error) {
+		return svc.DeleteModule(in.Name)
 	})
 
 	if svc.Secrets != nil {

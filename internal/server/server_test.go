@@ -848,6 +848,43 @@ func TestHomeConfigsOverHTTP(t *testing.T) {
 	}
 }
 
+func TestFleetModulesOverHTTP(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	var m core.FleetModule
+	if code := e.do(t, "POST", "/api/modules", map[string]any{"name": "media", "description": "Jellyfin"}, &m); code != 200 || m.Path != "modules/fleet/media/managed.json" {
+		t.Fatalf("create: %d %+v", code, m)
+	}
+	if code := e.do(t, "POST", "/api/modules", map[string]any{"name": "media"}, nil); code != 409 {
+		t.Fatalf("create twice: %d", code)
+	}
+	if code := e.do(t, "POST", "/api/modules/media", map[string]any{"options": map[string]any{"port": map[string]any{"type": "port", "default": 8096}}}, &m); code != 200 || m.Options["port"].Type != "port" {
+		t.Fatalf("edit: %d %+v", code, m)
+	}
+	if code := e.do(t, "POST", "/api/modules/media", map[string]any{"options": map[string]any{"bad": map[string]any{"type": "float"}}}, nil); code != 400 {
+		t.Fatalf("bad option type: %d", code)
+	}
+	// Its packages and settings go through the managed file routes, by target.
+	var v core.ManagedView
+	if code := e.do(t, "POST", "/api/hosts/module:media/settings", map[string]any{"path": []string{"networking", "firewall", "allowedTCPPorts"}, "value": []string{"@option:port@"}}, &v); code != 200 {
+		t.Fatalf("module setting: %d %+v", code, v)
+	}
+	if code := e.do(t, "POST", "/api/hosts/web/settings", map[string]any{"path": []string{"fleet", "modules", "media", "enable"}, "value": true}, &v); code != 200 {
+		t.Fatalf("turn on: %d", code)
+	}
+	var ms []core.FleetModule
+	if code := e.do(t, "GET", "/api/modules", nil, &ms); code != 200 || len(ms) != 1 || ms[0].Name != "media" || ms[0].Description != "Jellyfin" {
+		t.Fatalf("list: %d %+v", code, ms)
+	}
+	var d core.ModuleDeleted
+	if code := e.do(t, "POST", "/api/modules/media/delete", map[string]any{}, &d); code != 200 || len(d.Machines) != 1 || d.Machines[0] != "hosts/web/managed.json" {
+		t.Fatalf("delete: %d %+v", code, d)
+	}
+	if code := e.do(t, "POST", "/api/modules/media/delete", map[string]any{}, nil); code != 404 {
+		t.Fatalf("delete twice: %d", code)
+	}
+}
+
 func TestSearchOverHTTP(t *testing.T) {
 	e := fleetEnv(t)
 	e.login(t)

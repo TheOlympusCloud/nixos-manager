@@ -55,6 +55,10 @@ An MCP server gives automation the same features.
   a user's home packages, for every machine in one click, in
   `modules/managed.json`; each machine's own `managed.json` still wins. See
   [Every machine at once](#every-machine-at-once).
+- **Modules**: bundle packages and settings (a media server, a desktop, a
+  build machine) as a NixOS module of their own, turn it on machine by machine
+  with one switch, and give it options each machine sets its own way, such as
+  a port. See [Fleet modules](#fleet-modules).
 - **home-manager**: per machine and user, turn it on, add and remove packages,
   set any home-manager option from a search, keep dotfiles, put secrets in
   `~` (`.netrc`, a token in `gh`'s or `rclone`'s config) without them reaching
@@ -1273,9 +1277,10 @@ Fleet tools: `fleet_overview`, `fleet_insights`, `host_details`, `model_diff`,
 `remove_packages`, `edit_packages` (any package removed by name, and a
 home-manager user's packages), `set_package_override`, `set_home_manager`,
 `link_home_secret`, `set_home_config`, `set_home_config_key`, `remove_home_config_key`, `set_keyring_entry`,
-`remove_keyring_entry`, `copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`; the
+`remove_keyring_entry`, `copy_to_machines`, `update_managed_module`, `set_option`, `unset_option`, `create_machine`,
+`list_modules`, `create_module`, `edit_module`, `delete_module`; the
 package and option tools take host `*` for every machine
-(`modules/managed.json`). File and git
+(`modules/managed.json`), and `module:<name>` for a [fleet module](#fleet-modules). File and git
 tools: `list_files`, `read_file`, `write_file`, `create_folder`, `move_path`,
 `delete_path`, `format_nix`, `status`, `diff`, `stage`, `unstage`, `discard`,
 `commit`, `log`, `show_commit`, `read_file_at`, `restore_file`,
@@ -1391,7 +1396,9 @@ hand-written file, or a click here.
   `removedPackages` in `managed.json`. The Nix that adds it stays as it is, and
   **Restore** gives it back. A package NixOS needs for a working system (`bash`,
   `coreutils`…) asks before it goes. What `managed.json` itself installs is
-  never taken out by a removed name, and adding a removed name back clears it.
+  never taken out by a removed name, nor is what a [fleet module](#fleet-modules)
+  the machine has on installs (turn the module off instead), and adding a
+  removed name back clears it.
 - **Replace** removes it the same way and installs another package you pick,
   even one of the same name: replacing `nodejs_20` with `nodejs_24` keeps
   `nodejs_24`.
@@ -1471,6 +1478,58 @@ The Packages tab and the Packages matrix show what comes from
 `home/`) are not read: those stay per machine. MCP's `add_packages`,
 `remove_packages`, `edit_packages`, `set_package_override`, `set_option` and
 `unset_option` take host `*` for the same file.
+
+### Fleet modules
+
+**Modules** in the navigation lists the fleet's modules; **New module** makes
+one. A module is `modules/fleet/<name>/managed.json`, which `modules/managed.nix`
+(7) turns into a real NixOS module: an option `fleet.modules.<name>.enable`, an
+option `fleet.modules.<name>.<option>` for each option it declares, and, under
+`lib.mkIf enable`, its packages and settings. Its page has:
+
+- **Machines**: a switch per machine, and one for every machine
+  (`modules/managed.json`), which a machine can still turn off. A switch writes
+  `fleet.modules.<name>.enable` into that machine's `managed.json`, so it is
+  checked, committed and pushed like any other change. Each machine's options
+  show next to it, with where they are set.
+- **Options**: name, type (`bool`, `int`, `port`, `str`, `listOf str` or
+  `anything`), default and description. An option without a default must be
+  set by every machine that turns the module on; the check fails, naming it,
+  where one does not. Removing an option also removes the values machines and
+  other modules set for it; one the settings still use cannot be removed.
+- **Packages**: installed where the module is on. A name the machine removes
+  (`removedPackages`) does not take them out, as with the machine's own.
+- **Settings**: NixOS options the module sets, written as `option = value`
+  (JSON, or plain text). `"@option:port@"` as a value is the option `port`'s
+  value on each machine; inside a longer text (`"http://0.0.0.0:@option:port@"`),
+  its text. Settings apply as hand-written Nix does, at the default priority:
+  lists and sets merge with the machine's hand-written ones (a module's
+  firewall port joins them), and two different values of one option fail the
+  check with both files named. A value set by clicking, on the machine or for
+  every machine, wins whole: a list such as `networking.firewall.allowedTCPPorts`
+  set there replaces the module's, so the module's ports are not added. Set
+  such a list in Nix, or in a module, to merge it.
+- **Add Nix** opens `modules/fleet/<name>/custom.nix`, a NixOS module loaded
+  with it on every machine, for what JSON cannot say (a package as a value, a
+  `let`); keep its settings under `lib.mkIf config.fleet.modules.<name>.enable`,
+  as the file it starts from does.
+- **Delete** removes the folder and every `fleet.modules.<name>` setting in the
+  machines' `managed.json`, `modules/managed.json` and the other modules (one
+  can turn another on). Hand-written Nix that
+  still sets one fails the next check, which names the file.
+
+A machine's **Modules** tab has the same switches and a field per option: a
+value saved there goes into the machine's `managed.json` and **Reset** takes it
+out, back to the default or to what the fleet sets. The options are ordinary
+NixOS options, so search, option forms, **Compare** and hand-written Nix
+(`fleet.modules.media.enable = true;`) work on them too. A machine needs
+`managed.nix` 7 for modules; one with an older file says so and offers
+**Update managed.nix**. A module's `managed.json` has no homes, removed or
+customised packages: those stay per machine. MCP: `list_modules`,
+`create_module`, `edit_module`, `delete_module`; `add_packages`,
+`remove_packages`, `set_option` and `unset_option` with host `module:<name>`
+for its packages and settings, and `set_option` with
+`["fleet","modules","<name>","enable"]` to turn it on.
 
 ### Homes with home-manager
 
@@ -1682,8 +1741,8 @@ copied. To change something on every machine for good, use
 
 Removing and customising packages, and homes, need a `modules/managed.nix` with
 `nixosManager.version = 2`, Every machine needs 3, a package from another
-nixpkgs 4, secrets in homes 5, and app settings and keyring entries in homes
-this release's (6). A fleet
+nixpkgs 4, secrets in homes 5, app settings and keyring entries in homes 6,
+and fleet modules this release's (7). A fleet
 made by an earlier nixos-manager still has an older one: **Health** and the
 machine's Packages and Home tabs say so and offer **Update managed.nix**, which writes this
 release's file, and `modules/managed-configs.py` next to it, for you to review in Changes. Changes you made to them by hand are replaced,

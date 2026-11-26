@@ -26,6 +26,7 @@
   import MachinePage from './views/MachinePage.svelte'
   import MachinesView from './views/MachinesView.svelte'
   import MatrixView from './views/MatrixView.svelte'
+  import ModulesView from './views/ModulesView.svelte'
   import OptionsView from './views/OptionsView.svelte'
   import SettingsView from './views/SettingsView.svelte'
 
@@ -81,7 +82,7 @@
     syncOpenTabs()
   }
 
-  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', o: 'options', a: 'health', d: 'deployments', n: 'dependencies', i: 'inputs', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
+  const goKeys: Record<string, View> = { f: 'fleet', m: 'machines', p: 'packages', s: 'services', u: 'modules', o: 'options', a: 'health', d: 'deployments', n: 'dependencies', i: 'inputs', c: 'changes', h: 'history', e: 'code', ',': 'settings' }
   let pendingG = 0
 
   function onKey(e: KeyboardEvent) {
@@ -153,6 +154,8 @@
           {/if}
         {:else if route.view === 'packages' || route.view === 'services'}
           {#key route.view}<MatrixView kind={route.view} />{/key}
+        {:else if route.view === 'modules'}
+          <ModulesView name={route.parts[0]} />
         {:else if route.view === 'options'}
           <OptionsView />
         {:else if route.view === 'health'}

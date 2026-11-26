@@ -1,6 +1,7 @@
 // The evaluated fleet (stale while a new evaluation runs) and editing by clicking.
-import { ApiError, api, type FeatureGroup, type Host, type MachineCreated, type MachineSpec, type Managed, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
+import { ApiError, api, type FeatureGroup, type FleetModule, type Host, type MachineCreated, type MachineSpec, type Managed, type ModuleOption, type OptionValues, type PackageEdit, type PackageOverride, type SearchReply } from './api'
 import type { ConfigFormat, KeyringEntry } from './apps'
+import { MODULE, machinesWith } from './modules'
 import { fillPath, optionSegments, pathName } from './options'
 import { HOME, HOME_MODULE, SHARED, SHARED_FILE, copySummary } from './packages'
 import { codeLink, go } from './router.svelte'
@@ -18,6 +19,8 @@ export const fleet = $state({
   managed: {} as Record<string, Managed>,
   /** Machines created by the wizard in this session, until the evaluation lists them. */
   created: {} as Record<string, MachineCreated>,
+  /** The fleet modules (modules/fleet/), once read; null before. */
+  modules: null as FleetModule[] | null,
 })
 
 /** Resolves with the job's final state ('' when the stream broke) once it finishes. */
@@ -100,8 +103,9 @@ export const hostByName = (name: string): Host | undefined => fleet.model?.hosts
 export const homeByTarget = (target: string) => (target.startsWith(HOME) ? fleet.model?.homes.find((h) => HOME + h.name === target) : undefined)
 export const healthy = () => (fleet.model?.hosts ?? []).filter((h) => !h.error)
 
-/** A machine's name in messages, or "every machine" for SHARED (modules/managed.json). */
-export const targetName = (host: string) => (host === SHARED ? 'every machine' : host.startsWith(HOME) ? host.slice(HOME.length) : host)
+/** A machine's name in messages, "every machine" for SHARED (modules/managed.json), or "the module <name>". */
+export const targetName = (host: string) =>
+  host === SHARED ? 'every machine' : host.startsWith(HOME) ? host.slice(HOME.length) : host.startsWith(MODULE) ? `the module ${host.slice(MODULE.length)}` : host
 const fileOf = (host: string) => (host === SHARED ? SHARED_FILE : `${targetName(host)}'s managed file`)
 
 const loadingManaged = new Map<string, Promise<void>>()
@@ -148,7 +152,12 @@ async function writeNow(host: string, fn: () => Promise<Managed>, done: string, 
     } else report(e, `Could not change ${targetName(host)}`)
     return false
   }
-  const changed = host === SHARED ? (fleet.model?.hosts ?? []).filter((h) => h.managedFile).map((h) => h.name) : [host]
+  const changed =
+    host === SHARED
+      ? (fleet.model?.hosts ?? []).filter((h) => h.managedFile).map((h) => h.name)
+      : host.startsWith(MODULE)
+        ? machinesWith(fleet.model?.hosts ?? [], host.slice(MODULE.length))
+        : [host]
   for (const h of changed) if (!fleet.pending.includes(h)) fleet.pending.push(h)
   toast(done, 'ok', undefined, action ?? { label: 'View changes', run: () => go('#/changes') })
   await refreshStatus() // the working copy changed: this also re-evaluates the model
@@ -296,7 +305,7 @@ export async function updateManagedModule(home = false): Promise<boolean> {
       ? {
           title: `Update ${path}?`,
           message:
-            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users with their secrets, app settings and keyring entries, the Nix files next to managed.json and modules/managed.json, set for every machine. modules/managed-configs.py, which writes the app settings on the machines, is written next to it. Changes made to them by hand are replaced too: the diff shows in Changes before you commit.",
+            "It is replaced with this nixos-manager's version, which also applies removed and changed packages, home-manager users with their secrets, app settings and keyring entries, the Nix files next to managed.json, modules/managed.json, set for every machine, and the fleet modules in modules/fleet/. modules/managed-configs.py, which writes the app settings on the machines, is written next to it. Changes made to them by hand are replaced too: the diff shows in Changes before you commit.",
           ok: 'Update it',
         }
       : {
@@ -329,6 +338,65 @@ export const setOption = (host: string, path: string[], value: unknown, done = `
   write(host, async () => api.editSetting(host, { path, value, base_hash: await seenHash(host) }), done)
 export const unsetOption = (host: string, path: string[], done = `Reset ${pathName(path)} on ${targetName(host)}`) =>
   write(host, async () => api.editSetting(host, { path, unset: true, base_hash: await seenHash(host) }), done)
+
+/** Reads the fleet modules; callers asking while a read is in flight share it. */
+let loadingModules: Promise<void> | null = null
+export function loadModules(): Promise<void> {
+  loadingModules ??= api
+    .modules()
+    .then(
+      (ms) => void (fleet.modules = ms),
+      (e) => report(e, 'Could not read the fleet modules'),
+    )
+    .finally(() => (loadingModules = null))
+  return loadingModules
+}
+
+/** Creates an empty module, on no machine yet; resolves whether it did. */
+export async function createModule(name: string, description: string): Promise<boolean> {
+  try {
+    fleet.managed[MODULE + name] = await api.createModule(name, description)
+  } catch (e) {
+    return report(e, `Could not create the module ${name}`), false
+  }
+  toast(`Created the module ${name}: add packages and settings, then turn it on where you want it`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
+  await Promise.all([loadModules(), refreshStatus()])
+  return true
+}
+
+/** Changes a module's description, or adds, replaces or (null) removes options; machines and other modules lose the values of a removed one. */
+export function editModule(name: string, edit: { description?: string; options?: Record<string, ModuleOption | null> }, done: string): Promise<boolean> {
+  const target = MODULE + name
+  return write(target, async () => api.editModule(name, { ...edit, base_hash: await seenHash(target) }), done).then(async (ok) => {
+    if (ok) await Promise.all([loadModules(), Object.values(edit.options ?? {}).includes(null) ? reloadManaged(target) : null])
+    return ok
+  })
+}
+/** Reads again every managed file this tab holds (but skip), after an edit that changed some of them on the server. */
+const reloadManaged = (skip = '') => Promise.all(Object.keys(fleet.managed).filter((k) => k !== skip).map((k) => loadManaged(k)))
+
+/** Deletes a module once confirmed, and its settings in every managed.json. */
+export async function deleteModule(name: string): Promise<boolean> {
+  const on = machinesWith(fleet.model?.hosts ?? [], name)
+  const ok = await confirmBox({
+    title: `Delete the module ${name}?`,
+    message: `Its folder, modules/fleet/${name}/, goes, and every managed.json stops turning it on or setting its options${on.length ? ` (${list(on)} ${on.length > 1 ? 'have' : 'has'} it on now)` : ''}. Hand-written Nix that still uses it fails the next check. Review it all in Changes before you commit.`,
+    ok: 'Delete it',
+    danger: true,
+  })
+  if (!ok) return false
+  let r
+  try {
+    r = await api.deleteModule(name)
+  } catch (e) {
+    return report(e, `Could not delete the module ${name}`), false
+  }
+  delete fleet.managed[MODULE + name]
+  for (const h of on) if (!fleet.pending.includes(h)) fleet.pending.push(h)
+  toast(r.machines.length ? `Deleted the module ${name}, and its settings in ${list(r.machines)}` : `Deleted the module ${name}`, 'ok', undefined, { label: 'View changes', run: () => go('#/changes') })
+  await Promise.all([loadModules(), refreshStatus(), r.machines.length ? reloadManaged() : null])
+  return true
+}
 
 /** `services` + `desktopManager.plasma6` → services.desktopManager.plasma6.enable */
 export const enablePath = (group: FeatureGroup | string, name: string) => [group, ...fillPath(optionSegments(name), []), 'enable']

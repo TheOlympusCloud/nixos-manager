@@ -9,6 +9,7 @@
   import OverviewTab from '../components/machine/OverviewTab.svelte'
   import PackagesTab from '../components/machine/PackagesTab.svelte'
   import ServicesTab from '../components/machine/ServicesTab.svelte'
+  import ModulesTab from '../components/machine/ModulesTab.svelte'
   import TurnOnEditing from '../components/machine/TurnOnEditing.svelte'
   import DeployBadge from '../components/deployments/DeployBadge.svelte'
   import { deployOf } from '../lib/deployments.svelte'
@@ -36,6 +37,7 @@
           { id: 'packages', label: 'Packages', n: host.packages.length },
           { id: 'dependencies', label: 'Dependencies' },
           { id: 'services', label: 'Services & programs', n: host.features.length },
+          { id: 'modules', label: 'Modules', n: host.modules?.filter((m) => m.enable).length },
           { id: 'users', label: 'Users', n: host.users.length },
           { id: 'home', label: 'Home', n: host.users.filter((u) => u.home).length },
           { id: 'network', label: 'Network & storage' },
@@ -159,6 +161,8 @@
               <DependenciesTab {host} />
             {:else if tab === 'services'}
               <ServicesTab {host} />
+            {:else if tab === 'modules'}
+              <ModulesTab {host} />
             {:else if tab === 'users'}
               <UsersTab {host} />
             {:else if tab === 'home'}

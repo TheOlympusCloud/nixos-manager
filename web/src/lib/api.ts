@@ -83,8 +83,10 @@ export type Host = {
   managedFile: string | null
   /** managed.json attribute -> package name (nodejs_22 -> nodejs), to remove a model package by attribute. */
   managedPackages?: Record<string, string>
-  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager; 3 adds modules/managed.json; 4 packages from another nixpkgs. */
+  /** What its modules/managed.nix applies: 1 (older) knows only packages and settings; 2 adds removed packages, overrides and home-manager; 3 adds modules/managed.json; 4 packages from another nixpkgs; 5 secrets in homes; 6 app configs; 7 fleet modules. */
   managedVersion?: number
+  /** The fleet modules its managed.nix declares (7): on or off, and each option's value with the files that set it. */
+  modules?: HostModule[]
   packages: Package[]
   /** Packages some module adds but managed.json's removedPackages takes out. */
   removedPackages?: Package[]
@@ -103,6 +105,13 @@ export type Host = {
   secrets?: HostSecret[] | null
   error?: string | null
 }
+/** A fleet module on one machine. files: where enable is set; at its default, the module's own managed.json. */
+export type HostModule = { name: string; enable: boolean; files: string[]; options: Record<string, { value: unknown; files: string[] }> }
+/** An option a fleet module declares, fleet.modules.<name>.<option>; without a default, each machine that turns it on sets it. */
+export type ModuleOption = { type: ModuleOptionType; default?: unknown; description?: string }
+export type ModuleOptionType = 'bool' | 'int' | 'port' | 'str' | 'listOf str' | 'anything'
+/** A fleet module: modules/fleet/<name>/managed.json, edited as the target module:<name>. custom: its custom.nix exists. */
+export type FleetModule = Managed & { name: string; custom: boolean; error?: string }
 /** One of sops.secrets: where the machine finds it and the sops file it comes from ("nixos" outside the flake). */
 export type HostSecret = { name: string; path: string; file: string; owner: string; group: string; mode: string }
 export type Checks = {
@@ -251,6 +260,9 @@ export type Managed = {
   settings: Record<string, unknown>
   /** A standalone home's app configs, without secrets. */
   configs?: Record<string, HomeConfig>
+  /** A fleet module's (module:<name>): what it is, and the options it declares. */
+  description?: string
+  options?: Record<string, ModuleOption>
 }
 /** user: a machine's home-manager user (none for a standalone home); remove: no longer written. */
 export type HomeConfigEdit = { user?: string; path: string; format: ConfigFormat; mode?: 'merge' | 'seed'; process?: string; lock?: string } | { user?: string; path: string; remove: true }
@@ -416,6 +428,13 @@ export const api = {
   /** Writes this server's modules/managed.nix (home: modules/managed-home.nix) over the repository's (base_hash '' when it has none). */
   updateManagedModule: (base_hash: string, home = false) => post<{ hash: string }>('/api/managed-module', { base_hash, home }),
   editSetting: (host: string, edit: SettingEdit) => post<Managed>(`/api/hosts/${encodeURIComponent(host)}/settings`, edit),
+  modules: () => get<FleetModule[]>('/api/modules'),
+  createModule: (name: string, description: string) => post<FleetModule>('/api/modules', { name, description }),
+  /** options: an option's declaration, or null to remove it (and what machines set for it). 409 when it changed since base_hash. */
+  editModule: (name: string, edit: { description?: string; options?: Record<string, ModuleOption | null>; base_hash?: string }) =>
+    post<FleetModule>(`/api/modules/${encodeURIComponent(name)}`, edit),
+  /** Also removes fleet.modules.<name> from every managed.json; machines lists those files. */
+  deleteModule: (name: string) => post<{ path: string; machines: string[] }>(`/api/modules/${encodeURIComponent(name)}/delete`, {}),
   searchPackages: (q: string, limit = 50) => get<SearchReply<PackageHit>>('/api/search/packages', { q, limit }),
   searchOptions: (host: string, q: string, opts: { limit?: number; exact?: boolean } = {}) =>
     get<SearchReply<OptionInfo>>('/api/search/options', { host, q, limit: opts.limit, exact: opts.exact ? 1 : undefined }),

@@ -2,7 +2,7 @@
 
 import { HOME } from './packages'
 
-export const views = ['fleet', 'machines', 'packages', 'services', 'options', 'health', 'deployments', 'dependencies', 'inputs', 'changes', 'history', 'code', 'settings', 'intro'] as const
+export const views = ['fleet', 'machines', 'packages', 'services', 'modules', 'options', 'health', 'deployments', 'dependencies', 'inputs', 'changes', 'history', 'code', 'settings', 'intro'] as const
 export type View = (typeof views)[number]
 export type Route = { view: View; parts: string[]; query: Record<string, string> }
 

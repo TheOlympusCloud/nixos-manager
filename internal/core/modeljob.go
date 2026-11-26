@@ -419,6 +419,19 @@ func normalizeHost(h Host) Host {
 	if h.ManagedPackages == nil {
 		h.ManagedPackages = map[string]string{}
 	}
+	h.Modules = orEmpty(h.Modules)
+	slices.SortFunc(h.Modules, func(a, b HostModule) int { return strings.Compare(a.Name, b.Name) })
+	for i := range h.Modules {
+		m := &h.Modules[i]
+		m.Files = orEmpty(m.Files)
+		if m.Options == nil {
+			m.Options = map[string]HostModuleOption{}
+		}
+		for o, v := range m.Options {
+			v.Files = orEmpty(v.Files)
+			m.Options[o] = v
+		}
+	}
 	slices.SortFunc(h.Packages, func(a, b Package) int { return strings.Compare(a.Name, b.Name) })
 	slices.SortFunc(h.Features, func(a, b Feature) int {
 		return strings.Compare(a.Group+"."+a.Name, b.Group+"."+b.Name)
