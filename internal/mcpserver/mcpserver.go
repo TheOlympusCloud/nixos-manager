@@ -68,8 +68,8 @@ var toolScope = map[string]auth.Scope{
 	"edit_packages": auth.ScopeEdit, "set_package_override": auth.ScopeEdit, "set_home_manager": auth.ScopeEdit, "link_home_secret": auth.ScopeEdit,
 	"set_home_config": auth.ScopeEdit, "set_home_config_key": auth.ScopeEdit, "remove_home_config_key": auth.ScopeEdit,
 	"set_keyring_entry": auth.ScopeEdit, "remove_keyring_entry": auth.ScopeEdit,
-	"copy_to_machines":      auth.ScopeEdit,
-	"create_module":         auth.ScopeEdit, "edit_module": auth.ScopeEdit, "delete_module": auth.ScopeEdit,
+	"copy_to_machines": auth.ScopeEdit,
+	"create_module":    auth.ScopeEdit, "edit_module": auth.ScopeEdit, "delete_module": auth.ScopeEdit,
 	"update_managed_module": auth.ScopeEdit,
 	"flake_lock":            auth.ScopeEdit, "flake_update": auth.ScopeEdit, "set_secret": auth.ScopeEdit, "delete_secret": auth.ScopeEdit,
 

@@ -111,7 +111,7 @@ var tokenRoutes = map[string]auth.Scope{
 	"POST /api/hosts/{host}/home-configs": auth.ScopeEdit, "POST /api/hosts/{host}/home-config-keys": auth.ScopeEdit, "POST /api/hosts/{host}/keyring": auth.ScopeEdit,
 	"PUT /api/secrets": auth.ScopeEdit, "POST /api/secrets/delete": auth.ScopeEdit, "POST /api/secrets/reencrypt": auth.ScopeEdit,
 	"POST /api/updates/discard": auth.ScopeEdit,
-	"POST /api/modules": auth.ScopeEdit, "POST /api/modules/{name}": auth.ScopeEdit, "POST /api/modules/{name}/delete": auth.ScopeEdit,
+	"POST /api/modules":         auth.ScopeEdit, "POST /api/modules/{name}": auth.ScopeEdit, "POST /api/modules/{name}/delete": auth.ScopeEdit,
 
 	"POST /api/push": auth.ScopeFull, // a push is a deploy
 	"POST /api/try":  auth.ScopeFull, "POST /api/try/end": auth.ScopeFull,
