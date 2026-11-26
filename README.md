@@ -1396,7 +1396,9 @@ hand-written file, or a click here.
   `removedPackages` in `managed.json`. The Nix that adds it stays as it is, and
   **Restore** gives it back. A package NixOS needs for a working system (`bash`,
   `coreutils`…) asks before it goes. What `managed.json` itself installs is
-  never taken out by a removed name, and adding a removed name back clears it.
+  never taken out by a removed name, nor is what a [fleet module](#fleet-modules)
+  the machine has on installs (turn the module off instead), and adding a
+  removed name back clears it.
 - **Replace** removes it the same way and installs another package you pick,
   even one of the same name: replacing `nodejs_20` with `nodejs_24` keeps
   `nodejs_24`.
@@ -1493,23 +1495,27 @@ option `fleet.modules.<name>.<option>` for each option it declares, and, under
 - **Options**: name, type (`bool`, `int`, `port`, `str`, `listOf str` or
   `anything`), default and description. An option without a default must be
   set by every machine that turns the module on; the check fails, naming it,
-  where one does not. Removing an option also removes the values machines set
-  for it; one the settings still use cannot be removed.
+  where one does not. Removing an option also removes the values machines and
+  other modules set for it; one the settings still use cannot be removed.
 - **Packages**: installed where the module is on. A name the machine removes
   (`removedPackages`) does not take them out, as with the machine's own.
 - **Settings**: NixOS options the module sets, written as `option = value`
   (JSON, or plain text). `"@option:port@"` as a value is the option `port`'s
   value on each machine; inside a longer text (`"http://0.0.0.0:@option:port@"`),
   its text. Settings apply as hand-written Nix does, at the default priority:
-  lists and sets merge with the machine's own (a module's firewall port joins
-  the machine's), a value set on the machine wins, and two different values of
-  one option fail the check with both files named.
+  lists and sets merge with the machine's hand-written ones (a module's
+  firewall port joins them), and two different values of one option fail the
+  check with both files named. A value set by clicking, on the machine or for
+  every machine, wins whole: a list such as `networking.firewall.allowedTCPPorts`
+  set there replaces the module's, so the module's ports are not added. Set
+  such a list in Nix, or in a module, to merge it.
 - **Add Nix** opens `modules/fleet/<name>/custom.nix`, a NixOS module loaded
   with it on every machine, for what JSON cannot say (a package as a value, a
   `let`); keep its settings under `lib.mkIf config.fleet.modules.<name>.enable`,
   as the file it starts from does.
 - **Delete** removes the folder and every `fleet.modules.<name>` setting in the
-  machines' `managed.json` and `modules/managed.json`. Hand-written Nix that
+  machines' `managed.json`, `modules/managed.json` and the other modules (one
+  can turn another on). Hand-written Nix that
   still sets one fails the next check, which names the file.
 
 A machine's **Modules** tab has the same switches and a field per option: a
