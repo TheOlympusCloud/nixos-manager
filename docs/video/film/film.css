@@ -71,3 +71,69 @@ body {
 .c-acc2 {
   color: var(--accent-fill);
 }
+
+/* Beside the scene, outside the grid: the status line, dither transitions. Above the stage. */
+#amb {
+  position: absolute;
+  inset: 0;
+  z-index: 100; /* above the frames' own layers */
+  pointer-events: none;
+}
+#amb > * {
+  position: absolute;
+  margin: 0;
+  white-space: pre;
+}
+.status {
+  color: var(--fg-faint);
+}
+.status s {
+  text-decoration: none;
+  color: var(--line);
+}
+.dz {
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+}
+.dz-mask {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--bg);
+}
+.dz-band {
+  position: absolute;
+  top: 0;
+  margin: 0;
+  white-space: pre;
+}
+/* A label the narration is talking about: the console's selected-row colour, after a flash. */
+.lit {
+  color: var(--fg-strong) !important;
+  background: var(--bg-active);
+}
+/* Outlines on captures, exact to the pixel (marks, and what the narration names). */
+.pic .hl {
+  position: absolute;
+  box-sizing: border-box;
+  border: 3px solid var(--yellow);
+  box-shadow: 0 0 0 2px rgba(6, 8, 13, 0.7);
+}
+.pic .hl-accent {
+  border-color: var(--accent);
+}
+.pic .hl-ok {
+  border-color: var(--green);
+}
+.pic .hl-err {
+  border-color: var(--red);
+}
+.pic .hl-follow {
+  border: 2px solid var(--accent);
+  background: rgba(126, 186, 228, 0.1);
+}
+.sheen {
+  background: var(--bg);
+  font-weight: 700;
+}

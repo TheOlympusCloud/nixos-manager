@@ -23,7 +23,7 @@ REPO = HERE.parents[1]
 BUILD = HERE / "build"
 OUT = BUILD / "scenes"
 TICK = 0.08  # seconds: lib/ascii.ts TICK
-CARD = 2.4  # seconds of chapter card before a chapter's first scene speaks
+CARD = 2.8  # seconds of chapter card (dither in, title, dither out) before a chapter's first scene speaks
 OPENING = 4.0  # seconds of title before the first words of the video
 PAD = 1.0  # seconds held after a scene's narration
 VIEW = {"width": 1920, "height": 1080}
@@ -50,6 +50,39 @@ def intro_for(scene, scenes):
     return None
 
 
+STILL = 5.0  # seconds: the longest the picture may stay unchanged
+
+
+def still(hashes):
+    """Stretches where nothing on screen changes for longer than STILL seconds, as layout problems."""
+    out, start = [], 0
+    for i in range(1, len(hashes) + 1):
+        if i == len(hashes) or hashes[i] != hashes[start]:
+            if (i - start) * TICK > STILL:
+                out.append(f"still for {(i - start) * TICK:.1f} s from {start * TICK:.1f} s")
+            start = i
+    return out
+
+
+def ticks_of(scene, scenes):
+    """A scene's length in ticks, and when its voice starts (seconds): after its intro, if it has one."""
+    intro = intro_for(scene, scenes)
+    t0 = {None: 0.0, "opening": OPENING, "chapter": CARD}[intro and intro["kind"]]
+    audio = json.loads((BUILD / "audio" / f"{scene['id']}.json").read_text())
+    return math.ceil((t0 + audio["duration"] + PAD) / TICK), t0
+
+
+def live_for(scene, scenes, ticks):
+    """Where the scene sits in its chapter, for the status line, and how it leaves (see kit.ts onStart)."""
+    chapter = [s for s in scenes if s["chapter"] == scene["chapter"]]
+    lengths = [ticks_of(s, scenes)[0] * TICK for s in chapter]
+    k = chapter.index(scene)
+    i = scenes.index(scene)
+    nxt = scenes[i + 1] if i + 1 < len(scenes) else None
+    outro = None if nxt is None else "body" if intro_for(nxt, scenes) is None else "all"
+    return {"at": sum(lengths[:k]), "len": sum(lengths), "end": ticks, "outro": outro}
+
+
 def render(sid, check=False):
     from playwright.sync_api import sync_playwright
 
@@ -57,8 +90,8 @@ def render(sid, check=False):
     scene = next(s for s in scenes if s["id"] == sid)
     audio = json.loads((BUILD / "audio" / f"{sid}.json").read_text())
     intro = intro_for(scene, scenes)
-    t0 = {None: 0.0, "opening": OPENING, "chapter": CARD}[intro and intro["kind"]]
-    ticks = math.ceil((t0 + audio["duration"] + PAD) / TICK)
+    ticks, t0 = ticks_of(scene, scenes)
+    live = live_for(scene, scenes, ticks)
     frames = BUILD / "frames" / sid
     if not check:
         shutil.rmtree(frames, ignore_errors=True)
@@ -71,31 +104,37 @@ def render(sid, check=False):
         page.goto((HERE / "film/film.html").as_uri() + "?manual")
         page.evaluate("document.fonts.ready.then(() => 0)")
         info = {"n": scene["chapter"], "chapter": scene["chapter_title"], "title": scene["title"]}
-        page.evaluate("([sid, words, t0, intro, info]) => film.start(sid, words, t0, intro, info)",
-                      [sid, audio["words"], t0, intro, info])
-        runs, last = [], None
+        page.evaluate("([sid, words, t0, intro, info, live]) => film.start(sid, words, t0, intro, info, live)",
+                      [sid, audio["words"], t0, intro, info, live])
+        runs, last, content = [], None, []
         if check:  # the layout checks only: no images, no video
-            page.evaluate(f"(async () => {{ for (let i = 0; i < {ticks}; i++) await film.step() }})()")
-            problems = page.evaluate("film.problems()")
+            hashes = page.evaluate(f"(async () => {{ const h = []; for (let i = 0; i < {ticks}; i++) h.push(await film.step()); return h }})()")
+            problems = page.evaluate("film.problems()") + still([h.split(":")[1] for h in hashes])
             browser.close()
             return sid, problems
         for i in range(ticks):
             h = page.evaluate("film.step()")
+            content.append(h.split(":")[1])
             if h != last:
                 page.screenshot(path=str(frames / f"{i:06d}.png"))
                 runs.append([f"{i:06d}.png", 0])
                 last = h
             runs[-1][1] += 1
-        problems = page.evaluate("film.problems()")
+        problems = page.evaluate("film.problems()") + still(content)
         steps = page.evaluate("film.steps()") + [ticks - 1]
+        events = page.evaluate("film.events()")
         browser.close()
-    # One frame per step, once its animations have settled (about 9 ticks), for the layout review.
+    # The scene's sound cues, in seconds from its start, for audio.py.
+    cues = BUILD / "cues"
+    cues.mkdir(parents=True, exist_ok=True)
+    (cues / f"{sid}.json").write_text(json.dumps([{"t": round(e["t"] * TICK, 3), "k": e["k"]} for e in events]))
+    # One frame per step, once its animations have settled (an outline takes about 11 ticks), for the review.
     review = BUILD / "steps" / sid
     shutil.rmtree(review, ignore_errors=True)
     review.mkdir(parents=True)
     starts = [int(f[:6]) for f, _ in runs]
     for k, t in enumerate(steps):
-        at = min(t + 9, ticks - 1)
+        at = min(t + 12, ticks - 1)
         f = runs[max(i for i, st in enumerate(starts) if st <= at)][0]
         shutil.copy(frames / f, review / f"{k:02d}.png")
     lst = frames / "list.txt"

@@ -1,67 +1,129 @@
 // Part 1: how Nix and NixOS work (chapters 0 to 10).
-import { scene, A, type El, type Stage } from './film'
+import { scene, A, ROWS, type El, type Stage } from './film'
 import { countAt } from '../../../web/src/lib/motion'
-import { COLS, PIC, caption, card, code, harrow, header, larrow, len, list, machine, mid, point, storePath, uarrow, uncaption, varrow } from './kit'
+import { COLS, PIC, caption, card, code, dither, harrow, header, larrow, len, list, machine, mid, point, storePath, uarrow, uncaption, varrow } from './kit'
+
+const HOST_SRC = `{
+  environment.systemPackages = [ pkgs.htop pkgs.git ];
+  services.jellyfin.enable = true;
+  users.users.pablo.isNormalUser = true;
+}`
 
 scene('S0.1', async (s) => {
   header(s)
-  const xs = [12, 59, 106]
+  // Three machines power on, each with an uptime that keeps counting: years go by.
+  const xs = [8, 58, 108]
   const names = ['homeserver', 'pi', 'workstation']
-  const say = ['home server', 'raspberry', 'desktop']
-  const hosts = []
+  const hosts: ReturnType<typeof machine>[] = []
   for (let i = 0; i < 3; i++) {
-    await s.until(say[i])
-    hosts.push(machine(s, xs[i], 5, names[i], { lines: ['Debian 12', 'set up by hand'], w: 28 }))
+    const blank = Array(5).fill(' '.repeat(26))
+    hosts.push(machine(s, xs[i], 7, names[i], { lines: blank, w: 30 }))
+    const os = hosts[i].rows[0]
+    os.node.className = 'c-m'
+    os.cancel = A.run(5, (p) => (os.node.textContent = A.scramble(['Debian 12', 'Raspberry Pi OS', 'Ubuntu 22.04'][i], p)))
+    s.sfx('real')
+    await s.wait(3)
   }
-  const piles = [
-    ['+ apt install nginx', '✎ /etc/ssh/sshd_config', '+ cron: fix-disk.sh'],
-    ['+ pip install --user', '✎ /etc/hosts', '= libssl 1.1, pinned'],
-    ['+ curl … | sh', '✎ ~/.bashrc', '+ driver 535 by hand'],
+  const up = [412, 87, 1003]
+  let pace = 0.2
+  const uptimes = hosts.map((h, i) => {
+    const el = h.rows[1]
+    let days = up[i]
+    el.cancel = A.on(() => void ((days += pace), (el.node.textContent = `up ${Math.floor(days)} days`)))
+    return el
+  })
+  // Over the years each collects changes nobody wrote down: they scroll through the machine, drift grows.
+  const changes = [
+    ['+ apt install nginx', '✎ sshd_config', '+ cron: fix-disk.sh', '+ apt install php7', '✎ /etc/fstab', '+ ufw allow 8080'],
+    ['+ pip install --user', '✎ /etc/hosts', '= libssl 1.1 pinned', '+ docker by hand', '✎ config.txt', '+ swap 2G'],
+    ['+ curl … | sh', '✎ ~/.bashrc', '+ driver 535', '+ snap install code', '✎ grub timeout', '+ ppa: mesa-git'],
   ]
+  const meters = xs.map((x) => s.html(x + 2, 14, `<span class="c-m">drift </span>${A.bar(0, 18)}`, ''))
+  await s.until('over the years')
+  pace = 3
+  const year = s.big(mid(len(A.big('2021'))), 19, '2021', 'acc')
+  await s.wait(7) // the wipe in, then the years run
+  year.cancel = A.run(48, (p) => (year.node.textContent = A.big(String(countAt(2021, 2026, p)))))
   await s.until('collects')
-  const items = []
-  for (let k = 0; k < 3; k++) {
-    for (let i = 0; i < 3; i++) items.push(s.type(xs[i] + 2, 11 + k, piles[i][k], 'c-warn'))
-    await s.wait(5)
-  }
-  await s.until('breaks')
-  hosts[0].node.dataset.tone = 'err'
-  hosts[0].rows[1]!.node.textContent = '✗ broken'
-  hosts[0].rows[1]!.node.className = 'c-err'
-  await s.until('rebuild')
-  const q = s.big(xs[0] + 12, 15, '?', 'err')
-  await s.until('different')
-  for (const e of [...items, q]) e.remove()
-  hosts.forEach((h) => {
-    h.node.dataset.tone = 'accent'
-    h.rows[0]!.node.textContent = '● NixOS 26.05'
-    h.rows[1]!.node.textContent = ' '
-    h.rows[1]!.node.className = ''
-  })
-  await s.until('described')
-  const files = ['flake.nix', 'hosts/homeserver/default.nix', 'hosts/pi/default.nix', 'hosts/workstation/default.nix', 'modules/common.nix']
-  const repo = s.box(mid(46), 20, 46, files.length + 2, { title: 'files', kind: 'square' })
-  list(s, repo.inner.x, repo.inner.y, files, '', '·', repo)
-  await s.until('repository')
-  repo.remove()
-  const git = s.box(mid(46), 20, 46, files.length + 2, { title: 'fleet.git', tag: 'main', tone: 'accent' })
-  list(s, git.inner.x, git.inner.y, files, '', '·', git)
-  await s.until('built')
-  const cx = xs.map((x) => x + 14)
-  s.buf({ x: 0, y: 9, w: COLS, h: 11 }, { l: 'c-acc' }, (L, t) => {
-    const p = Math.min(1, t / 8)
-    L.l.path([[cx[0], 10], [cx[2], 10]])
-    for (const x of cx) {
-      L.l.path([[x, 10], [x, 10 - Math.round(p * 9)]])
-      if (p >= 1) L.l.set(x, 0, '▲')
+  for (let k = 0; k < 6; k++) {
+    for (let i = 0; i < 3; i++) {
+      const rows = hosts[i].rows
+      for (let r = 2; r < 4; r++) rows[r].node.textContent = rows[r + 1].node.textContent
+      rows[4].node.className = changes[i][k].startsWith('✎') ? 'c-warn' : 'c-acc'
+      rows[4].cancel()
+      rows[4].cancel = A.type(rows[4].node, changes[i][k], 5)
+      meters[i].node.innerHTML = `<span class="c-m">drift </span>${A.bar(((k + 1) / 6) * [0.7, 0.9, 1][i], 18)}`
     }
+    s.sfx('type')
+    await s.wait(8)
+  }
+  pace = 0.2
+  // One day something breaks, and nothing says what changed.
+  await s.until('breaks')
+  const hs = hosts[0]
+  s.tone(hs, 'err')
+  const jolt = [hs, ...hs.rows]
+  A.run(6, (p) => jolt.forEach((e) => (e.node.style.transform = p >= 1 ? '' : `translateX(${Math.round(Math.sin(p * 18) * 6)}px)`)))
+  uptimes[0].cancel()
+  hs.rows[1].node.className = 'c-err'
+  hs.rows[1].cancel = A.run(6, (p) => (hs.rows[1].node.textContent = A.scramble('✗ sshd: failed', p)))
+  await s.until('changed')
+  year.cancel()
+  year.node.textContent = A.big('????')
+  year.node.className = 'big err'
+  await s.until('rebuild')
+  year.cancel = A.run(10, (p) => (year.node.textContent = A.big(p >= 1 ? '????' : String(countAt(2026, 2021, p)))))
+  // NixOS: the machines are wiped and come back from files in one repository.
+  await s.until('different')
+  const hide = dither('out', 2, ROWS - 1, 8)
+  await hide.done
+  s.clear()
+  hide.remove()
+  header(s)
+  const fresh = names.map((n, i) => machine(s, xs[i], 8, n, { lines: ['● NixOS 26.05', ' '.repeat(26), ' '.repeat(26)], w: 30 }))
+  await s.until('whole machine')
+  const src = code(s, 40, 20, HOST_SRC, 'hosts/homeserver/default.nix')
+  for (const [cue, line] of [['package', 1], ['service', 2], ['user', 3]] as const) {
+    await s.until(cue)
+    point(s, src, line, 'c-acc')
+  }
+  await s.until('repository')
+  const repo = s.box(38, 19, 70, 10, { title: 'fleet.git', tag: 'main', tone: 'accent' })
+  src.parent = repo // the file now lives in the repository's frame
+  s.real(41, 27, 'commit a3f19c2', 'c-m', repo)
+  // Built from them, the same way every time: packets go up the lines; every machine ends on the same path.
+  await s.until('built')
+  const mids = xs.map((x) => x + 15)
+  const routes = mids.map((x) => {
+    const r: [number, number][] = [[73, 5], [73, 4], [73, 3]]
+    for (let c = 73; c !== x; c += Math.sign(x - 73)) r.push([c + Math.sign(x - 73), 3])
+    r.push([x, 2], [x, 1], [x, 0])
+    return r
   })
+  s.buf({ x: 0, y: 13, w: COLS, h: 6 }, { l: 'c-acc', p: 'c-b' }, (L, t) => {
+    const p = Math.min(1, t / 6)
+    L.l.path([[73, 5], [73, 5 - Math.round(p * 2)]])
+    if (p < 1) return
+    L.l.path([[mids[0], 3], [mids[2], 3]])
+    for (const x of mids) L.l.path([[x, 3], [x, 0]]), L.l.set(x, 0, '▲')
+    routes.forEach((r, i) => {
+      const [x, y] = r[Math.floor(t * 2 + i * 5) % r.length]
+      L.p.set(x, y, '●')
+    })
+  })
+  for (const [i, h] of fresh.entries()) {
+    h.rows[1].cancel = A.run(12, (q) => (h.rows[1].node.innerHTML = A.bar(q, 22)), () => {
+      h.rows[1].cancel = A.run(6, (q) => (h.rows[1].node.textContent = A.scramble('/nix/store/x7c1…-system', q)))
+    })
+    await s.wait(2 + i)
+  }
   await s.until('same way')
-  hosts.forEach((h) => {
-    h.node.dataset.tone = 'ok'
-    h.rows[1]!.node.textContent = '✓ built from fleet.git'
-    h.rows[1]!.node.className = 'c-ok'
-  })
+  for (const h of fresh) {
+    s.tone(h, 'ok')
+    h.rows[2].node.className = 'c-ok'
+    h.rows[2].cancel = A.type(h.rows[2].node, '✓ same as fleet.git', 4)
+    await s.wait(2)
+  }
 })
 
 scene('S0.2', async (s) => {
@@ -376,6 +438,8 @@ scene('S3.2', async (s) => {
   s.text(114, 14, 'one package', 'c-acc')
   await s.until('a word', 2)
   fresh(s)
+  await s.until('language')
+  card(s, mid(56), 4, ['small and functional: three shapes to read'], { title: 'the Nix language', tone: 'accent', w: 56 })
   const shapes: [string, string, string][] = [['attribute sets', '{ name = "hello"; version = "2.12"; }', 'an attribute set'],
     ['functions', 'x: x + 1', 'a function'], ['let bindings', 'let\n  port = 8096;\nin\n  { allowedTCPPorts = [ port ]; }', 'a let binding']]
   let y = 9
@@ -481,7 +545,13 @@ scene('S4.2', async (s) => {
 
 scene('S5.1', async (s) => {
   header(s)
+  await s.until('modules')
+  const title = s.big(mid(len(A.big('MODULES'))), 15, 'MODULES')
+  await s.until('two things')
+  const sub = s.type(mid(52), 20, 'a Nix file that declares options and sets values', 'c-m')
   await s.until('declare')
+  title.remove()
+  sub.remove()
   const a = card(s, 6, 5, ['options.services.openssh.enable', '  : bool, default false'], { title: 'module A · NixOS declares', tone: 'accent' })
   await s.until('set values')
   const b = card(s, 6, 13, ['services.openssh.enable = true;'], { title: 'module B · you define', tone: 'ok' })

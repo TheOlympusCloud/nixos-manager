@@ -470,10 +470,11 @@ scene('S31.2', async (s) => {
   fresh(s)
   const rules = [['same code as the web page, same rules', 'c-b'], ['a file is read before it is written', 'c-acc'],
     ['no commit, no push without a passing check', 'c-warn'], ['every commit says so: Via: token <name>', 'c-ok']]
-  s.type(mid(60), 9, rules[0][0], rules[0][1])
+  const rb = s.box(mid(66), 7, 66, 17, { kind: 'square', title: 'the MCP endpoint' })
+  s.type(mid(60), 9, rules[0][0], rules[0][1], rb)
   for (const [cue, i] of [['read a file', 1], ['never commit', 2], ['trailer', 3]] as const) {
     await s.until(cue)
-    s.type(mid(60), 9 + i * 4, rules[i][0], rules[i][1])
+    s.type(mid(60), 9 + i * 4, rules[i][0], rules[i][1], rb)
   }
 })
 

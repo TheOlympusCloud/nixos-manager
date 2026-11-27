@@ -1,6 +1,6 @@
 // The video's recurring pieces, made of the stage's elements: the header, chapter cards, captions, machine
 // cards, store paths, code cards and arrows. Sizes are in cells; the stage is COLS x ROWS.
-import { A, COLS, ROWS, El, Pic, Stage, bufs, snowflake, stars, type Box, type Intro } from './film'
+import { A, COLS, ROWS, El, Pic, Stage, bufs, snowflake, stars, type Box, type Intro, type Live } from './film'
 
 export const TOP = 3 // first row under the header
 export const BOTTOM = 33 // last row above the caption
@@ -33,6 +33,10 @@ export function caption(s: Stage, text: string, tone: 'accent' | 'ok' | 'warn' |
   const w = len(text) + 6
   const b = s.box(mid(w), ROWS - 4, w, 3, { tone })
   s.type(b.inner.x + 1, b.inner.y, text, 'c-b', b)
+  // A block cursor after the line once it is typed, blinking on the clock like a terminal's.
+  const cur = s.text(b.inner.x + 1 + len(text), b.inner.y, ' ', 'c-acc', b)
+  const from = A.clock.t + Math.ceil(len(text) / 4)
+  cur.cancel = A.on((t) => void (t >= from && (cur.node.textContent = Math.floor((t - from) / 6) % 2 ? ' ' : '▌')))
   captions.set(s, b)
   return b
 }
@@ -73,10 +77,50 @@ export function point(s: Stage, c: ReturnType<typeof code>, line: number, tone =
   return s.text(c.rect.x + 1, c.inner.y + line, '▌', tone, c)
 }
 
-export const harrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => s.text(x, y, '─'.repeat(n - 1) + '▶', cls)
-export const varrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => s.text(x, y, '│\n'.repeat(n - 1) + '▼', cls)
-export const larrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => s.text(x, y, '◀' + '─'.repeat(n - 1), cls)
-export const uarrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => s.text(x, y, '▲' + '\n│'.repeat(n - 1), cls)
+/**
+ * An arrow that draws itself in the way it points, then now and then sends a bright packet along that way:
+ * something flows there. idx lists the arrow's cells (indexes into its text) in the direction of flow.
+ */
+function flow(el: El, idx: number[]) {
+  const base = [...(el.node.textContent ?? '')]
+  const n = idx.length
+  const draw = Math.max(2, Math.ceil(n / 4))
+  const period = 42 + ((n * 7) % 17)
+  const start = A.clock.t
+  const lit: Record<string, string> = { '─': '━', '│': '┃' }
+  let shown = ''
+  const paint = (html: string) => html !== shown && ((shown = html), (el.node.innerHTML = html))
+  el.cancel = A.on((t) => {
+    if (!el.node.isConnected) return false
+    const k = t - start
+    if (k <= draw) {
+      const on = new Set(idx.slice(0, Math.round((k / draw) * n)))
+      return void paint(base.map((c, i) => (c === '\n' || on.has(i) ? A.esc(c) : ' ')).join(''))
+    }
+    const at = Math.floor(((k - draw) % period) * 3)
+    if (at >= n + 2) return void paint(base.map(A.esc).join(''))
+    const hot = new Map([[idx[at], 'c-b'], [idx[at - 1], 'c-acc'], [idx[at - 2], 'c-acc']])
+    paint(base.map((c, i) => (hot.has(i) ? `<b class="${hot.get(i)}">${A.esc(lit[c] ?? c)}</b>` : A.esc(c))).join(''))
+  })
+  return el
+}
+const cells = (txt: string) => [...txt].flatMap((c, i) => (c === '\n' ? [] : [i]))
+export const harrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => {
+  const el = s.text(x, y, '─'.repeat(n - 1) + '▶', cls)
+  return flow(el, cells(el.node.textContent!))
+}
+export const varrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => {
+  const el = s.text(x, y, '│\n'.repeat(n - 1) + '▼', cls)
+  return flow(el, cells(el.node.textContent!))
+}
+export const larrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => {
+  const el = s.text(x, y, '◀' + '─'.repeat(n - 1), cls)
+  return flow(el, cells(el.node.textContent!).reverse())
+}
+export const uarrow = (s: Stage, x: number, y: number, n: number, cls = 'c-line') => {
+  const el = s.text(x, y, '▲' + '\n│'.repeat(n - 1), cls)
+  return flow(el, cells(el.node.textContent!).reverse())
+}
 
 /** A list, one item per row, each after a glyph. */
 export function list(s: Stage, x: number, y: number, items: string[], cls = '', mark = '›', parent?: El) {
@@ -92,7 +136,7 @@ type Tone = 'accent' | 'ok' | 'warn' | 'err'
 export type Step =
   | ['show', string, string?] // a capture, whole; on a cue
   | ['look', string | Box, string?, number?] // zoom to a recorded box (outlined) or an area (fractions); cue; margin
-  | ['mark', string, string?, Tone?] // outline a recorded box, instead of the outline before
+  | ['mark', string | Box, string?, Tone?] // outline a recorded box (or a region), instead of the outline before
   | ['mark+', string, string?, Tone?] // one more outline, beside the others (boxes far apart only)
   | ['cap', string, string?, Tone?] // a caption
   | ['nocap', string?]
@@ -107,6 +151,7 @@ export async function walk(s: Stage, steps: Step[], title = 'nixos-manager') {
   for (const st of steps) {
     const cue = st[2] as string | undefined
     if (cue) await s.until(cue, 2)
+    else s.steps.push(A.clock.t)
     if (st[0] === 'show') {
       unmark()
       pic?.remove()
@@ -135,6 +180,8 @@ export async function walk(s: Stage, steps: Step[], title = 'nixos-manager') {
 
 /** A chapter card: the part, the number, the title in the pixel face; it holds until the voice starts. */
 async function chapterCard(s: Stage, i: Intro) {
+  s.sfx('transition')
+  const reveal = dither('in', 0, ROWS, 9, 'c-acc')
   const lines = bigLines(i.title!)
   const h = lines.length * 4 - 1
   let y = Math.floor((ROWS - h) / 2) - 1
@@ -145,13 +192,18 @@ async function chapterCard(s: Stage, i: Intro) {
     s.big(mid(len(art)), y, l)
     y += 4
   }
-  s.text(mid(40), y, '━'.repeat(40), 'c-acc')
-  await s.tick(Math.round((s.t0 * 1000) / A.TICK) - 3)
+  s.type(mid(40), y, '━'.repeat(40), 'c-acc', undefined, 3)
+  await reveal.done
+  await s.tick(Math.round((s.t0 * 1000) / A.TICK) - 10)
+  const hide = dither('out', 0, ROWS, 8, 'c-acc')
+  await hide.done
   s.clear()
+  hide.remove()
 }
 
 /** The title of the video: the snowflake turning on the clock, then the name in the pixel face. */
 async function opening(s: Stage) {
+  s.sfx('title')
   s.buf({ x: mid(41), y: 3, w: 41, h: 18 }, { hot: 'c-acc', globe: 'c-acc2' }, (L, t) => snowflake(L, 20, 8.5, 9, t * 0.06))
   await s.wait(6)
   const a = A.big('NIX, NIXOS')
@@ -162,8 +214,89 @@ async function opening(s: Stage) {
   await s.wait(5)
   const sub = 'How Nix works, and how to run a fleet of machines with it'
   s.type(mid(sub.length), 32, sub, 'c-m')
-  await s.tick(Math.round((s.t0 * 1000) / A.TICK) - 2)
+  await s.tick(Math.round((s.t0 * 1000) / A.TICK) - 10)
+  const hide = dither('out', 0, ROWS, 8)
+  await hide.done
   s.clear()
+  hide.remove()
+}
+
+// ---- Beside every scene: the status line and the way out ------------------------------------------------------
+
+const amb = () => document.getElementById('amb')!
+
+/**
+ * A dither band sweeping across rows y0 to y1 in n ticks, left to right: 'out' leaves the background behind it
+ * (what was there is gone), 'in' leaves what is there. It sits above the stage, outside the grid.
+ */
+export function dither(dir: 'in' | 'out', y0: number, y1: number, n = 8, cls = 'c-line') {
+  const B = 6
+  const box = document.createElement('div')
+  box.className = 'dz'
+  box.style.top = `calc(${y0} * var(--lh))`
+  box.style.height = `calc(${y1 - y0} * var(--lh))`
+  const mask = document.createElement('div')
+  mask.className = 'dz-mask'
+  const band = document.createElement('pre')
+  band.className = 'dz-band ' + cls
+  band.textContent = Array(y1 - y0).fill(dir === 'out' ? '█▓▓▒░░' : '░░▒▓▓█').join('\n')
+  box.append(mask, band)
+  amb().append(box)
+  const done = new Promise<void>((res) =>
+    A.run(n, (p) => {
+      const x = Math.round(p * (COLS + B)) - B
+      band.style.left = `${x}ch`
+      if (dir === 'out') (mask.style.left = '0'), (mask.style.width = `${Math.max(0, x)}ch`)
+      else (mask.style.left = `${Math.max(0, x + B)}ch`), (mask.style.width = `${Math.max(0, COLS - x - B)}ch`)
+    }, () => {
+      if (dir === 'in') box.remove()
+      else band.remove()
+      res()
+    }),
+  )
+  return { done, remove: () => box.remove() }
+}
+
+const clock = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+
+/**
+ * The status line on the last row, like the console's: the chapter's progress and time, and a meter that moves
+ * while the narrator speaks. Outside the grid and the still check: it is the frame, not the picture.
+ */
+function statusLine(s: Stage, o: Live) {
+  const pre = document.createElement('pre')
+  pre.className = 'status'
+  pre.style.left = '2ch'
+  pre.style.top = `calc(${ROWS - 1} * var(--lh))`
+  amb().append(pre)
+  const from = Math.round((s.t0 * 1000) / A.TICK)
+  const meter: number[] = Array(8).fill(0)
+  A.on((t) => {
+    if (t < from) return void (pre.innerHTML = '')
+    const sec = t * A.TICK / 1000
+    const speaking = s.words.some((w) => sec >= s.t0 + w.s && sec < s.t0 + w.e)
+    meter.shift()
+    meter.push(speaking ? 2 + Math.floor(Math.random() * 7) : 0)
+    const at = o.at + sec
+    const W = 60
+    const left = `<span class="c-acc">▶</span> <span class="c-m">${clock(at)} / ${clock(o.len)}</span>  ${A.bar(at / o.len, W)}`
+    const right = `<span class="c-acc">${meter.map((v) => '▁▂▃▄▅▆▇█'[Math.min(7, v)]).join('')}</span>`
+    pre.innerHTML = left + ' '.repeat(COLS - 4 - 16 - W - 8) + right
+  })
+}
+
+window.film.onStart = (s, o) => {
+  statusLine(s, o)
+  // The scene leaves in a dither once its narration is over: the body only while the chapter goes on (the
+  // header stays), everything before a new chapter.
+  if (o.outro) {
+    const y0 = o.outro === 'body' ? 2 : 0
+    A.on((t) => {
+      if (t !== o.end - 9) return
+      dither('out', y0, ROWS, 8)
+      return false
+    })
+  }
 }
 
 window.film.intros = { chapter: chapterCard, opening }

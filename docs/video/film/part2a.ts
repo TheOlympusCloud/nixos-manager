@@ -264,7 +264,9 @@ scene('S17.2', (s) =>
     ['show', 'm-essentials-2', 'compressed'],
     ['look', VIEW, undefined, 1.05],
     ['show', 'ess-zram', 'flip a switch'],
-    ['look', 'row', undefined, 2.2],
+    // The capture's 'row' box is the label only: frame the whole row, label to switch.
+    ['look', [522, 1216, 1124, 48], undefined, 1.6],
+    ['mark', [522, 1216, 1124, 48]],
     ['cap', '→ hosts/homeserver/managed.json · nothing reaches the machine yet', 'nothing reaches', 'warn'],
   ]),
 )
