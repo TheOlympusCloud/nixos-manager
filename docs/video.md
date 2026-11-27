@@ -26,7 +26,7 @@ Each chapter is also a short video of its own:
 | 14 | [Finding your way around](TODO-YOUTUBE-14) | 1:07 | The navigation rail and its shortcuts, the top bar, branches and the command palette. | Navigation, Ctrl+K |
 | 15 | [The fleet graph](TODO-YOUTUBE-15) | 0:43 | Machines, the services and modules they share, and their deployment state on one graph. | Fleet |
 | 16 | [Machines and new machines](TODO-YOUTUBE-16) | 2:57 | The Machines view, the New machine wizard, nixos-anywhere and the installer ISO. | Machines |
-| 17 | [The machine page](TODO-YOUTUBE-17) | 5:43 | Overview, Essentials, adding, removing, replacing and customising packages, and copying to other machines. | Machines › a machine |
+| 17 | [The machine page](TODO-YOUTUBE-17) | 5:43 | Every tab of a machine's page: overview, essentials, packages (add, remove, replace, customise), dependencies, services, modules, users, homes and their apps, network and storage. | Machines › a machine |
 | 18 | [Packages and Services matrices](TODO-YOUTUBE-18) | 0:19 | Every package and service of every machine, side by side. | Packages, Services |
 | 19 | [Fleet modules](TODO-YOUTUBE-19) | 1:12 | Bundle packages and settings into a module with options of its own, turned on machine by machine. | Modules |
 | 20 | [Options](TODO-YOUTUBE-20) | 0:58 | Browse NixOS options with their real value on each machine, set them with a form, compare and copy. | Options |
