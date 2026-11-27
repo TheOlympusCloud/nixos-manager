@@ -179,6 +179,10 @@ The repository is a normal git repository whose remote is Forgejo. Each machine
 runs [comin](https://github.com/nlewo/comin), pulls from Forgejo and switches
 to `nixosConfigurations.<its hostname>`.
 
+**Video tutorial:** [Nix, NixOS and nixos-manager](docs/video.md), a narrated
+46-minute walkthrough of how Nix works and of every part of the console, also
+as one short video per chapter.
+
 ## Run it in a Proxmox LXC (recommended)
 
 nixos-manager is happiest in its own NixOS container: Nix is right there, so it
