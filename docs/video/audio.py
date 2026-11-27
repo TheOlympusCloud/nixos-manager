@@ -163,15 +163,15 @@ def mood(chapter):
     return {"bpm": 86, "root": 48, "mode": "major", "sixteenths": False, "rng": rng}
 
 
-def bed(chapter, seconds):
-    """The chapter's music, stereo, peak 1: pad, bass, arpeggio (with an echo) and, in some sections, a hat."""
+def bed(chapter, n):
+    """The chapter's music, n samples, stereo, peak 1: pad, bass, arpeggio (with an echo) and, in some sections, a hat."""
     m = mood(chapter)
     rng, bpm, root, mode = m["rng"], m["bpm"], m["root"], m["mode"]
     scale = SCALES[mode]
     prog = PROGRESSIONS[mode][int(rng.integers(len(PROGRESSIONS[mode])))]
     beat = 60 / bpm
     bar = 4 * beat
-    n = int(seconds * SR)
+    seconds = n / SR
     out = np.zeros((n + int(2 * bar * SR), 2))
 
     def deg(d, octave=0):
@@ -250,7 +250,7 @@ def mix(voice, cues, chapter, bed_db=-17.0):
     rms = envelope(voice)
     speech = np.percentile(rms[rms > rms.max() * 0.05], 75) if (rms > rms.max() * 0.05).any() else 1.0
     loud = rms > 0.45 * speech
-    music = bed(chapter, len(voice) / SR)
+    music = bed(chapter, len(voice))
     g = np.repeat(duck(rms, speech), HOP)
     g = np.pad(g, (0, len(voice) - len(g)), mode="edge")
     music *= (g * speech * 10 ** (bed_db / 20) / max(1e-9, np.sqrt((music**2).mean())))[:, None]
@@ -289,6 +289,7 @@ def test():
     assert ok[2] < 0.2, "a cue that must sound on speech is not played far below it"
     out, _ = mix(voice, cues, 3)
     assert np.isfinite(out).all() and out.shape[1] == 2
+    assert bed(5, 1781759).shape == (1781759, 2), "the bed is not exactly as long as the voice"
     print("audio.py: self-check passed")
 
 
@@ -298,7 +299,7 @@ def demo():
     for k, v in cue_bank().items():
         sf.write(d / f"cue-{k}.wav", v * 0.5, SR)
     for ch in (0, 3, 17, 32):
-        sf.write(d / f"bed-{ch:02d}.wav", bed(ch, 40) * 0.5, SR)
+        sf.write(d / f"bed-{ch:02d}.wav", bed(ch, 40 * SR) * 0.5, SR)
     print(f"wrote {d}")
 
 
