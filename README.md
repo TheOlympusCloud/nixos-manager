@@ -180,8 +180,8 @@ runs [comin](https://github.com/nlewo/comin), pulls from Forgejo and switches
 to `nixosConfigurations.<its hostname>`.
 
 **Video tutorial:** [Nix, NixOS and nixos-manager](docs/video.md), a narrated
-46-minute walkthrough of how Nix works and of every part of the console, also
-as one short video per chapter.
+46-minute walkthrough of how Nix works and of every part of the console, with a
+chapter list that jumps to each part.
 
 ## Run it in a Proxmox LXC (recommended)
 
