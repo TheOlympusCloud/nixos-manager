@@ -5,7 +5,6 @@ description = "Sources for the Nix, NixOS and nixos-manager video tutorial"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "kokoro",
-  "manim",
   "playwright",
   "soundfile",
   "torch",
