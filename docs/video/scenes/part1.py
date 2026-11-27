@@ -203,7 +203,7 @@ class S0_2(Narrated):
         img = shot("fleet")
         self.play(FadeOut(c1), FadeOut(c2), FadeIn(img), run_time=0.8)
         self.play(self.camera.frame.animate.set_width(config.frame_width * 0.6).move_to(img.get_center() + LEFT * 1.0),
-                  run_time=max(1.0, self.t0 + self.duration - self.time - 0.2), rate_func=smooth)
+                  run_time=max(1.0, self.t0 + self.audio_len - self.time - 0.2), rate_func=smooth)
         self.finish()
 
 

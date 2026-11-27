@@ -23,6 +23,7 @@ MEDIA = BUILD / "media"
 OUT = BUILD / "out"
 TITLE = "Nix, NixOS and nixos-manager"
 LOUD = "loudnorm=I=-16:TP=-1.5:LRA=11"
+PAD = 1.0  # seconds after each scene's narration
 
 
 def scene_files():
@@ -65,10 +66,27 @@ def render(ids, jobs):
         sys.exit(1)
 
 
-def duration(path):
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+def duration(path, stream=None):
+    what = ["-select_streams", stream, "-show_entries", "stream=duration"] if stream else ["-show_entries", "format=duration"]
+    out = subprocess.run(["ffprobe", "-v", "error", *what, "-of", "csv=p=0", str(path)],
                          capture_output=True, text=True, check=True).stdout
-    return float(out)
+    return float(out.split()[0])
+
+
+def fit(src):
+    """The scene with its last frame held, and silence after its voice, to the narration plus PAD seconds:
+    every scene lasts exactly as long as its audio, so chapters stay in sync."""
+    dest = BUILD / "fit" / src.with_suffix(".mkv").name  # PCM audio: AAC priming would add up across scenes
+    if dest.exists() and dest.stat().st_mtime > src.stat().st_mtime:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    target = round(duration(src, "a:0") + PAD, 3)
+    hold = max(0.0, target - duration(src, "v:0"))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", f"tpad=stop_mode=clone:stop_duration={hold}",
+                    "-af", f"apad=whole_dur={target}", "-t", str(target), "-c:v", "libx264", "-preset", "veryfast",
+                    "-crf", "16", "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "pcm_s16le", "-ar", "48000",
+                    str(dest)], check=True)
+    return dest
 
 
 def concat(parts, dest, reencode, metadata=None):
@@ -111,6 +129,7 @@ def cut(only):
         absent = [str(p) for p in parts if not p.exists()]
         if absent:
             sys.exit(f"chapter {n}: not rendered: {', '.join(absent)}")
+        parts = [fit(p) for p in parts]
         dest = OUT / f"{n:02d}-{slug(title)}.mp4"
         if not dest.exists() or dest.stat().st_mtime < max(p.stat().st_mtime for p in parts):
             concat(parts, dest, reencode=True)
