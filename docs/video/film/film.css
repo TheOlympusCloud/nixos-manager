@@ -1,0 +1,73 @@
+/* The video's stage: the console's Night theme at a size for 1920 x 1080, one cell = 1ch x one --lh row. */
+:root {
+  --fs: 22px;
+  --lh: 27px;
+}
+body {
+  background: var(--bg);
+}
+#stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+#stage > *,
+#stage .in {
+  position: absolute;
+  margin: 0;
+  white-space: pre;
+}
+/* Text colours, from the console's palette. */
+.c-b {
+  color: var(--fg-strong);
+  font-weight: 700;
+}
+.c-m {
+  color: var(--fg-muted);
+}
+.c-f {
+  color: var(--fg-faint);
+}
+.c-acc {
+  color: var(--accent);
+}
+.c-ok {
+  color: var(--green);
+}
+.c-warn {
+  color: var(--yellow);
+}
+.c-err {
+  color: var(--red);
+}
+.c-pur {
+  color: var(--purple);
+}
+.c-cy {
+  color: var(--cyan);
+}
+.c-line {
+  color: var(--line);
+}
+.c-grid {
+  color: var(--grid-major);
+}
+.rev {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+/* A framed console capture: the screenshot fills the frame's inside, cropped to the view. */
+.pic {
+  overflow: hidden;
+}
+.pic img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  image-rendering: auto;
+  max-width: none; /* app.css caps img at 100%, which would undo every zoom */
+}
+.c-acc2 {
+  color: var(--accent-fill);
+}
