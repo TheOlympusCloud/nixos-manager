@@ -51,22 +51,23 @@ class S11_2(Narrated):
     def construct(self):
         names = ["Edit", "Check", "Commit", "Push = deploy"]
         colors = [ACCENT, YELLOW_, GREEN, CYAN]
-        steps = VGroup(*[box(n, c, 30, w=3.3, h=1.1) for n, c in zip(names, colors)])
-        pos = [UP * 1.8 + LEFT * 3.2, UP * 1.8 + RIGHT * 3.2, DOWN * 1.6 + RIGHT * 3.2, DOWN * 1.6 + LEFT * 3.2]
+        steps = VGroup(*[box(n, c, 28, w=3.0, h=1.0) for n, c in zip(names, colors)])
+        pos = [UP * 2.6 + LEFT * 5.0, UP * 2.6 + RIGHT * 5.0, DOWN * 2.6 + RIGHT * 5.0, DOWN * 2.6 + LEFT * 5.0]
         for b, p in zip(steps, pos):
             b.move_to(p)
-        arrows = VGroup(*[Arrow(steps[i].get_center(), steps[(i + 1) % 4].get_center(), buff=1.0, stroke_color=LINE_STRONG,
-                                stroke_width=4) for i in range(4)])
+        ends = [(steps[0].get_right(), steps[1].get_left()), (steps[1].get_bottom(), steps[2].get_top()),
+                (steps[2].get_left(), steps[3].get_right()), (steps[3].get_top(), steps[0].get_bottom())]
+        arrows = VGroup(*[Arrow(a, b, buff=0.15, stroke_color=LINE_STRONG, stroke_width=4) for a, b in ends])
         self.play(LaggedStart(*[FadeIn(b) for b in steps], lag_ratio=0.15), run_time=1.0)
         self.play(LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.15), run_time=0.8)
         l1 = padlock(s=0.4).move_to(arrows[1].get_center() + RIGHT * 0.5)
         l2 = padlock(s=0.4).move_to(arrows[2].get_center() + DOWN * 0.45)
         self.play_at("cannot commit", FadeIn(l1, scale=0.5), run_time=0.5)
         self.play_at("cannot push", FadeIn(l2, scale=0.5), run_time=0.5)
-        rule = T("a commit needs a passing check of exactly what is staged", 26, YELLOW_).move_to(ORIGIN)
+        rule = T("a commit needs a passing check\nof exactly what is staged", 28, YELLOW_).move_to(UP * 0.6)
         self.play_at("exactly", FadeIn(rule), run_time=0.6)
-        who = VGroup(T("person in the web page: can override, explicitly", 22, FG),
-                     T("automation (API, MCP): never", 22, RED_)).arrange(DOWN, buff=0.15).next_to(rule, DOWN, buff=0.3)
+        who = VGroup(T("a person in the web page: can override, explicitly", 22, FG),
+                     T("automation (API, MCP): never", 22, RED_)).arrange(DOWN, buff=0.15).next_to(rule, DOWN, buff=0.4)
         self.play_at("person", FadeIn(who[0]), run_time=0.5)
         self.play_at("automation", FadeIn(who[1]), run_time=0.5)
         self.until("edit check", 0.2)
