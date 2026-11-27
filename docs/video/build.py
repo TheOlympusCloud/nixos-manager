@@ -148,7 +148,9 @@ def fit(limit):
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(FULL), "-map", "0:v", "-preset", "medium"] + common
                    + ["-pass", "1", "-an", "-f", "null", "-"], check=True)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(FULL), "-map", "0:v", "-map", "0:a", "-map_metadata", "0",
-                    "-map_chapters", "0", "-preset", "slow"] + common + ["-pass", "2", "-c:a", "aac", "-b:a", f"{audio_k}k",
+                    "-map_chapters", "0", "-preset", "slow"] + common + ["-pass", "2",
+                    # a lower AAC rate overshoots the chapters' -1.5 dB peaks: limit them first
+                    "-af", "alimiter=limit=0.75:level=false", "-c:a", "aac", "-b:a", f"{audio_k}k",
                     "-movflags", "+faststart", str(tmp)], check=True)
     tmp.replace(FULL)
     for f in MIX.glob("x264-fit*"):
