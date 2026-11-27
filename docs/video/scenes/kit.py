@@ -193,6 +193,7 @@ class Narrated(MovingCameraScene):
         info = scenes()[self.sid]
         meta = json.loads((BUILD / "audio" / f"{self.sid}.json").read_text())
         self.words, self.audio_len, self._cursor = meta["words"], meta["duration"], 0
+        self.marks = []
         order = list(scenes())
         first = order.index(self.sid) == 0 or scenes()[order[order.index(self.sid) - 1]]["chapter"] != info["chapter"]
         self.t0 = 2.6 if first and info["chapter"] else 3.4 if self.opening else 0.0
