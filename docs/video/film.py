@@ -121,7 +121,7 @@ def render(sid, check=False):
                 last = h
             runs[-1][1] += 1
         problems = page.evaluate("film.problems()") + still(content)
-        steps = page.evaluate("film.steps()") + [ticks - 1]
+        steps = page.evaluate("film.steps()") + [ticks - (22 if live["outro"] else 1)]  # the last, before the outro
         events = page.evaluate("film.events()")
         browser.close()
     # The scene's sound cues, in seconds from its start, for audio.py.
@@ -134,7 +134,7 @@ def render(sid, check=False):
     review.mkdir(parents=True)
     starts = [int(f[:6]) for f, _ in runs]
     for k, t in enumerate(steps):
-        at = min(t + 12, ticks - 1)
+        at = min(t + 12, ticks - (10 if live["outro"] else 1))
         f = runs[max(i for i, st in enumerate(starts) if st <= at)][0]
         shutil.copy(frames / f, review / f"{k:02d}.png")
     lst = frames / "list.txt"

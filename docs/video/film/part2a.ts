@@ -264,9 +264,9 @@ scene('S17.2', (s) =>
     ['show', 'm-essentials-2', 'compressed'],
     ['look', VIEW, undefined, 1.05],
     ['show', 'ess-zram', 'flip a switch'],
-    // The capture's 'row' box is the label only: frame the whole row, label to switch.
-    ['look', [522, 1216, 1124, 48], undefined, 1.6],
-    ['mark', [522, 1216, 1124, 48]],
+    // The capture's 'row' box is the label only: frame the whole row, label to switch, clear of the lines around.
+    ['look', [522, 1220, 1124, 36], undefined, 1.6],
+    ['mark', [522, 1220, 1124, 36]],
     ['cap', '→ hosts/homeserver/managed.json · nothing reaches the machine yet', 'nothing reaches', 'warn'],
   ]),
 )
@@ -294,13 +294,12 @@ scene('S17.4', async (s) => {
     ['show', 'pkg-customise'],
     ['look', [0.47, 0.05, 0.53, 0.9], 'customise', 1.05],
   ])
-  const unmark = () => [...s.els].filter((e) => e.parent === current(s)).forEach((m) => m.remove())
   // One outline at a time: the sections sit close, and outlines must not cross the headings beside them.
   for (const [cue, key] of [['another nix', 'sec:From another nixpkgs'], ['arguments', 'sec:Arguments .override'],
     ['build attributes', 'sec:Attributes .overrideAttrs'], ['pin a version', 'sec:Version and source'],
     ['patches', "sec:Patches after the package's own"], ['nix file', 'sec:Nix']]) {
     await s.until(cue)
-    unmark()
+    current(s).unmark()
     current(s).mark(key)
   }
   await s.until('overlay', 2)

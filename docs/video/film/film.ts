@@ -198,10 +198,18 @@ export class Pic extends El {
     const cy = Math.max(0, Math.min(r.h - 2, y0))
     return { x: r.x + cx, y: r.y + cy, w: Math.max(4, Math.min(r.w, x1) - cx), h: Math.max(2, Math.min(r.h, y1) - cy) }
   }
+  marks: El[] = []
   /** The console's highlight on a region: a heavy outline, exact to the pixel. */
   mark(key: string | Box, tone: FrameOpts['tone'] = 'warn'): El {
     this.stage.sfx('mark')
-    return this.overlay(key, `hl-${tone}`)
+    const m = this.overlay(key, `hl-${tone}`)
+    this.marks.push(m)
+    return m
+  }
+  /** Remove every mark on this capture (the narration's own highlights go by themselves). */
+  unmark() {
+    this.marks.forEach((m) => m.remove())
+    this.marks = []
   }
   /** The screenshot's named boxes as words, to light the one the narration names (buttons, headings, rows). */
   labels(): { key: string; toks: string[] }[] {
