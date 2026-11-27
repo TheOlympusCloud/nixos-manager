@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import multiprocessing as mp
+import multiprocessing.util  # noqa: F401  mp.util
 import os
 import re
 import shutil
@@ -101,7 +102,10 @@ def _init(threads):
 
     # espeak-ng ignores a data path over 160 characters (deep venvs hit it) and phonemizer
     # resolves symlinks, so give it a copy at a short path.
-    short = os.path.join(tempfile.mkdtemp(prefix="espk"), "d")
+    tmp = tempfile.mkdtemp(prefix="espk")
+    # Pool workers end with os._exit, past atexit: a multiprocessing finalizer removes the copy.
+    mp.util.Finalize(None, shutil.rmtree, args=(tmp, True), exitpriority=0)
+    short = os.path.join(tmp, "d")
     shutil.copytree(espeakng_loader.get_data_path(), short)
     EspeakWrapper.set_data_path(short)
     from kokoro import KPipeline
