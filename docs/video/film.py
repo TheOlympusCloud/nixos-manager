@@ -105,8 +105,8 @@ def render(sid, check=False):
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
                     "-i", str(BUILD / "audio" / f"{sid}.wav"),
                     # concat drops the last image's duration: hold the last frame, then cut to the scene's length
-                    "-filter_complex", f"[0:v]fps=25,tpad=stop_mode=clone:stop_duration=10[v];"
-                                       f"[1:a]adelay={int(t0 * 1000)}:all=1,apad[a]", "-map", "[v]", "-map", "[a]",
+                    "-filter_complex", (f"[0:v]fps=25,tpad=stop_mode=clone:stop_duration=10[v];"
+                                        f"[1:a]adelay={int(t0 * 1000)}:all=1,apad[a]"), "-map", "[v]", "-map", "[a]",
                     "-t", f"{ticks * TICK:.3f}", "-r", "25", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
                     "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-ar", "48000", str(dest)], check=True)
     shutil.rmtree(frames)

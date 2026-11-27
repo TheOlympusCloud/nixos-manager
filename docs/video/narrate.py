@@ -10,7 +10,7 @@ import argparse
 import hashlib
 import json
 import multiprocessing as mp
-import multiprocessing.util  # noqa: F401  mp.util
+import multiprocessing.util  # mp.util
 import os
 import re
 import shutil

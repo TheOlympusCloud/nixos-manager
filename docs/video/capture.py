@@ -485,8 +485,8 @@ def reports(s):
     head, prev = git("rev-parse", "main", cwd=repo), git("rev-parse", "main~1", cwd=repo)
     plan = {"homeserver": [(prev, "done", ""), (head, "done", "")],
             "workstation": [(prev, "done", "")],
-            "pi": [(prev, "done", ""), (head, "failed", "error: builder for '/nix/store/0kq7…-home-assistant-2026.11.3.drv' "
-                                                       "failed with exit code 1")]}
+            "pi": [(prev, "done", ""), (head, "failed", ("error: builder for '/nix/store/0kq7…-home-assistant-2026.11.3.drv' "
+                                                        "failed with exit code 1"))]}
     for host, steps in plan.items():
         token = http(s, "GET", "/api/deployments/token", query=f"?host={host}")["token"]
         system = store(f"nixos-system-{host}-26.05.20261124.a3f19c2")
@@ -884,7 +884,7 @@ def new_machine(s):
     s.settle(1)
     s.page.get_by_placeholder("nas").fill("nas")
     s.snap("nm-name")
-    nxt = lambda: visible(s.page.get_by_role("button", name=re.compile("Next"))).click()  # noqa: E731
+    nxt = lambda: visible(s.page.get_by_role("button", name=re.compile("Next"))).click()
     step(s, "nm-role", nxt)
     step(s, "nm-user", nxt)
     try:
@@ -930,7 +930,7 @@ def new_machine(s):
     mock(s, "**/api/hostkey*", {"key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq3v8mR0Placeholder0HostKey0ForTheVideo root@nixos",
                                 "fingerprint": "SHA256:q8Yx3mWb0c9fT2e6RkLh1VnZpD4sJu7aE5iGoKwM0s4"})
     s.go("machines/nas/overview", 8)
-    det = s.page.locator("details", has=s.page.get_by_text(re.compile("Install with nixos-anywhere", re.I))).first
+    det = s.page.locator("details", has=s.page.get_by_text(re.compile("Install with nixos-anywhere", re.IGNORECASE))).first
     try:
         if det.get_attribute("open") is None:
             det.locator("summary").click()
