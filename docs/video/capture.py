@@ -157,9 +157,24 @@ def nix_wrapper(root):
     return w
 
 
+MARKER = ".nixos-manager-video-demo"
+
+
 def data_dir(name):
-    # The fleet's data path shows in check logs: keep it short and plain.
-    return Path.home() / "nixos-manager" if name == "fleet" else DEMO / name / "data"
+    # The fleet's data path shows in check logs: keep it short and plain (and not ~/nixos-manager, where a clone
+    # of this repository or a real console's data may live).
+    return Path.home() / "nixos-manager-demo" if name == "fleet" else DEMO / name / "data"
+
+
+def own_data(name, create=False):
+    """The demo's data folder, only if this script made it: never adopt or reset a folder it did not create."""
+    d = data_dir(name)
+    if d.exists() and not (d / MARKER).exists():
+        sys.exit(f"{d} exists and was not made by capture.py (no {MARKER}): move it away or set another path")
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / MARKER).write_text("Data of the video demo console (docs/video/capture.py); safe to delete.\n")
+    return d
 
 
 def serve(name):
@@ -168,7 +183,7 @@ def serve(name):
     root.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "NIXMGR_NIX": str(nix_wrapper(root)), "NIXMGR_FAKE_DELAY": "1",
            "NIXMGR_FAKE_FIXTURES": str(fixtures(root)), "NIXMGR_AUTHOR_NAME": AUTHOR[0],
-           "NIXMGR_AUTHOR_EMAIL": AUTHOR[1], "NIXMGR_DATA": str(data_dir(name)),
+           "NIXMGR_AUTHOR_EMAIL": AUTHOR[1], "NIXMGR_DATA": str(own_data(name, create=True)),
            "NIXMGR_LISTEN": f"127.0.0.1:{PORT[name]}", "TMPDIR": "/tmp",
            "FAKE_NIX": str(REPO / "scripts/dev/fake-nix")}
     env["NIXMGR_PASSWORD_HASH"] = subprocess.run([str(BIN), "hash-password"], input=PASSWORD + "\n", text=True,
@@ -315,6 +330,7 @@ def run_shots(name, only):
                 except Exception as e:  # noqa: BLE001  one failed shot should not stop the rest
                     print(f"  FAILED {fname}: {str(e).splitlines()[0]}", flush=True)
                     page.screenshot(path=str(SHOTS / f"_failed-{fname}.png"))
+                    FAILURES.append(fname)
         browser.close()
 
 
@@ -465,7 +481,7 @@ def deploy_setup(s):
 
 @shot("fleet")
 def reports(s):
-    repo = data_dir("fleet") / "repo"
+    repo = own_data("fleet") / "repo"
     head, prev = git("rev-parse", "main", cwd=repo), git("rev-parse", "main~1", cwd=repo)
     plan = {"homeserver": [(prev, "done", ""), (head, "done", "")],
             "workstation": [(prev, "done", "")],
@@ -555,6 +571,9 @@ def click_at(s, loc):
     s.page.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
 
 
+FAILURES = []  # shots and steps that failed: the run carries on, then exits non-zero
+
+
 def step(s, name, fn, *boxes):
     """Do one interaction; whatever happens, keep a screenshot named after it."""
     try:
@@ -562,6 +581,7 @@ def step(s, name, fn, *boxes):
         s.settle(1.2)
     except Exception as e:  # noqa: BLE001
         print(f"  step {name} failed: {str(e).splitlines()[0]}", flush=True)
+        FAILURES.append(name)
     s.snap(name, dict(boxes) if boxes else None)
 
 
@@ -675,7 +695,9 @@ def users_tab(s):
 
 
 def reset_working_copy():
-    repo = data_dir("fleet") / "repo"
+    repo = own_data("fleet") / "repo"
+    if not repo.is_dir():
+        raise RuntimeError(f"no demo working copy at {repo}")
     for attempt in range(5):  # the console may hold git's index lock for a moment
         try:
             git("reset", "-q", cwd=repo)
@@ -1101,7 +1123,7 @@ def change_flow(s):
 @shot("fleet")
 def reports2(s):
     """After the push: homeserver deployed it, workstation is behind, pi failed on it."""
-    repo = data_dir("fleet") / "repo"
+    repo = own_data("fleet") / "repo"
     head, prev = git("rev-parse", "main", cwd=repo), git("rev-parse", "main~1", cwd=repo)
     err = ("error: builder for '/nix/store/5w2kd…-jellyfin-ffmpeg-7.1.2.drv' failed with exit code 137 "
            "(out of memory while building on the Pi)")
@@ -1156,7 +1178,7 @@ def trial(s):
 
 @shot("fleet")
 def inputs_update(s):
-    repo = data_dir("fleet") / "repo"
+    repo = own_data("fleet") / "repo"
     head = git("rev-parse", "main", cwd=repo)
     now = int(time.time())
     upd = {"schedule": {"enabled": True, "day": 0, "hour": 4}, "next": "2026-11-29T04:00:00+01:00", "zone": "Europe/Madrid",
@@ -1269,3 +1291,5 @@ if __name__ == "__main__":
         serve(name)
     else:
         run_shots(name, rest)  # in the order given: later shots build on the state earlier ones leave
+        if FAILURES:
+            sys.exit(f"{len(FAILURES)} shot(s) or step(s) failed: {', '.join(FAILURES)}")
