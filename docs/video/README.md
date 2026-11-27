@@ -1,5 +1,8 @@
 # Video tutorial sources
 
+This branch, `video-sources`, keeps what renders the video and is never merged: `main` only links the published
+video, in `docs/video.md`. Rebuild here when the console changes, upload the new cut, and update the links there.
+
 The narrated tutorial *Nix, NixOS and nixos-manager*, built from [`script.md`](script.md). It is drawn the way the
 console is: text on one grid of cells, the console's own stylesheet, font and frames, and motion stepping on its
 80 ms clock (`web/src/lib/ascii.ts`), 1920 x 1080 at 25 fps. Console captures sit in the same frames. The voice
@@ -35,7 +38,7 @@ uv run python capture.py shots fleet       # build/shots/*.png + the boxes scene
 uv run python film.py --check              # every scene's layout, in seconds
 uv run python film.py --jobs 8             # build/scenes/S*.mkv, and build/steps/<scene>/ for review
 uv run python audio.py test                # the mix's self-check (ducking, cue spacing, cues off speech)
-uv run python build.py cut                 # build/out/NN-chapter.mp4 and the full cut, mixed at -14 LUFS
+uv run python build.py cut                 # build/out/NN-chapter.mp4 and the full cut: upload quality, -14 LUFS, peaks under -1 dBTP
 uv run python build.py fit 97              # the full cut re-encoded under 97 MiB (two passes), to attach it
 uv run python build.py parts 95            # or: the full cut in parts under 95 MiB, each with its markers
 ```

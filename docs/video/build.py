@@ -27,7 +27,7 @@ BUILD = HERE / "build"
 SCENES = BUILD / "scenes"
 OUT = BUILD / "out"
 TITLE = "Nix, NixOS and nixos-manager"
-LOUD = "loudnorm=I=-14:TP=-1.5:LRA=11"
+LOUD = "loudnorm=I=-14:TP=-2:LRA=11"  # -2: AAC overshoots a little, the files must stay under -1 dBTP
 MIX = BUILD / "mix"
 FULL = OUT / "nix-nixos-and-nixos-manager-full.mp4"
 
@@ -36,6 +36,17 @@ def duration(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
                          capture_output=True, text=True, check=True).stdout
     return float(out)
+
+
+PEAK = -1.0  # dBTP: the most any delivered file may peak (YouTube's ceiling)
+
+
+def loudness(path):
+    """Integrated loudness (LUFS) and true peak (dBTP) of a file's audio."""
+    err = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"],
+                         capture_output=True, text=True, check=True).stderr
+    summary = err[err.rindex("Summary:"):]
+    return float(re.search(r"I:\s+(-?[\d.]+) LUFS", summary)[1]), float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary)[1])
 
 
 def chapter_sound(n, ids, lst):
@@ -71,9 +82,9 @@ def concat(parts, dest, reencode, metadata=None, sound=None):
         m = json.loads(re.findall(r"\{[^{}]*\}", probe)[-1])
         af = (f"{LOUD}:linear=true:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
               f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}")
-        # Text on a still grid compresses far below a camera's rate: animation tuning, a long GOP.
-        cmd += ["-af", af, "-c:v", "libx264", "-preset", "slow", "-crf", "24", "-tune", "animation", "-g", "250",
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-shortest"]
+        # Upload quality: text on a still grid stays small even at a low CRF (animation tuning, a long GOP).
+        cmd += ["-af", af, "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-tune", "animation", "-g", "250",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest"]
     else:
         cmd += ["-c", "copy"]
     cmd += ["-movflags", "+faststart", str(dest)]
@@ -106,12 +117,15 @@ def cut(only):
         if not dest.exists() or dest.stat().st_mtime < max(p.stat().st_mtime for p in parts):
             concat(parts, dest, reencode=True, sound=lambda lst, n=n, ids=ids: chapter_sound(n, ids, lst))
         d = duration(dest)
+        lufs, peak = loudness(dest)
+        if peak > PEAK:
+            sys.exit(f"{dest.name}: true peak {peak} dBTP, above {PEAK}")
         meta += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={int(t * 1000)}", f"END={int((t + d) * 1000)}",
                  f"title={n} {title}"]
         marks.append(f"{int(t) // 60}:{int(t) % 60:02d} {n} {title}")
         made.append(dest)
         t += d
-        print(f"{dest.name} {d / 60:.1f} min", flush=True)
+        print(f"{dest.name} {d / 60:.1f} min, {lufs} LUFS, {peak} dBTP", flush=True)
     if only:
         return
     (OUT / "chapters.ffmeta").write_text("\n".join(meta) + "\n")
