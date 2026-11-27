@@ -20,7 +20,7 @@ class S28_1(Capture):
         self.play_at("named after", FadeIn(rows[2:], shift=RIGHT * 0.2), run_time=0.6)
         img = shot("secrets")
         self.play_at("age key", FadeOut(rows), FadeIn(img), run_time=0.6)
-        self.look(img, (0.11, 0.05, 0.6, 0.6), margin=1.05, mark=False)
+        self.look(img, "sec:SECRETS", margin=1.1, mark=False)
         self.lower("Back up $NIXMGR_DATA/sops-age-key", "back it up", YELLOW_, 26)
         img = self.show("secrets-2", "approved")
         self.look(img, (0.11, 0.05, 0.6, 0.9), margin=1.05, mark=False)
@@ -37,7 +37,7 @@ class S28_2(Capture):
 
     def construct(self):
         img = self.show("secrets")
-        self.look(img, (0.11, 0.05, 0.6, 0.9), "add a secret", margin=1.05, mark=False)
+        self.look(img, "sec:SECRETS", "add a secret", margin=1.1, mark=False)
         self.lower("Only the encrypted form is written · Show decrypts for you alone", "encrypted", GREEN, 24)
         self.lower("No MCP tool can ever read a value", "no", RED_, 26)
         self.until("on the machine", 0.3)
@@ -110,7 +110,7 @@ class S31_1(Capture):
 
     def construct(self):
         img = self.show("tokens")
-        self.look(img, (0.11, 0.05, 0.6, 0.6), "api tokens", margin=1.05, mark=False)
+        self.look(img, "sec:API TOKENS", "api tokens", margin=1.1, mark=False)
         self.until("scope", 0.3)
         clear_to_manim(self)
         rings = VGroup(*[Circle(radius=r, color=c, stroke_width=4) for r, (_, _, c) in zip((1.3, 2.3, 3.3), SCOPES)])

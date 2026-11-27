@@ -77,18 +77,16 @@ class S13_4(Capture):
 
     def construct(self):
         img = self.show("forgejo-1")
-        self.look(img, (0.11, 0.08, 0.53, 0.2), "numbered", mark=False, margin=1.15)
-        self.look(img, (0.11, 0.22, 0.53, 0.15), "one", margin=1.3)
-        self.look(img, (0.11, 0.37, 0.53, 0.25), "two", margin=1.3)
-        self.mark(img, (0.13, 0.56, 0.5, 0.06), "copy")
-        self.look(img, (0.11, 0.62, 0.53, 0.1), "three", margin=1.4)
+        self.look(img, "sec:FORGEJO", "numbered", mark=False, margin=1.1)
+        self.look(img, "sec:Repository", "one", margin=1.3)
+        self.look(img, "sec:Deploy key", "two", margin=1.25)
+        self.look(img, "sec:Connection", "three", margin=1.5)
         img = self.show("forgejo-2", "four")
-        self.look(img, (0.11, 0.0, 0.53, 0.33), margin=1.2)
-        self.look(img, (0.11, 0.5, 0.53, 0.2), "five", margin=1.3)
+        self.look(img, "sec:Push webhook optional", margin=1.15)
+        self.look(img, "sec:Commit statuses optional", "five", margin=1.4)
         self.finish()
 
 
-SHORTCUTS = ["g f", "g m", "g p", "g s", "g u", "g o", "g a", "g d", "g n", "g i", "g c", "g h", "g e", "g ,"]
 RAIL_ITEMS = ["Fleet", "Machines", "Packages", "Services", "Modules", "Options", "Health", "Deployments", "Dependencies",
               "Inputs", "Changes", "History", "Code", "Settings"]
 
@@ -104,16 +102,13 @@ class S14_1(Capture):
             r = region(img, item).set_stroke(ACCENT, 3)
             self.play(Create(r), run_time=0.12)
             self.play(FadeOut(r), run_time=0.12)
-        keys = VGroup(*[M(k, 13, YELLOW_) for k in SHORTCUTS[:13]])
-        for k, item in zip(keys, RAIL_ITEMS[:13]):
-            k.next_to(region(img, item), RIGHT, buff=0.05)
-        self.play_at("press g", LaggedStart(*[FadeIn(k) for k in keys], lag_ratio=0.08), run_time=1.2)
+        self.mark(img, (0.083, 0.055, 0.022, 0.285), "press g")
         for cue, item in (("g f", "Fleet"), ("g m", "Machines"), ("g c", "Changes")):
             try:
                 self.mark(img, item, cue, ACCENT)
             except ValueError:
                 pass
-        self.play_at("badges", FadeOut(keys), run_time=0.4)
+        self.until("badges", 0.2)
         self.unmark()
         for item in ("Changes", "Deployments", "Health"):
             self.mark(img, item, color=RED_ if item != "Changes" else ACCENT)
@@ -226,10 +221,10 @@ class S16_3(Capture):
         img = self.show("install-card")
         self.look(img, "card", "install card", margin=1.6)
         img = self.show("install-hostkey", "fetch its host key")
-        self.look(img, (0.11, 0.3, 0.6, 0.5), margin=1.15, mark=False)
+        self.look(img, "card", margin=1.1, mark=False)
         self.lower("No password sent, nothing run on the machine", "only reads", GREEN, 26)
         img = self.show("install-command", "command")
-        self.look(img, (0.11, 0.2, 0.6, 0.6), margin=1.15, mark=False)
+        self.look(img, "card", margin=1.1, mark=False)
         self.finish()
 
 
@@ -269,12 +264,12 @@ class S17_1(Capture):
         img = self.show("m-overview")
         self.look(img, TABS, "nine tabs", margin=1.05)
         self.look(img, (0.11, 0.3, 0.89, 0.15), "summarises", margin=1.1, mark=False)
-        self.mark(img, (0.115, 0.44, 0.47, 0.13), "services")
-        self.mark(img, (0.6, 0.72, 0.38, 0.18), "users")
+        self.mark(img, "sec:FEATURES", "services")
+        self.mark(img, "sec:USERS AND ACCESS", "users")
         img = self.show("m-overview-2", "secrets")
-        self.look(img, (0.6, 0.2, 0.4, 0.6), margin=1.1, mark=False)
+        self.look(img, (0.6, 0.2, 0.4, 0.6), margin=1.1)
         img = self.show("m-overview", "deployment")
-        self.look(img, (0.6, 0.44, 0.38, 0.27), margin=1.2)
+        self.look(img, "sec:DEPLOYMENT", margin=1.3)
         self.finish()
 
 
@@ -284,8 +279,8 @@ class S17_2(Capture):
     def construct(self):
         img = self.show("m-essentials")
         self.look(img, (0.11, 0.28, 0.89, 0.7), "essentials", mark=False, margin=1.05)
-        self.mark(img, (0.115, 0.3, 0.42, 0.25), "time zone")
-        self.mark(img, (0.54, 0.3, 0.45, 0.45), "garbage")
+        self.mark(img, "sec:REGION", "time zone")
+        self.mark(img, "sec:MAINTENANCE", "garbage")
         img = self.show("m-essentials-2", "compressed")
         self.look(img, (0.11, 0.05, 0.89, 0.9), mark=False, margin=1.05)
         img = self.show("ess-zram", "flip a switch")
@@ -319,12 +314,12 @@ class S17_4(Capture):
     def construct(self):
         img = self.show("pkg-customise")
         self.look(img, (0.47, 0.05, 0.53, 0.9), "customise", margin=1.05, mark=False)
-        self.mark(img, (0.5, 0.23, 0.48, 0.07), "another nix")
-        self.mark(img, (0.5, 0.32, 0.48, 0.1), "arguments")
-        self.mark(img, (0.5, 0.43, 0.48, 0.1), "build attributes")
-        self.mark(img, (0.5, 0.55, 0.48, 0.07), "pin a version")
-        self.mark(img, (0.5, 0.62, 0.48, 0.05), "patches")
-        self.mark(img, (0.5, 0.68, 0.48, 0.07), "nix file")
+        self.mark(img, "sec:From another nixpkgs", "another nix")
+        self.mark(img, "sec:Arguments .override", "arguments")
+        self.mark(img, "sec:Attributes .overrideAttrs", "build attributes")
+        self.mark(img, "sec:Version and source", "pin a version")
+        self.mark(img, "sec:Patches after the package's own", "patches")
+        self.mark(img, "sec:Nix", "nix file")
         self.until("overlay", 0.3)
         self.play(*[FadeOut(m) for m in self.mobjects if m is not self.camera.frame],
                   self.camera.frame.animate.set_width(config.frame_width).move_to(ORIGIN), run_time=0.6)
@@ -509,11 +504,12 @@ class S19_1(Capture):
         nl = M("what NixOS sees", 20, GREEN)
         left = VGroup(jl, js).arrange(DOWN, aligned_edge=LEFT, buff=0.15)
         right = VGroup(nl, nx).arrange(DOWN, aligned_edge=LEFT, buff=0.15)
-        VGroup(left, right).arrange(DOWN, buff=0.5, aligned_edge=LEFT).scale_to_fit_height(7.2)
+        both = VGroup(left, right).arrange(DOWN, buff=0.4, aligned_edge=LEFT)
+        both.scale(min(5.9 / both.height, 13.2 / both.width)).move_to(UP * 0.45)
         self.play(FadeIn(left), run_time=0.6)
         self.play(FadeIn(right, shift=DOWN * 0.2), run_time=0.6)
         self.play_at("hand-written", Create(hl(lines(js, 3, 4), YELLOW_)), run_time=0.5)
-        on = T("on each machine: fleet.modules.media.enable = true → its managed.json", 22, FG).to_edge(DOWN, buff=0.3)
+        on = T("on each machine: fleet.modules.media.enable = true → its managed.json", 22, FG).to_edge(DOWN, buff=0.25)
         self.play_at("on each machine", FadeIn(on), run_time=0.5)
         self.play_at("without a default", Indicate(lines(nx, 2), color=YELLOW_), run_time=0.8)
         img = shot("mod-filled")

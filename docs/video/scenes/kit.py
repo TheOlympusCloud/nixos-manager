@@ -292,6 +292,7 @@ def region(img, key, pad=0.08):
         x, y, w, h = x * pw, y * ph, w * pw, h * ph
     k = img.width / pw
     left, top = img.get_left()[0], img.get_top()[1]
+    pad = min(pad, 0.25 * min(w, h) * k)  # a small element gets a snug outline
     r = Rectangle(width=w * k + 2 * pad, height=h * k + 2 * pad, stroke_color=YELLOW_, stroke_width=4)
     r.move_to([left + (x + w / 2) * k, top - (y + h / 2) * k, 0])
     return r
@@ -369,8 +370,11 @@ def pin(scene, mob):
     return mob
 
 
-def _look(self, img, where, cue=None, mark=True, margin=1.35, run_time=1.2, color=YELLOW_):
-    """Zoom to a part of a screenshot (named box, [x, y, w, h] px, or fractions) and outline it."""
+def _look(self, img, where, cue=None, mark=None, margin=1.35, run_time=1.2, color=YELLOW_):
+    """Zoom to a part of a screenshot (named box, [x, y, w, h] px, or fractions) and outline it.
+    Only a box the capture recorded gets an outline: an estimated one could frame the wrong thing."""
+    if mark is None:
+        mark = isinstance(where, str)
     r = region(img, where).set_stroke(color)
     if cue:
         self.until(cue, 0.4)
@@ -395,6 +399,8 @@ def _mark(self, img, where, cue=None, color=YELLOW_):
     r = region(img, where).set_stroke(color)
     if cue:
         self.until(cue, 0.2)
+    if not isinstance(where, str):  # estimated, not recorded: no outline (see _look)
+        return r
     self.play(Create(r), run_time=0.5)
     self.marks = getattr(self, "marks", []) + [r]
     return r

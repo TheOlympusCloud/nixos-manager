@@ -200,7 +200,7 @@ class S24_4(Capture):
 
     def construct(self):
         img = self.show("notifications")
-        self.look(img, (0.11, 0.05, 0.6, 0.9), "notifications", margin=1.05, mark=False)
+        self.look(img, "sec:NOTIFICATIONS", "notifications", margin=1.1, mark=False)
         phone = RoundedRectangle(corner_radius=0.3, width=2.6, height=4.6, stroke_color=LINE_STRONG, fill_color=BG, fill_opacity=1)
         msg = card(VGroup(T("ntfy · nixos-manager", 16, MUTED), T("pi failed to deploy a3f19c2", 18, FG_STRONG))
                    .arrange(DOWN, aligned_edge=LEFT, buff=0.08), color=RED_, pad=0.12).scale_to_fit_width(2.3)
@@ -265,7 +265,7 @@ class S27_1(Capture):
         self.look(img, (0.11, 0.05, 0.89, 0.9), "every commit", margin=1.02, mark=False)
         img = self.show("history-show", "what it did")
         self.look(img, RIGHT_PANE, margin=1.02, mark=False)
-        img = self.show("file-history", "single file")
+        img = self.show("file-history", "single files")
         self.look(img, (0.11, 0.05, 0.89, 0.9), margin=1.02, mark=False)
         self.finish()
 
